@@ -7,6 +7,7 @@ import {
   Boxes,
   LayoutDashboard,
   Layers,
+  Lightbulb,
   LogOut,
   Package,
   PanelLeft,
@@ -32,6 +33,7 @@ const links: NavLink[] = [
   { href: "/dashboard/sales", label: "Sales Growth", icon: BarChart3 },
   { href: "/dashboard/commercial", label: "Sales & Marketing", icon: TrendingUp },
   { href: "/dashboard/inventory", label: "Inventory & Forecast", icon: Package },
+  { href: "/dashboard/insights", label: "Supply Chain Insights", icon: Lightbulb },
   {
     href: "/dashboard/procurement",
     label: "Procurement",

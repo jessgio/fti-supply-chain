@@ -36,7 +36,6 @@ import {
 } from "@/lib/forecast/stock-status";
 import type {
   DemandPattern,
-  ForecastInsight,
   RestockRecommendation,
   VelocityClass,
 } from "@/types/database";
@@ -226,7 +225,6 @@ export default function InventoryPage() {
   const [recommendations, setRecommendations] = useState<
     RestockRecommendation[]
   >([]);
-  const [insight, setInsight] = useState<ForecastInsight | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -257,12 +255,11 @@ export default function InventoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/forecast?ai=false");
+        const res = await fetch("/api/forecast");
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Forecast failed");
         if (!active) return;
         setRecommendations(data.recommendations ?? []);
-        setInsight(data.insight ?? null);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Forecast failed");
       } finally {
@@ -349,47 +346,6 @@ export default function InventoryPage() {
     columnFilters.confidence !== "" ||
     columnFilters.franchise.trim() !== "";
 
-  const insightRows = useMemo(() => {
-    const urgent = recommendations.filter(
-      (r) => r.needs_reorder && !r.covered_by_po,
-    );
-    const highDemand = [...recommendations]
-      .sort((a, b) => b.forecast_daily_demand - a.forecast_daily_demand)
-      .slice(0, 3);
-
-    const bySku = new Map<
-      string,
-      { row: RestockRecommendation; focus: Set<"risk" | "demand"> }
-    >();
-
-    for (const row of urgent) {
-      const entry = bySku.get(row.sku_code) ?? {
-        row,
-        focus: new Set<"risk" | "demand">(),
-      };
-      entry.focus.add("risk");
-      bySku.set(row.sku_code, entry);
-    }
-
-    for (const row of highDemand) {
-      const entry = bySku.get(row.sku_code) ?? {
-        row,
-        focus: new Set<"risk" | "demand">(),
-      };
-      entry.focus.add("demand");
-      bySku.set(row.sku_code, entry);
-    }
-
-    return [...bySku.values()].sort((a, b) => {
-      const aRisk = a.focus.has("risk") ? 0 : 1;
-      const bRisk = b.focus.has("risk") ? 0 : 1;
-      if (aRisk !== bRisk) return aRisk - bRisk;
-      return (
-        (a.row.days_until_stockout ?? 9999) - (b.row.days_until_stockout ?? 9999)
-      );
-    });
-  }, [recommendations]);
-
   return (
     <PageShell wide={true}>
       <div className="flex items-end justify-between gap-4">
@@ -405,7 +361,14 @@ export default function InventoryPage() {
             {DEFAULT_TARGET_STOCK_MONTHS}-month batch. Fcst/day is uplifted when
             the reorder window overlaps Ramadan or Q4 (from prior-year sales, or
             +35% / +25% defaults). Open purchase orders are netted out so
-            already-ordered SKUs are not re-flagged.
+            already-ordered SKUs are not re-flagged. See{" "}
+            <Link
+              href="/dashboard/insights"
+              className="font-medium text-emerald-800 hover:underline"
+            >
+              Supply chain insights
+            </Link>{" "}
+            for the narrative summary.
           </p>
         </div>
         <Button
@@ -469,117 +432,6 @@ export default function InventoryPage() {
           tone={summary.overstock > 0 ? "info" : "default"}
         />
       </div>
-
-      {insight && (
-        <Card>
-          <CardHeader>
-            <CardTitle>AI supply chain insight</CardTitle>
-            <CardDescription>
-              Powered by L3M / L6M demand averages (excludes current month)
-              {process.env.NEXT_PUBLIC_OPENAI_ENABLED === "true"
-                ? " + OpenAI summary"
-                : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-stone-700">
-            <p className="leading-relaxed">{insight.summary}</p>
-            {insightRows.length > 0 && (
-              <div className="overflow-x-auto rounded-md border border-stone-200">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-                      <th className="px-3 py-2 font-medium">Focus</th>
-                      <th className="px-3 py-2 font-medium">SKU</th>
-                      <th className="px-3 py-2 font-medium">Franchise</th>
-                      <th className="px-3 py-2 text-right font-medium">Stock</th>
-                      <th className="px-3 py-2 text-right font-medium">
-                        Fcst/day
-                      </th>
-                      <th className="px-3 py-2 text-right font-medium">
-                        Reorder pt.
-                      </th>
-                      <th className="px-3 py-2 font-medium">Stockout</th>
-                      <th className="px-3 py-2 text-right font-medium">
-                        Restock qty
-                      </th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {insightRows.map(({ row, focus }) => {
-                      const risk = riskOf(row);
-                      const badge = RISK_BADGE[risk];
-                      return (
-                        <tr
-                          key={row.sku_code}
-                          className="border-b border-stone-100 last:border-0"
-                        >
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {focus.has("risk") && (
-                                <Badge className="bg-amber-100 text-amber-900">
-                                  Reorder risk
-                                </Badge>
-                              )}
-                              {focus.has("demand") && (
-                                <Badge className="bg-violet-100 text-violet-800">
-                                  High demand
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 font-medium">
-                            {row.sku_code}
-                          </td>
-                          <td className="px-3 py-2">
-                            {row.franchise_name ?? "—"}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums">
-                            {formatNumber(row.current_stock)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums">
-                            <div className="flex flex-col items-end gap-0.5">
-                              <span>
-                                {formatNumber(row.forecast_daily_demand, 1)}
-                              </span>
-                              {row.seasonal_uplift_multiplier > 1 && (
-                                <span
-                                  className="text-xs text-amber-800"
-                                  title={row.seasonal_uplift_reasons.join(", ")}
-                                >
-                                  +
-                                  {Math.round(
-                                    (row.seasonal_uplift_multiplier - 1) * 100,
-                                  )}
-                                  %
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums">
-                            {formatNumber(Math.ceil(row.reorder_point))}
-                          </td>
-                          <td className="px-3 py-2">
-                            {row.projected_stockout_date ?? "—"}
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-800">
-                            {formatNumber(row.recommended_restock_qty)}
-                          </td>
-                          <td className="px-3 py-2">
-                            <Badge className={badge.className}>
-                              {badge.label}
-                            </Badge>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="overflow-hidden">
         <CardHeader className="sticky top-0 z-20 border-b border-stone-200 bg-white pb-4">

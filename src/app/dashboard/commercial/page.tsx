@@ -42,7 +42,7 @@ export default function CommercialPage() {
       try {
         const [growthRes, forecastRes] = await Promise.all([
           fetch("/api/analytics/growth?grain=month"),
-          fetch("/api/forecast?ai=false"),
+          fetch("/api/forecast"),
         ]);
         const growthData = await growthRes.json();
         if (!growthRes.ok)
