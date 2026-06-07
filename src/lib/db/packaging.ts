@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PACKAGING_STOCK_LOCATION } from "@/lib/stock/locations";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { listProductPackagingLinks } from "@/lib/db/product-packaging";
+import { loadRestockRecommendations } from "@/lib/forecast/service";
+import { computePackagingRestockNeed } from "@/lib/packaging/restock-needs";
 import type { PackagingPoLine, PackagingSkuRow } from "@/types/database";
 
 export interface PackagingOverview {
@@ -86,15 +89,46 @@ export async function listPackagingOverview(
     onOrderBySku.set(row.sku_id as string, Number(row.on_order_qty));
   }
 
-  const items: PackagingSkuRow[] = packagingSkus.map((sku) => ({
-    id: sku.id,
-    sku_code: sku.sku_code,
-    name: sku.name,
-    is_packaging: true,
-    qty_on_hand: stockBySku.get(sku.id) ?? 0,
-    on_order_qty: onOrderBySku.get(sku.id) ?? 0,
-    stock_as_of: stockAsOf,
-  }));
+  const [links, { recommendations }] = await Promise.all([
+    listProductPackagingLinks(supabase),
+    loadRestockRecommendations(supabase),
+  ]);
+  const recBySku = new Map(recommendations.map((r) => [r.sku_code, r]));
+  const linksByPackagingId = new Map<string, typeof links>();
+  for (const link of links) {
+    const list = linksByPackagingId.get(link.packaging_sku_id) ?? [];
+    list.push(link);
+    linksByPackagingId.set(link.packaging_sku_id, list);
+  }
+
+  const items: PackagingSkuRow[] = packagingSkus.map((sku) => {
+    const onHand = stockBySku.get(sku.id) ?? 0;
+    const onOrder = onOrderBySku.get(sku.id) ?? 0;
+    const skuLinks = linksByPackagingId.get(sku.id) ?? [];
+    const need = computePackagingRestockNeed(
+      skuLinks.map((l) => ({
+        product_sku_code: l.product_sku_code,
+        product_name: l.product_name,
+        qty_per_unit: l.qty_per_unit,
+      })),
+      recBySku,
+      onHand,
+      onOrder,
+    );
+
+    return {
+      id: sku.id,
+      sku_code: sku.sku_code,
+      name: sku.name,
+      is_packaging: true,
+      qty_on_hand: onHand,
+      on_order_qty: onOrder,
+      stock_as_of: stockAsOf,
+      suggested_from_fg_restock: need.suggested_from_fg_restock,
+      recommended_po_qty: need.recommended_po_qty,
+      linked_products: need.linked_products,
+    };
+  });
 
   const openPoLines = await listOpenPackagingPoLines(supabase);
 

@@ -33,6 +33,30 @@ export interface PackagingSkuRow {
   qty_on_hand: number;
   on_order_qty: number;
   stock_as_of: string | null;
+  /** Packaging qty implied by linked finished-goods restock batches. */
+  suggested_from_fg_restock: number;
+  /** Net PO qty after on-hand and on-order packaging stock. */
+  recommended_po_qty: number;
+  linked_products: PackagingLinkContribution[];
+}
+
+export interface PackagingLinkContribution {
+  product_sku_code: string;
+  product_name: string | null;
+  qty_per_unit: number;
+  fg_restock_qty: number | null;
+  contribution: number;
+}
+
+export interface ProductPackagingLink {
+  id: string;
+  product_sku_id: string;
+  product_sku_code: string;
+  product_name: string | null;
+  packaging_sku_id: string;
+  packaging_sku_code: string;
+  packaging_name: string | null;
+  qty_per_unit: number;
 }
 
 export interface PackagingPoLine {
