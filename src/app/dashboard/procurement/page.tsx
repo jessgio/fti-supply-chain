@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, PackageCheck, Truck } from "lucide-react";
+import { Plus, PackageCheck, Truck, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,6 +22,11 @@ import type {
   PurchaseOrderLine,
   Supplier,
 } from "@/types/database";
+import type { PoLineCoverage } from "@/lib/forecast/po-coverage";
+import {
+  DEFAULT_LEAD_TIME_MONTHS,
+  DEFAULT_SAFETY_STOCK_MONTHS,
+} from "@/lib/forecast/demand";
 
 interface SkuOption {
   id: string;
@@ -314,9 +319,11 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 }
 
 interface DraftLine {
+  id?: string;
   sku_id: string;
   qty_ordered: string;
   unit_cost: string;
+  qty_received?: number;
 }
 
 function CreatePoDialog({
@@ -594,6 +601,317 @@ function CreatePoDialog({
   );
 }
 
+function EditPoDialog({
+  po,
+  suppliers,
+  skus,
+  onClose,
+  onSaved,
+  onSupplierCreated,
+}: {
+  po: PurchaseOrder;
+  suppliers: Supplier[];
+  skus: SkuOption[];
+  onClose: () => void;
+  onSaved: (updated: PurchaseOrder) => void;
+  onSupplierCreated: (s: Supplier) => void;
+}) {
+  const locked =
+    po.status === "received" || po.status === "cancelled";
+  const [supplierId, setSupplierId] = useState(po.supplier_id ?? "");
+  const [status, setStatus] = useState<PoStatus>(po.status);
+  const [orderDate, setOrderDate] = useState(po.order_date ?? "");
+  const [expectedDate, setExpectedDate] = useState(po.expected_date ?? "");
+  const [notes, setNotes] = useState(po.notes ?? "");
+  const [lines, setLines] = useState<DraftLine[]>(
+    (po.lines ?? []).map((l) => ({
+      id: l.id,
+      sku_id: l.sku_id,
+      qty_ordered: String(l.qty_ordered),
+      unit_cost: l.unit_cost != null ? String(l.unit_cost) : "",
+      qty_received: l.qty_received,
+    })),
+  );
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [newSupplier, setNewSupplier] = useState("");
+  const [addingSupplier, setAddingSupplier] = useState(false);
+
+  function updateLine(idx: number, patch: Partial<DraftLine>) {
+    setLines((prev) =>
+      prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
+    );
+  }
+
+  function addLine() {
+    setLines((prev) => [
+      ...prev,
+      { sku_id: "", qty_ordered: "", unit_cost: "" },
+    ]);
+  }
+
+  function removeLine(idx: number) {
+    setLines((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleAddSupplier() {
+    if (!newSupplier.trim()) return;
+    setAddingSupplier(true);
+    try {
+      const res = await fetch("/api/procurement/suppliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newSupplier.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      onSupplierCreated(data.supplier);
+      setSupplierId(data.supplier.id);
+      setNewSupplier("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setAddingSupplier(false);
+    }
+  }
+
+  async function handleSubmit() {
+    setSaving(true);
+    setFormError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+
+      if (locked) {
+        payload.notes = notes || null;
+      } else {
+        const cleanLines = lines
+          .filter((l) => l.sku_id && Number(l.qty_ordered) > 0)
+          .map((l) => ({
+            id: l.id,
+            sku_id: l.sku_id,
+            qty_ordered: Number(l.qty_ordered),
+            unit_cost: l.unit_cost ? Number(l.unit_cost) : null,
+          }));
+
+        if (cleanLines.length === 0) {
+          setFormError("Add at least one line with a SKU and quantity.");
+          setSaving(false);
+          return;
+        }
+
+        payload.supplier_id = supplierId || null;
+        payload.status = status;
+        payload.order_date = orderDate || null;
+        payload.expected_date = expectedDate || null;
+        payload.notes = notes || null;
+        payload.lines = cleanLines;
+      }
+
+      const res = await fetch(`/api/procurement/pos/${po.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update PO");
+      onSaved(data.purchaseOrder);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed to update PO");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit ${po.po_number}`}
+      description={
+        locked
+          ? "Only notes can be changed on received or cancelled orders."
+          : "Update supplier, dates, status, and line items."
+      }
+    >
+      <div className="space-y-4">
+        {!locked && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-stone-700">
+                  Supplier
+                </span>
+                <Select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                >
+                  <option value="">No supplier</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-stone-700">Status</span>
+                <Select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as PoStatus)}
+                >
+                  {STATUS_FLOW.concat("cancelled").map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS_LABELS[s]}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
+
+            <div className="flex items-end gap-2">
+              <label className="flex-1 space-y-1">
+                <span className="text-sm font-medium text-stone-700">
+                  Add a new supplier
+                </span>
+                <Input
+                  value={newSupplier}
+                  onChange={(e) => setNewSupplier(e.target.value)}
+                  placeholder="Supplier name"
+                />
+              </label>
+              <Button
+                variant="outline"
+                onClick={handleAddSupplier}
+                disabled={!newSupplier.trim() || addingSupplier}
+              >
+                {addingSupplier ? "Adding..." : "Add"}
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-stone-700">
+                  Order date
+                </span>
+                <Input
+                  type="date"
+                  value={orderDate}
+                  onChange={(e) => setOrderDate(e.target.value)}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-stone-700">
+                  Expected delivery
+                </span>
+                <Input
+                  type="date"
+                  value={expectedDate}
+                  onChange={(e) => setExpectedDate(e.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-stone-700">
+                  Line items
+                </span>
+                <Button size="sm" variant="ghost" onClick={addLine}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Add line
+                </Button>
+              </div>
+              {lines.map((line, idx) => {
+                const received = line.qty_received ?? 0;
+                const lockedLine = received > 0;
+                return (
+                  <div key={line.id ?? `new-${idx}`} className="flex gap-2">
+                    {lockedLine ? (
+                      <Input
+                        className="flex-1"
+                        value={
+                          skus.find((s) => s.id === line.sku_id)?.sku_code ??
+                          line.sku_id
+                        }
+                        disabled
+                      />
+                    ) : (
+                      <Select
+                        className="flex-1"
+                        value={line.sku_id}
+                        onChange={(e) =>
+                          updateLine(idx, { sku_id: e.target.value })
+                        }
+                      >
+                        <option value="">Select SKU</option>
+                        {skus.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.sku_code}
+                            {s.name ? ` · ${s.name}` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                    <Input
+                      className="w-24"
+                      type="number"
+                      min={lockedLine ? received : 0}
+                      placeholder="Qty"
+                      value={line.qty_ordered}
+                      onChange={(e) =>
+                        updateLine(idx, { qty_ordered: e.target.value })
+                      }
+                    />
+                    <Input
+                      className="w-28"
+                      type="number"
+                      min="0"
+                      placeholder="Unit cost"
+                      value={line.unit_cost}
+                      onChange={(e) =>
+                        updateLine(idx, { unit_cost: e.target.value })
+                      }
+                    />
+                    {!lockedLine && lines.length > 1 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeLine(idx)}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-stone-700">Notes</span>
+          <Input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Optional"
+          />
+        </label>
+
+        {formError && <p className="text-sm text-red-600">{formError}</p>}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {saving ? "Saving..." : "Save changes"}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 function PoDetailDialog({
   poId,
   onClose,
@@ -604,10 +922,43 @@ function PoDetailDialog({
   onChanged: () => void;
 }) {
   const [po, setPo] = useState<PurchaseOrder | null>(null);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [skus, setSkus] = useState<SkuOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [editOpen, setEditOpen] = useState(false);
+  const [coverage, setCoverage] = useState<PoLineCoverage[]>([]);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+
+  const coverageByLine = useMemo(
+    () => new Map(coverage.map((c) => [c.line_id, c])),
+    [coverage],
+  );
+
+  useEffect(() => {
+    let active = true;
+    async function loadMeta() {
+      try {
+        const [supRes, skuRes] = await Promise.all([
+          fetch("/api/procurement/suppliers"),
+          fetch("/api/procurement/skus"),
+        ]);
+        const supData = await supRes.json();
+        const skuData = await skuRes.json();
+        if (!active) return;
+        setSuppliers(supData.suppliers ?? []);
+        setSkus(skuData.skus ?? []);
+      } catch {
+        // optional
+      }
+    }
+    loadMeta();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -629,6 +980,32 @@ function PoDetailDialog({
       active = false;
     };
   }, [poId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCoverage() {
+      if (!po?.expected_date) {
+        setCoverage([]);
+        return;
+      }
+      setCoverageLoading(true);
+      try {
+        const res = await fetch(`/api/procurement/pos/${poId}/coverage`);
+        const data = await res.json();
+        if (!active) return;
+        if (!res.ok) throw new Error(data.error ?? "Failed");
+        setCoverage(data.coverage ?? []);
+      } catch {
+        if (active) setCoverage([]);
+      } finally {
+        if (active) setCoverageLoading(false);
+      }
+    }
+    if (po) loadCoverage();
+    return () => {
+      active = false;
+    };
+  }, [poId, po?.expected_date, po?.updated_at]);
 
   async function setStatus(status: PoStatus) {
     setBusy(true);
@@ -673,14 +1050,51 @@ function PoDetailDialog({
     }
   }
 
+  async function handleDelete() {
+    if (!po) return;
+    const hasReceipts = (po.lines ?? []).some((l) => l.qty_received > 0);
+    if (hasReceipts) {
+      setError(
+        "This PO has received items and cannot be deleted. Cancel it instead.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete purchase order ${po.po_number}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/pos/${poId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete PO");
+      onChanged();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete PO");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canDelete = po && !(po.lines ?? []).some((l) => l.qty_received > 0);
+
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={po ? `Purchase order ${po.po_number}` : "Purchase order"}
-      description={po?.supplier_name ?? undefined}
-      className="max-w-3xl"
-    >
+    <>
+      <Dialog
+        open={!editOpen}
+        onClose={onClose}
+        title={po ? `Purchase order ${po.po_number}` : "Purchase order"}
+        description={po?.supplier_name ?? undefined}
+        className="max-w-3xl"
+      >
       {loading ? (
         <p className="text-sm text-stone-500">Loading...</p>
       ) : !po ? (
@@ -695,6 +1109,27 @@ function PoDetailDialog({
               </span>
             )}
             <div className="ml-auto flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditOpen(true)}
+                disabled={busy}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+              {canDelete && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDelete}
+                  disabled={busy}
+                  className="text-rose-700 hover:text-rose-800"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </Button>
+              )}
               {po.status !== "received" && po.status !== "cancelled" && (
                 <>
                   {nextStatus(po.status) && (
@@ -724,6 +1159,27 @@ function PoDetailDialog({
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
+          {!po.expected_date ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Set an expected delivery date to see when this batch runs out and
+              when the next reorder is due after earlier stock and POs are
+              consumed.
+            </p>
+          ) : coverageLoading ? (
+            <p className="text-sm text-stone-500">Calculating coverage…</p>
+          ) : coverage.length > 0 ? (
+            <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
+              <p>
+                Assumes current on-hand stock is used first, then earlier open
+                POs by delivery date, then this order. Next reorder is when
+                inventory hits the reorder point (
+                {DEFAULT_LEAD_TIME_MONTHS}-month lead +{" "}
+                {DEFAULT_SAFETY_STOCK_MONTHS}-month buffer) after the latest
+                incoming batch lands.
+              </p>
+            </div>
+          ) : null}
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
@@ -731,6 +1187,12 @@ function PoDetailDialog({
                   <th className="py-2 pr-4">SKU</th>
                   <th className="py-2 pr-4">Ordered</th>
                   <th className="py-2 pr-4">Received</th>
+                  {po.expected_date && (
+                    <>
+                      <th className="py-2 pr-4">Batch runs out</th>
+                      <th className="py-2 pr-4">Next reorder</th>
+                    </>
+                  )}
                   <th className="py-2 pr-4">Receive</th>
                   <th className="py-2" />
                 </tr>
@@ -739,6 +1201,7 @@ function PoDetailDialog({
                 {(po.lines ?? []).map((line) => {
                   const open = line.qty_ordered - line.qty_received;
                   const fully = open <= 0;
+                  const lineCoverage = coverageByLine.get(line.id);
                   return (
                     <tr key={line.id} className="border-b border-stone-100">
                       <td className="py-2 pr-4">
@@ -750,6 +1213,11 @@ function PoDetailDialog({
                             {line.sku_name}
                           </span>
                         )}
+                        {lineCoverage?.is_latest_batch && (
+                          <span className="mt-0.5 block text-xs text-sky-700">
+                            Latest incoming batch
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-4">
                         {formatNumber(line.qty_ordered)}
@@ -757,6 +1225,20 @@ function PoDetailDialog({
                       <td className="py-2 pr-4">
                         {formatNumber(line.qty_received)}
                       </td>
+                      {po.expected_date && (
+                        <>
+                          <td className="py-2 pr-4 text-stone-700">
+                            {fully
+                              ? "—"
+                              : lineCoverage?.batch_depletion_date ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 font-medium text-stone-900">
+                            {fully
+                              ? "—"
+                              : (lineCoverage?.next_reorder_date ?? "—")}
+                          </td>
+                        </>
+                      )}
                       <td className="py-2 pr-4">
                         {fully ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700">
@@ -827,7 +1309,23 @@ function PoDetailDialog({
           )}
         </div>
       )}
-    </Dialog>
+      </Dialog>
+
+      {editOpen && po && (
+        <EditPoDialog
+          po={po}
+          suppliers={suppliers}
+          skus={skus}
+          onClose={() => setEditOpen(false)}
+          onSaved={(updated) => {
+            setPo(updated);
+            setEditOpen(false);
+            onChanged();
+          }}
+          onSupplierCreated={(s) => setSuppliers((prev) => [...prev, s])}
+        />
+      )}
+    </>
   );
 }
 

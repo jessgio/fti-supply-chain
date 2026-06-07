@@ -22,6 +22,22 @@ export interface NewPoInput {
   lines: NewPoLineInput[];
 }
 
+export interface UpdatePoLineInput {
+  id?: string;
+  sku_id: string;
+  qty_ordered: number;
+  unit_cost?: number | null;
+}
+
+export interface UpdatePoInput {
+  supplier_id?: string | null;
+  status?: PoStatus;
+  order_date?: string | null;
+  expected_date?: string | null;
+  notes?: string | null;
+  lines?: UpdatePoLineInput[];
+}
+
 export interface NewSupplierInput {
   name: string;
   lead_time_days?: number;
@@ -214,15 +230,190 @@ export async function updatePurchaseOrderStatus(
   id: string,
   status: PoStatus,
 ): Promise<PurchaseOrder> {
-  const { error } = await supabase
-    .from("purchase_orders")
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) throw error;
+  return updatePurchaseOrder(supabase, id, { status });
+}
+
+export async function updatePurchaseOrder(
+  supabase: SupabaseClient,
+  id: string,
+  input: UpdatePoInput,
+): Promise<PurchaseOrder> {
+  const existing = await getPurchaseOrder(supabase, id);
+  if (!existing) throw new Error("Purchase order not found.");
+
+  const lockedStatus =
+    existing.status === "received" || existing.status === "cancelled";
+  if (lockedStatus) {
+    const notesOnly =
+      input.notes !== undefined &&
+      input.supplier_id === undefined &&
+      input.status === undefined &&
+      input.order_date === undefined &&
+      input.expected_date === undefined &&
+      input.lines === undefined;
+    if (!notesOnly) {
+      throw new Error(
+        `${existing.status === "received" ? "Received" : "Cancelled"} purchase orders can only have notes updated.`,
+      );
+    }
+  }
+
+  const headerPatch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (input.supplier_id !== undefined) headerPatch.supplier_id = input.supplier_id;
+  if (input.status !== undefined) headerPatch.status = input.status;
+  if (input.order_date !== undefined) headerPatch.order_date = input.order_date;
+  if (input.expected_date !== undefined)
+    headerPatch.expected_date = input.expected_date;
+  if (input.notes !== undefined) headerPatch.notes = input.notes;
+
+  if (Object.keys(headerPatch).length > 1) {
+    const { error } = await supabase
+      .from("purchase_orders")
+      .update(headerPatch)
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  if (input.lines !== undefined) {
+    if (input.lines.length === 0) {
+      throw new Error("A purchase order needs at least one line item.");
+    }
+
+    const existingLines = existing.lines ?? [];
+    const incomingIds = new Set(
+      input.lines.filter((l) => l.id).map((l) => l.id!),
+    );
+
+    for (const line of existingLines) {
+      if (line.qty_received > 0) {
+        if (!incomingIds.has(line.id)) {
+          throw new Error(
+            `Cannot remove line ${line.sku_code ?? line.id} with received quantity.`,
+          );
+        }
+        const incoming = input.lines.find((l) => l.id === line.id)!;
+        if (incoming.sku_id !== line.sku_id) {
+          throw new Error(
+            `Cannot change SKU on line ${line.sku_code ?? line.id} with received quantity.`,
+          );
+        }
+        if (incoming.qty_ordered < line.qty_received) {
+          throw new Error(
+            `Quantity ordered cannot be below received quantity for ${line.sku_code ?? line.id}.`,
+          );
+        }
+      }
+    }
+
+    const toDelete = existingLines
+      .filter((l) => l.qty_received === 0 && !incomingIds.has(l.id))
+      .map((l) => l.id);
+    if (toDelete.length > 0) {
+      const { error } = await supabase
+        .from("purchase_order_lines")
+        .delete()
+        .in("id", toDelete);
+      if (error) throw error;
+    }
+
+    for (const line of input.lines) {
+      if (line.id && existingLines.some((l) => l.id === line.id)) {
+        const { error } = await supabase
+          .from("purchase_order_lines")
+          .update({
+            sku_id: line.sku_id,
+            qty_ordered: line.qty_ordered,
+            unit_cost: line.unit_cost ?? null,
+          })
+          .eq("id", line.id);
+        if (error) throw error;
+      } else if (!line.id) {
+        const { error } = await supabase.from("purchase_order_lines").insert({
+          po_id: id,
+          sku_id: line.sku_id,
+          qty_ordered: line.qty_ordered,
+          unit_cost: line.unit_cost ?? null,
+        });
+        if (error) throw error;
+      }
+    }
+  }
 
   const updated = await getPurchaseOrder(supabase, id);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
+}
+
+export async function deletePurchaseOrder(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<void> {
+  const existing = await getPurchaseOrder(supabase, id);
+  if (!existing) throw new Error("Purchase order not found.");
+
+  const hasReceipts = (existing.lines ?? []).some((l) => l.qty_received > 0);
+  if (hasReceipts) {
+    throw new Error(
+      "Cannot delete a purchase order with received items. Cancel it instead.",
+    );
+  }
+
+  const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export interface OpenPoBatch {
+  line_id: string;
+  po_id: string;
+  sku_id: string;
+  sku_code: string;
+  open_qty: number;
+  expected_date: string | null;
+}
+
+export async function listOpenPoBatchesBySkus(
+  supabase: SupabaseClient,
+  skuIds: string[],
+): Promise<OpenPoBatch[]> {
+  if (skuIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .select(
+      "id, expected_date, purchase_order_lines(id, sku_id, qty_ordered, qty_received, skus(sku_code))",
+    )
+    .in("status", ["planned", "ordered", "in_transit"]);
+  if (error) throw error;
+
+  const skuSet = new Set(skuIds);
+  const batches: OpenPoBatch[] = [];
+
+  for (const po of data ?? []) {
+    const lines = (po.purchase_order_lines ?? []) as unknown as {
+      id: string;
+      sku_id: string;
+      qty_ordered: number;
+      qty_received: number;
+      skus: { sku_code: string } | null;
+    }[];
+    for (const line of lines) {
+      if (!skuSet.has(line.sku_id)) continue;
+      const openQty = Number(line.qty_ordered) - Number(line.qty_received);
+      if (openQty <= 0) continue;
+      batches.push({
+        line_id: line.id,
+        po_id: po.id,
+        sku_id: line.sku_id,
+        sku_code: line.skus?.sku_code ?? "",
+        open_qty: openQty,
+        expected_date: po.expected_date,
+      });
+    }
+  }
+
+  return batches;
 }
 
 export async function receivePoLine(
