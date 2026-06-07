@@ -34,6 +34,7 @@ import {
   stockStatusOf,
   type StockStatus,
 } from "@/lib/forecast/stock-status";
+import { applySeasonalityToggle } from "@/lib/forecast/seasonality-toggle";
 import type {
   DemandPattern,
   RestockRecommendation,
@@ -301,9 +302,10 @@ function SortableHeader({
 }
 
 export default function InventoryPage() {
-  const [recommendations, setRecommendations] = useState<
+  const [rawRecommendations, setRawRecommendations] = useState<
     RestockRecommendation[]
   >([]);
+  const [seasonalityEnabled, setSeasonalityEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -358,7 +360,7 @@ export default function InventoryPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Forecast failed");
         if (!active) return;
-        setRecommendations(data.recommendations ?? []);
+        setRawRecommendations(data.recommendations ?? []);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Forecast failed");
       } finally {
@@ -370,6 +372,11 @@ export default function InventoryPage() {
       active = false;
     };
   }, [refreshKey]);
+
+  const recommendations = useMemo(
+    () => applySeasonalityToggle(rawRecommendations, seasonalityEnabled),
+    [rawRecommendations, seasonalityEnabled],
+  );
 
   const summary = useMemo(() => {
     const reorder = recommendations.filter(
@@ -388,7 +395,7 @@ export default function InventoryPage() {
     const overstock = recommendations.filter(
       (r) => riskOf(r) === "overstock",
     ).length;
-    const seasonalUplift = recommendations.filter(
+    const seasonalUplift = rawRecommendations.filter(
       (r) => r.seasonal_uplift_multiplier > 1,
     ).length;
     return {
@@ -403,7 +410,7 @@ export default function InventoryPage() {
       seasonalUplift,
       total: recommendations.length,
     };
-  }, [recommendations]);
+  }, [recommendations, rawRecommendations]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -481,14 +488,33 @@ export default function InventoryPage() {
             for the narrative summary.
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setRefreshKey((k) => k + 1)}
-          disabled={loading}
-        >
-          Refresh forecast
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant={seasonalityEnabled ? "default" : "outline"}
+            onClick={() => setSeasonalityEnabled((v) => !v)}
+            disabled={loading}
+            title="Toggle Ramadan / Q4 uplift on Fcst/day and restock calculations"
+          >
+            Seasonality {seasonalityEnabled ? "on" : "off"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setRefreshKey((k) => k + 1)}
+            disabled={loading}
+          >
+            Refresh forecast
+          </Button>
+        </div>
       </div>
+
+      {!seasonalityEnabled && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          Seasonality is off — Fcst/day and restock metrics use the base L3M/L6M
+          blend without Ramadan or Q4 uplift. Toggle on to compare with seasonal
+          demand.
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-10">
         <StatCard
@@ -856,7 +882,8 @@ export default function InventoryPage() {
                       <td className="py-2 pr-4">
                         <div className="flex flex-col gap-0.5">
                           <span>{formatNumber(row.forecast_daily_demand, 1)}</span>
-                          {row.seasonal_uplift_multiplier > 1 && (
+                          {seasonalityEnabled &&
+                            row.seasonal_uplift_multiplier > 1 && (
                             <span
                               className="text-xs text-amber-800"
                               title={row.seasonal_uplift_reasons.join(", ")}
@@ -866,6 +893,19 @@ export default function InventoryPage() {
                                 (row.seasonal_uplift_multiplier - 1) * 100,
                               )}
                               % seasonal
+                            </span>
+                          )}
+                          {!seasonalityEnabled &&
+                            row.seasonal_uplift_multiplier > 1 && (
+                            <span
+                              className="text-xs text-stone-400 line-through"
+                              title={row.seasonal_uplift_reasons.join(", ")}
+                            >
+                              +
+                              {Math.round(
+                                (row.seasonal_uplift_multiplier - 1) * 100,
+                              )}
+                              % seasonal (off)
                             </span>
                           )}
                         </div>
