@@ -30,11 +30,14 @@ const LINK_SELECT =
 
 export async function listProductPackagingLinks(
   supabase: SupabaseClient,
-  packagingSkuId?: string,
+  filters?: { packagingSkuId?: string; productSkuId?: string },
 ): Promise<ProductPackagingLink[]> {
   let query = supabase.from("product_packaging").select(LINK_SELECT);
-  if (packagingSkuId) {
-    query = query.eq("packaging_sku_id", packagingSkuId);
+  if (filters?.packagingSkuId) {
+    query = query.eq("packaging_sku_id", filters.packagingSkuId);
+  }
+  if (filters?.productSkuId) {
+    query = query.eq("product_sku_id", filters.productSkuId);
   }
 
   const { data, error } = await query.order("created_at");

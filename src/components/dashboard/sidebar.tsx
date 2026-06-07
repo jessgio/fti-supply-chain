@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Layers,
   Lightbulb,
+  Link2,
   LogOut,
   Package,
   PanelLeft,
@@ -26,6 +27,8 @@ interface NavLink {
   label: string;
   icon: typeof LayoutDashboard;
   roles?: UserRole[];
+  /** When true, only highlight on exact path match (not sub-routes). */
+  exact?: boolean;
 }
 
 const links: NavLink[] = [
@@ -44,6 +47,13 @@ const links: NavLink[] = [
     href: "/dashboard/packaging",
     label: "Packaging",
     icon: Layers,
+    roles: ["admin", "supply_chain"],
+    exact: true,
+  },
+  {
+    href: "/dashboard/packaging/links",
+    label: "Packaging BOM",
+    icon: Link2,
     roles: ["admin", "supply_chain"],
   },
   {
@@ -141,10 +151,12 @@ export function Sidebar({ role, displayName, email }: SidebarProps) {
         </div>
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-2">
-        {visibleLinks.map(({ href, label, icon: Icon }) => {
+        {visibleLinks.map(({ href, label, icon: Icon, exact }) => {
           const active =
             pathname === href ||
-            (href !== "/dashboard" && pathname.startsWith(href));
+            (!exact &&
+              href !== "/dashboard" &&
+              pathname.startsWith(`${href}/`));
           return (
             <Link
               key={href}

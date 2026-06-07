@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Layers, ShoppingCart, Link2, Trash2 } from "lucide-react";
+import { Layers, ShoppingCart, Link2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,22 +16,12 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { formatNumber } from "@/lib/utils";
-import { Select } from "@/components/ui/select";
-import { DEFAULT_TARGET_STOCK_MONTHS } from "@/lib/forecast/demand";
 import { PACKAGING_STOCK_LOCATION, STOCK_QTY_COLUMN } from "@/lib/stock/locations";
 import type {
   PackagingPoLine,
   PackagingSkuRow,
   PoStatus,
-  ProductPackagingLink,
 } from "@/types/database";
-
-interface FinishedGoodOption {
-  id: string;
-  sku_code: string;
-  name: string | null;
-  franchise_name: string | null;
-}
 
 interface SkuToggleRow {
   id: string;
@@ -72,13 +62,6 @@ export default function PackagingPage() {
   const [packagingFilter, setPackagingFilter] =
     useState<PackagingFilter>("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [links, setLinks] = useState<ProductPackagingLink[]>([]);
-  const [products, setProducts] = useState<FinishedGoodOption[]>([]);
-  const [linksLoading, setLinksLoading] = useState(true);
-  const [linkPackagingId, setLinkPackagingId] = useState("");
-  const [linkProductId, setLinkProductId] = useState("");
-  const [linkQty, setLinkQty] = useState("1");
-  const [linkSaving, setLinkSaving] = useState(false);
   const [expandedPackagingId, setExpandedPackagingId] = useState<string | null>(
     null,
   );
@@ -114,33 +97,10 @@ export default function PackagingPage() {
     }
   }, []);
 
-  const loadLinks = useCallback(async () => {
-    setLinksLoading(true);
-    try {
-      const [linksRes, productsRes] = await Promise.all([
-        fetch("/api/packaging/links"),
-        fetch("/api/packaging/products"),
-      ]);
-      const linksData = await linksRes.json();
-      const productsData = await productsRes.json();
-      if (!linksRes.ok) throw new Error(linksData.error ?? "Failed to load links");
-      if (!productsRes.ok) {
-        throw new Error(productsData.error ?? "Failed to load products");
-      }
-      setLinks(linksData.links ?? []);
-      setProducts(productsData.products ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load links");
-    } finally {
-      setLinksLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadOverview();
     loadToggleSkus();
-    loadLinks();
-  }, [loadOverview, loadToggleSkus, loadLinks]);
+  }, [loadOverview, loadToggleSkus]);
 
   const summary = useMemo(() => {
     const totalOnHand = items.reduce((sum, row) => sum + row.qty_on_hand, 0);
@@ -202,67 +162,31 @@ export default function PackagingPage() {
   function refreshAll() {
     loadOverview();
     loadToggleSkus();
-    loadLinks();
-  }
-
-  async function addLink() {
-    if (!linkPackagingId || !linkProductId) return;
-    const qty = Number(linkQty);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError("Quantity per unit must be greater than zero.");
-      return;
-    }
-    setLinkSaving(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/packaging/links", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          packaging_sku_id: linkPackagingId,
-          product_sku_id: linkProductId,
-          qty_per_unit: qty,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to add link");
-      setLinkProductId("");
-      setLinkQty("1");
-      await Promise.all([loadLinks(), loadOverview()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add link");
-    } finally {
-      setLinkSaving(false);
-    }
-  }
-
-  async function removeLink(id: string) {
-    setError(null);
-    try {
-      const res = await fetch(`/api/packaging/links/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to remove link");
-      await Promise.all([loadLinks(), loadOverview()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove link");
-    }
   }
 
   return (
     <PageShell wide>
-      <div>
-        <div className="flex items-center gap-2">
-          <Layers className="h-6 w-6 text-emerald-800" />
-          <h1 className="text-2xl font-semibold text-stone-900">
-            Packaging materials
-          </h1>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Layers className="h-6 w-6 text-emerald-800" />
+            <h1 className="text-2xl font-semibold text-stone-900">
+              Packaging materials
+            </h1>
+          </div>
+          <p className="mt-1 max-w-3xl text-stone-600">
+            Track primary packaging inventory (UB, EFLUTE, JAR, PUMP, etc.) and
+            purchase orders before components go to the manufacturer. On-hand stock
+            comes from {PACKAGING_STOCK_LOCATION} ({STOCK_QTY_COLUMN} column in the
+            WMS upload); POs are managed in Procurement.
+          </p>
         </div>
-        <p className="mt-1 max-w-3xl text-stone-600">
-          Track primary packaging inventory (UB, EFLUTE, JAR, PUMP, etc.) and
-          purchase orders before components go to the manufacturer. On-hand stock
-          comes from {PACKAGING_STOCK_LOCATION} ({STOCK_QTY_COLUMN} column in the
-          WMS upload); POs are managed in Procurement.
-        </p>
+        <Link href="/dashboard/packaging/links">
+          <Button variant="outline">
+            <Link2 className="h-4 w-4" />
+            Packaging BOM
+          </Button>
+        </Link>
       </div>
 
       {error && (
@@ -307,142 +231,19 @@ export default function PackagingPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Link2 className="h-5 w-5" />
-            Link packaging to finished goods
-          </CardTitle>
-          <CardDescription>
-            Connect each packaging SKU to the finished goods it is used for, with
-            units per finished good. Suggested PO quantities are derived from
-            linked products that need a restock batch (
-            {DEFAULT_TARGET_STOCK_MONTHS}-month cover in Inventory).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-stone-700">
-                Packaging SKU
-              </span>
-              <Select
-                value={linkPackagingId}
-                onChange={(e) => setLinkPackagingId(e.target.value)}
-              >
-                <option value="">Select packaging</option>
-                {items.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.sku_code}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            <label className="space-y-1 md:col-span-2">
-              <span className="text-sm font-medium text-stone-700">
-                Finished good
-              </span>
-              <Select
-                value={linkProductId}
-                onChange={(e) => setLinkProductId(e.target.value)}
-              >
-                <option value="">Select product</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.sku_code}
-                    {p.franchise_name ? ` · ${p.franchise_name}` : ""}
-                    {p.name ? ` · ${p.name}` : ""}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-stone-700">
-                Qty per unit
-              </span>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={linkQty}
-                  onChange={(e) => setLinkQty(e.target.value)}
-                />
-                <Button
-                  onClick={addLink}
-                  disabled={linkSaving || !linkPackagingId || !linkProductId}
-                >
-                  {linkSaving ? "Adding…" : "Add"}
-                </Button>
-              </div>
-            </label>
-          </div>
-
-          {linksLoading ? (
-            <p className="text-sm text-stone-500">Loading links…</p>
-          ) : links.length === 0 ? (
-            <p className="text-sm text-stone-500">
-              No links yet. Add connections above so packaging PO quantities
-              reflect upcoming finished-goods restocks.
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-stone-200">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-                    <th className="px-3 py-2">Packaging</th>
-                    <th className="px-3 py-2">Finished good</th>
-                    <th className="px-3 py-2 text-right">Qty / unit</th>
-                    <th className="px-3 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {links.map((link) => (
-                    <tr
-                      key={link.id}
-                      className="border-b border-stone-100 last:border-0"
-                    >
-                      <td className="px-3 py-2 font-mono text-xs">
-                        {link.packaging_sku_code}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs">
-                        {link.product_sku_code}
-                        {link.product_name && (
-                          <span className="block text-stone-500">
-                            {link.product_name}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {formatNumber(link.qty_per_unit)}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removeLink(link.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Remove
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle>Packaging inventory</CardTitle>
             <CardDescription>
               On-hand from {PACKAGING_STOCK_LOCATION} (WMS {STOCK_QTY_COLUMN})
-              plus units on open POs. Suggested PO qty covers linked finished
-              goods that need a restock, minus packaging already on hand or on
-              order.
+              plus units on open POs. Suggested PO qty uses links from{" "}
+              <Link
+                href="/dashboard/packaging/links"
+                className="font-medium text-emerald-800 hover:underline"
+              >
+                Packaging BOM
+              </Link>
+              .
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={refreshAll}>
