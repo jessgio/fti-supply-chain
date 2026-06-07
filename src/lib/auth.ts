@@ -10,6 +10,7 @@ export interface CurrentProfile {
 }
 
 const WRITE_ROLES: UserRole[] = ["admin", "supply_chain"];
+const SUPPLY_CHAIN_ROLES: UserRole[] = ["admin", "supply_chain"];
 
 function authConfigured(): boolean {
   return Boolean(
@@ -73,6 +74,23 @@ export async function requireWriteRole(): Promise<NextResponse | null> {
   if (!WRITE_ROLES.includes(profile.role)) {
     return NextResponse.json(
       { error: "Your role does not have permission to modify data." },
+      { status: 403 },
+    );
+  }
+  return null;
+}
+
+/** Guard for supply-chain-only modules (packaging, procurement UI). */
+export async function requireSupplyChainAccess(): Promise<NextResponse | null> {
+  if (!authConfigured()) return null;
+
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  if (!SUPPLY_CHAIN_ROLES.includes(profile.role)) {
+    return NextResponse.json(
+      { error: "Supply chain access required." },
       { status: 403 },
     );
   }

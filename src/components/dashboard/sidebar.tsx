@@ -6,6 +6,7 @@ import {
   BarChart3,
   Boxes,
   LayoutDashboard,
+  Layers,
   LogOut,
   Package,
   PanelLeft,
@@ -35,6 +36,12 @@ const links: NavLink[] = [
     href: "/dashboard/procurement",
     label: "Procurement",
     icon: ShoppingCart,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/packaging",
+    label: "Packaging",
+    icon: Layers,
     roles: ["admin", "supply_chain"],
   },
   {

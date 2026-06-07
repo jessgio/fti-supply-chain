@@ -20,7 +20,31 @@ export interface Sku {
   franchise_id: string | null;
   is_bundle: boolean;
   is_active: boolean;
+  /** Primary packaging material (UB, EFLUTE, JAR, PUMP, etc.) — supply chain only. */
+  is_packaging: boolean;
   retail_price: number | null;
+}
+
+export interface PackagingSkuRow {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_packaging: boolean;
+  qty_on_hand: number;
+  on_order_qty: number;
+  stock_as_of: string | null;
+}
+
+export interface PackagingPoLine {
+  po_id: string;
+  po_number: string;
+  po_status: PoStatus;
+  supplier_name: string | null;
+  expected_date: string | null;
+  sku_code: string;
+  qty_ordered: number;
+  qty_received: number;
+  qty_open: number;
 }
 
 export interface BundleComponent {

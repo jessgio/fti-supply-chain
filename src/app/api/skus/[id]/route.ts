@@ -12,10 +12,22 @@ export async function PATCH(
     if (denied) return denied;
 
     const { id } = await params;
-    const body = (await request.json()) as { is_active?: boolean };
-    if (typeof body.is_active !== "boolean") {
+    const body = (await request.json()) as {
+      is_active?: boolean;
+      is_packaging?: boolean;
+    };
+
+    const updates: { is_active?: boolean; is_packaging?: boolean } = {};
+    if (typeof body.is_active === "boolean") {
+      updates.is_active = body.is_active;
+    }
+    if (typeof body.is_packaging === "boolean") {
+      updates.is_packaging = body.is_packaging;
+    }
+
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json(
-        { error: "is_active must be a boolean" },
+        { error: "Provide is_active and/or is_packaging as booleans" },
         { status: 400 },
       );
     }
@@ -23,9 +35,9 @@ export async function PATCH(
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("skus")
-      .update({ is_active: body.is_active })
+      .update(updates)
       .eq("id", id)
-      .select("id, sku_code, is_active")
+      .select("id, sku_code, is_active, is_packaging")
       .single();
 
     if (error) throw error;
