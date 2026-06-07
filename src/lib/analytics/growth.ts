@@ -2,17 +2,24 @@ import {
   addDays,
   addMonths,
   addWeeks,
+  differenceInCalendarDays,
+  endOfMonth,
   format,
+  getDaysInMonth,
   parseISO,
   startOfDay,
   startOfMonth,
   startOfWeek,
   startOfYear,
 } from "date-fns";
-import type { FranchiseGrowthPoint, TimeGrain } from "@/types/database";
+import type {
+  FranchiseGrowthPoint,
+  PeriodCoverage,
+  TimeGrain,
+} from "@/types/database";
 import { pctChange } from "@/lib/utils";
 
-interface DailyRow {
+export interface DailyRow {
   sale_date: string;
   channel_id: string;
   channel_name: string;
@@ -49,6 +56,262 @@ function shiftPeriod(period: string, grain: TimeGrain, delta: number): string {
   if (grain === "week") return format(addWeeks(d, delta), "yyyy-MM-dd");
   if (grain === "day") return format(addDays(d, delta), "yyyy-MM-dd");
   return period;
+}
+
+export function effectiveNetSales(point: FranchiseGrowthPoint): number {
+  return point.projected_net_sales ?? point.total_net_sales;
+}
+
+export function effectiveQty(point: FranchiseGrowthPoint): number {
+  return point.projected_qty ?? point.total_qty;
+}
+
+/** Inclusive calendar-day bounds for fetching daily rows in a period. */
+export function periodToDateBounds(
+  period: string,
+  grain: TimeGrain,
+): { from: string; to: string; daysInPeriod: number } {
+  if (grain === "month") {
+    const [year, month] = period.split("-").map(Number);
+    const start = new Date(year, month - 1, 1);
+    return {
+      from: format(start, "yyyy-MM-dd"),
+      to: format(endOfMonth(start), "yyyy-MM-dd"),
+      daysInPeriod: getDaysInMonth(start),
+    };
+  }
+  if (grain === "week") {
+    const start = parseISO(period);
+    const end = addDays(start, 6);
+    return {
+      from: format(start, "yyyy-MM-dd"),
+      to: format(end, "yyyy-MM-dd"),
+      daysInPeriod: 7,
+    };
+  }
+  return { from: period, to: period, daysInPeriod: 1 };
+}
+
+function rowInPeriod(
+  saleDate: string,
+  period: string,
+  grain: TimeGrain,
+): boolean {
+  return periodKey(saleDate, grain) === period;
+}
+
+/**
+ * Derive how much of a period is covered by uploaded sales, using the latest
+ * sale date in daily rows (not today's calendar date).
+ */
+export function computePeriodCoverage(
+  dailyRows: DailyRow[],
+  period: string,
+  grain: TimeGrain,
+): PeriodCoverage {
+  const { from, to, daysInPeriod } = periodToDateBounds(period, grain);
+  let lastSaleDate: string | null = null;
+
+  for (const row of dailyRows) {
+    if (!rowInPeriod(row.sale_date, period, grain)) continue;
+    if (!lastSaleDate || row.sale_date > lastSaleDate) {
+      lastSaleDate = row.sale_date;
+    }
+  }
+
+  if (!lastSaleDate) {
+    return {
+      period,
+      isPartial: false,
+      lastSaleDate: null,
+      daysElapsed: daysInPeriod,
+      daysInPeriod,
+    };
+  }
+
+  const daysElapsed =
+    differenceInCalendarDays(parseISO(lastSaleDate), parseISO(from)) + 1;
+  const isPartial = lastSaleDate < to && daysElapsed < daysInPeriod;
+
+  return {
+    period,
+    isPartial,
+    lastSaleDate,
+    daysElapsed,
+    daysInPeriod,
+  };
+}
+
+function runRateScale(coverage: PeriodCoverage): number {
+  if (!coverage.isPartial || coverage.daysElapsed <= 0) return 1;
+  return coverage.daysInPeriod / coverage.daysElapsed;
+}
+
+function recomputeComparisonsForPoint(
+  current: FranchiseGrowthPoint,
+  lookup: Map<string, FranchiseGrowthPoint>,
+  grain: TimeGrain,
+  compareSales: number,
+  compareQty: number,
+): Pick<
+  FranchiseGrowthPoint,
+  | "qty_mom_pct"
+  | "sales_mom_pct"
+  | "qty_yoy_pct"
+  | "sales_yoy_pct"
+  | "qty_mom_eom_pct"
+  | "sales_mom_eom_pct"
+  | "qty_yoy_eom_pct"
+  | "sales_yoy_eom_pct"
+> {
+  const momKey = `${shiftPeriod(current.period, grain, -1)}|${current.franchise_id}|${current.channel_id}`;
+  const yoyKey = `${shiftPeriod(current.period, grain, yoyDeltaFor(grain))}|${current.franchise_id}|${current.channel_id}`;
+  const prevMom = lookup.get(momKey);
+  const prevYoy = lookup.get(yoyKey);
+
+  const salesMomEom = prevMom
+    ? pctChange(compareSales, prevMom.total_net_sales)
+    : null;
+  const qtyMomEom = prevMom ? pctChange(compareQty, prevMom.total_qty) : null;
+  const salesYoyEom = prevYoy
+    ? pctChange(compareSales, prevYoy.total_net_sales)
+    : null;
+  const qtyYoyEom = prevYoy ? pctChange(compareQty, prevYoy.total_qty) : null;
+
+  return {
+    qty_mom_eom_pct: qtyMomEom,
+    sales_mom_eom_pct: salesMomEom,
+    qty_yoy_eom_pct: qtyYoyEom,
+    sales_yoy_eom_pct: salesYoyEom,
+    qty_mom_pct: qtyMomEom,
+    sales_mom_pct: salesMomEom,
+    qty_yoy_pct: qtyYoyEom,
+    sales_yoy_pct: salesYoyEom,
+  };
+}
+
+function buildGrowthPctFields(
+  currentQty: number,
+  currentSales: number,
+  projectedQty: number,
+  projectedSales: number,
+  prevMom: { total_qty: number; total_net_sales: number } | undefined,
+  prevYoy: { total_qty: number; total_net_sales: number } | undefined,
+): Pick<
+  FranchiseGrowthPoint,
+  | "qty_mom_pct"
+  | "sales_mom_pct"
+  | "qty_yoy_pct"
+  | "sales_yoy_pct"
+  | "qty_mom_mtd_pct"
+  | "sales_mom_mtd_pct"
+  | "qty_yoy_mtd_pct"
+  | "sales_yoy_mtd_pct"
+  | "qty_mom_eom_pct"
+  | "sales_mom_eom_pct"
+  | "qty_yoy_eom_pct"
+  | "sales_yoy_eom_pct"
+> {
+  const qtyMomMtd = prevMom ? pctChange(currentQty, prevMom.total_qty) : null;
+  const salesMomMtd = prevMom
+    ? pctChange(currentSales, prevMom.total_net_sales)
+    : null;
+  const qtyYoyMtd = prevYoy ? pctChange(currentQty, prevYoy.total_qty) : null;
+  const salesYoyMtd = prevYoy
+    ? pctChange(currentSales, prevYoy.total_net_sales)
+    : null;
+
+  const qtyMomEom = prevMom ? pctChange(projectedQty, prevMom.total_qty) : null;
+  const salesMomEom = prevMom
+    ? pctChange(projectedSales, prevMom.total_net_sales)
+    : null;
+  const qtyYoyEom = prevYoy ? pctChange(projectedQty, prevYoy.total_qty) : null;
+  const salesYoyEom = prevYoy
+    ? pctChange(projectedSales, prevYoy.total_net_sales)
+    : null;
+
+  return {
+    qty_mom_mtd_pct: qtyMomMtd,
+    sales_mom_mtd_pct: salesMomMtd,
+    qty_yoy_mtd_pct: qtyYoyMtd,
+    sales_yoy_mtd_pct: salesYoyMtd,
+    qty_mom_eom_pct: qtyMomEom,
+    sales_mom_eom_pct: salesMomEom,
+    qty_yoy_eom_pct: qtyYoyEom,
+    sales_yoy_eom_pct: salesYoyEom,
+    qty_mom_pct: qtyMomEom,
+    sales_mom_pct: salesMomEom,
+    qty_yoy_pct: qtyYoyEom,
+    sales_yoy_pct: salesYoyEom,
+  };
+}
+
+/** Apply run-rate projections and recompute MoM/YoY for an in-progress period. */
+export function applyRunRateGrowth(
+  points: FranchiseGrowthPoint[],
+  coverage: PeriodCoverage,
+  grain: TimeGrain,
+): void {
+  if (!coverage.isPartial || coverage.daysElapsed <= 0) return;
+
+  const scale = runRateScale(coverage);
+  const lookup = new Map(
+    points.map((p) => [
+      `${p.period}|${p.franchise_id}|${p.channel_id}`,
+      p,
+    ]),
+  );
+
+  for (const point of points) {
+    if (point.period !== coverage.period) continue;
+
+    point.is_partial = true;
+    point.projected_net_sales = point.total_net_sales * scale;
+    point.projected_qty = point.total_qty * scale;
+
+    Object.assign(
+      point,
+      recomputeComparisonsForPoint(
+        point,
+        lookup,
+        grain,
+        point.projected_net_sales,
+        point.projected_qty,
+      ),
+    );
+  }
+}
+
+export function buildGrowthPoints(
+  rows: DailyRow[],
+  grain: TimeGrain,
+  dailyRowsForLatest: DailyRow[] | null = null,
+): { points: FranchiseGrowthPoint[]; coverage: PeriodCoverage | null } {
+  const points = aggregateFranchiseGrowth(rows, grain);
+
+  if (grain !== "month" && grain !== "week") {
+    return { points, coverage: null };
+  }
+
+  const latestPeriod = getLatestPeriod(points);
+  if (!latestPeriod || !dailyRowsForLatest?.length) {
+    return { points, coverage: null };
+  }
+
+  const coverage = computePeriodCoverage(
+    dailyRowsForLatest,
+    latestPeriod,
+    grain,
+  );
+  applyRunRateGrowth(points, coverage, grain);
+  return { points, coverage: coverage.isPartial ? coverage : null };
+}
+
+export function formatPeriodCoverageHint(coverage: PeriodCoverage): string {
+  const through = coverage.lastSaleDate
+    ? format(parseISO(coverage.lastSaleDate), "d MMM")
+    : "—";
+  return `${coverage.daysElapsed} of ${coverage.daysInPeriod} days · through ${through}`;
 }
 
 export function aggregateFranchiseGrowth(
@@ -113,18 +376,14 @@ export function aggregateFranchiseGrowth(
 
       return {
         ...current,
-        qty_mom_pct: prevMom
-          ? pctChange(current.total_qty, prevMom.total_qty)
-          : null,
-        sales_mom_pct: prevMom
-          ? pctChange(current.total_net_sales, prevMom.total_net_sales)
-          : null,
-        qty_yoy_pct: prevYoy
-          ? pctChange(current.total_qty, prevYoy.total_qty)
-          : null,
-        sales_yoy_pct: prevYoy
-          ? pctChange(current.total_net_sales, prevYoy.total_net_sales)
-          : null,
+        ...buildGrowthPctFields(
+          current.total_qty,
+          current.total_net_sales,
+          current.total_qty,
+          current.total_net_sales,
+          prevMom,
+          prevYoy,
+        ),
       };
     });
 }
@@ -142,6 +401,9 @@ export function sumGrowthAcrossChannels(
       franchise_name: string;
       total_qty: number;
       total_net_sales: number;
+      projected_qty: number | null;
+      projected_net_sales: number | null;
+      is_partial: boolean;
     }
   >();
 
@@ -151,6 +413,15 @@ export function sumGrowthAcrossChannels(
     if (existing) {
       existing.total_qty += point.total_qty;
       existing.total_net_sales += point.total_net_sales;
+      if (point.projected_qty != null) {
+        existing.projected_qty =
+          (existing.projected_qty ?? 0) + point.projected_qty;
+      }
+      if (point.projected_net_sales != null) {
+        existing.projected_net_sales =
+          (existing.projected_net_sales ?? 0) + point.projected_net_sales;
+      }
+      existing.is_partial = existing.is_partial || Boolean(point.is_partial);
     } else {
       bucket.set(key, {
         period: point.period,
@@ -158,6 +429,9 @@ export function sumGrowthAcrossChannels(
         franchise_name: point.franchise_name,
         total_qty: point.total_qty,
         total_net_sales: point.total_net_sales,
+        projected_qty: point.projected_qty ?? null,
+        projected_net_sales: point.projected_net_sales ?? null,
+        is_partial: Boolean(point.is_partial),
       });
     }
   }
@@ -181,6 +455,9 @@ export function sumGrowthAcrossChannels(
       const yoyKey = `${shiftPeriod(current.period, grain, yoyDelta)}|${current.franchise_id}`;
       const prevMom = lookup.get(momKey);
       const prevYoy = lookup.get(yoyKey);
+      const projectedQty = current.projected_qty ?? current.total_qty;
+      const projectedSales =
+        current.projected_net_sales ?? current.total_net_sales;
 
       return {
         period: current.period,
@@ -190,18 +467,17 @@ export function sumGrowthAcrossChannels(
         channel_name: "All channels",
         total_qty: current.total_qty,
         total_net_sales: current.total_net_sales,
-        qty_mom_pct: prevMom
-          ? pctChange(current.total_qty, prevMom.total_qty)
-          : null,
-        sales_mom_pct: prevMom
-          ? pctChange(current.total_net_sales, prevMom.total_net_sales)
-          : null,
-        qty_yoy_pct: prevYoy
-          ? pctChange(current.total_qty, prevYoy.total_qty)
-          : null,
-        sales_yoy_pct: prevYoy
-          ? pctChange(current.total_net_sales, prevYoy.total_net_sales)
-          : null,
+        projected_qty: current.projected_qty,
+        projected_net_sales: current.projected_net_sales,
+        is_partial: current.is_partial,
+        ...buildGrowthPctFields(
+          current.total_qty,
+          current.total_net_sales,
+          projectedQty,
+          projectedSales,
+          prevMom,
+          prevYoy,
+        ),
       };
     });
 }
@@ -217,6 +493,10 @@ export interface GrowthSummaryMetrics {
   prevPeriod: string | null;
   totalSales: number;
   totalQty: number;
+  projectedSales: number | null;
+  projectedQty: number | null;
+  isPartialPeriod: boolean;
+  periodCoverageHint: string | null;
   salesMomPct: number | null;
   qtyMomPct: number | null;
   salesYoyPct: number | null;
@@ -235,6 +515,10 @@ const EMPTY_METRICS: GrowthSummaryMetrics = {
   prevPeriod: null,
   totalSales: 0,
   totalQty: 0,
+  projectedSales: null,
+  projectedQty: null,
+  isPartialPeriod: false,
+  periodCoverageHint: null,
   salesMomPct: null,
   qtyMomPct: null,
   salesYoyPct: null,
@@ -269,14 +553,25 @@ export function computeGrowthMetrics(
   points: FranchiseGrowthPoint[],
   grain: TimeGrain,
   metric: "sales" | "qty",
+  coverage: PeriodCoverage | null = null,
 ): GrowthSummaryMetrics {
   if (points.length === 0) return EMPTY_METRICS;
 
-  const periodTotals = new Map<string, { sales: number; qty: number }>();
+  const periodTotals = new Map<
+    string,
+    { sales: number; qty: number; projectedSales: number; projectedQty: number }
+  >();
   for (const p of points) {
-    const t = periodTotals.get(p.period) ?? { sales: 0, qty: 0 };
+    const t = periodTotals.get(p.period) ?? {
+      sales: 0,
+      qty: 0,
+      projectedSales: 0,
+      projectedQty: 0,
+    };
     t.sales += p.total_net_sales;
     t.qty += p.total_qty;
+    t.projectedSales += effectiveNetSales(p);
+    t.projectedQty += effectiveQty(p);
     periodTotals.set(p.period, t);
   }
 
@@ -286,11 +581,22 @@ export function computeGrowthMetrics(
   const prevPeriod = shiftPeriod(latestPeriod, grain, -1);
   const yoyPeriod = shiftPeriod(latestPeriod, grain, yoyDeltaFor(grain));
 
-  const cur = periodTotals.get(latestPeriod) ?? { sales: 0, qty: 0 };
+  const cur = periodTotals.get(latestPeriod) ?? {
+    sales: 0,
+    qty: 0,
+    projectedSales: 0,
+    projectedQty: 0,
+  };
   const prev = periodTotals.get(prevPeriod) ?? null;
   const yoy = periodTotals.get(yoyPeriod) ?? null;
 
-  const arpu = cur.qty > 0 ? cur.sales / cur.qty : null;
+  const isPartialPeriod = Boolean(
+    coverage?.isPartial && coverage.period === latestPeriod,
+  );
+  const compareSales = isPartialPeriod ? cur.projectedSales : cur.sales;
+  const compareQty = isPartialPeriod ? cur.projectedQty : cur.qty;
+
+  const arpu = cur.qty > 0 ? compareSales / compareQty : null;
   const prevArpu = prev && prev.qty > 0 ? prev.sales / prev.qty : null;
 
   const byFranchise = new Map<string, GrowthMover>();
@@ -329,10 +635,15 @@ export function computeGrowthMetrics(
     prevPeriod: prev ? prevPeriod : null,
     totalSales: cur.sales,
     totalQty: cur.qty,
-    salesMomPct: prev ? pctChange(cur.sales, prev.sales) : null,
-    qtyMomPct: prev ? pctChange(cur.qty, prev.qty) : null,
-    salesYoyPct: yoy ? pctChange(cur.sales, yoy.sales) : null,
-    qtyYoyPct: yoy ? pctChange(cur.qty, yoy.qty) : null,
+    projectedSales: isPartialPeriod ? cur.projectedSales : null,
+    projectedQty: isPartialPeriod ? cur.projectedQty : null,
+    isPartialPeriod,
+    periodCoverageHint:
+      isPartialPeriod && coverage ? formatPeriodCoverageHint(coverage) : null,
+    salesMomPct: prev ? pctChange(compareSales, prev.sales) : null,
+    qtyMomPct: prev ? pctChange(compareQty, prev.qty) : null,
+    salesYoyPct: yoy ? pctChange(compareSales, yoy.sales) : null,
+    qtyYoyPct: yoy ? pctChange(compareQty, yoy.qty) : null,
     arpu,
     arpuMomPct:
       arpu !== null && prevArpu !== null ? pctChange(arpu, prevArpu) : null,
@@ -391,9 +702,48 @@ export function latestPeriodGrowthRows(
         sales_mom_pct: null,
         qty_yoy_pct: null,
         sales_yoy_pct: null,
+        qty_mom_mtd_pct: null,
+        sales_mom_mtd_pct: null,
+        qty_yoy_mtd_pct: null,
+        sales_yoy_mtd_pct: null,
+        qty_mom_eom_pct: null,
+        sales_mom_eom_pct: null,
+        qty_yoy_eom_pct: null,
+        sales_yoy_eom_pct: null,
       };
     })
     .sort((a, b) => a.franchise_name.localeCompare(b.franchise_name));
+}
+
+export type GrowthPctKind = "mom_mtd" | "mom_eom" | "yoy_mtd" | "yoy_eom";
+
+export function growthPctForRow(
+  row: FranchiseGrowthPoint,
+  metric: "sales" | "qty",
+  kind: GrowthPctKind,
+): number | null {
+  if (metric === "sales") {
+    switch (kind) {
+      case "mom_mtd":
+        return row.sales_mom_mtd_pct ?? row.sales_mom_pct;
+      case "mom_eom":
+        return row.sales_mom_eom_pct ?? row.sales_mom_pct;
+      case "yoy_mtd":
+        return row.sales_yoy_mtd_pct ?? row.sales_yoy_pct;
+      case "yoy_eom":
+        return row.sales_yoy_eom_pct ?? row.sales_yoy_pct;
+    }
+  }
+  switch (kind) {
+    case "mom_mtd":
+      return row.qty_mom_mtd_pct ?? row.qty_mom_pct;
+    case "mom_eom":
+      return row.qty_mom_eom_pct ?? row.qty_mom_pct;
+    case "yoy_mtd":
+      return row.qty_yoy_mtd_pct ?? row.qty_yoy_pct;
+    case "yoy_eom":
+      return row.qty_yoy_eom_pct ?? row.qty_yoy_pct;
+  }
 }
 
 export function summarizeGrowth(points: FranchiseGrowthPoint[]) {

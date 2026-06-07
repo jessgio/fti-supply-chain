@@ -19,10 +19,15 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { formatCurrency, formatNumber, formatPct } from "@/lib/utils";
 import {
   computeGrowthMetrics,
+  growthPctForRow,
   latestPeriodGrowthRows,
-  sumGrowthAcrossChannels,
+  type GrowthPctKind,
 } from "@/lib/analytics/growth";
-import type { FranchiseGrowthPoint, TimeGrain } from "@/types/database";
+import type {
+  FranchiseGrowthPoint,
+  PeriodCoverage,
+  TimeGrain,
+} from "@/types/database";
 
 const grains: TimeGrain[] = ["day", "week", "month", "year"];
 
@@ -43,7 +48,11 @@ type SortKey =
   | "channel"
   | "value"
   | "mom"
-  | "yoy";
+  | "yoy"
+  | "mom_mtd"
+  | "mom_eom"
+  | "yoy_mtd"
+  | "yoy_eom";
 type SortDir = "asc" | "desc";
 
 function compareNullableNumber(
@@ -84,18 +93,78 @@ function compareGrowthRows(
       break;
     case "mom":
       return compareNullableNumber(
-        metric === "sales" ? a.sales_mom_pct : a.qty_mom_pct,
-        metric === "sales" ? b.sales_mom_pct : b.qty_mom_pct,
+        growthPctForRow(a, metric, "mom_eom"),
+        growthPctForRow(b, metric, "mom_eom"),
         dir,
       );
     case "yoy":
       return compareNullableNumber(
-        metric === "sales" ? a.sales_yoy_pct : a.qty_yoy_pct,
-        metric === "sales" ? b.sales_yoy_pct : b.qty_yoy_pct,
+        growthPctForRow(a, metric, "yoy_eom"),
+        growthPctForRow(b, metric, "yoy_eom"),
+        dir,
+      );
+    case "mom_mtd":
+      return compareNullableNumber(
+        growthPctForRow(a, metric, "mom_mtd"),
+        growthPctForRow(b, metric, "mom_mtd"),
+        dir,
+      );
+    case "mom_eom":
+      return compareNullableNumber(
+        growthPctForRow(a, metric, "mom_eom"),
+        growthPctForRow(b, metric, "mom_eom"),
+        dir,
+      );
+    case "yoy_mtd":
+      return compareNullableNumber(
+        growthPctForRow(a, metric, "yoy_mtd"),
+        growthPctForRow(b, metric, "yoy_mtd"),
+        dir,
+      );
+    case "yoy_eom":
+      return compareNullableNumber(
+        growthPctForRow(a, metric, "yoy_eom"),
+        growthPctForRow(b, metric, "yoy_eom"),
         dir,
       );
   }
   return dir === "asc" ? cmp : -cmp;
+}
+
+function pctClass(pct: number | null): string {
+  if (pct === null) return "text-stone-400";
+  if (pct > 0) return "text-emerald-700";
+  if (pct < 0) return "text-rose-700";
+  return "text-stone-600";
+}
+
+function GrowthPctCell({
+  row,
+  metric,
+  kind,
+  projectedLabel,
+}: {
+  row: FranchiseGrowthPoint;
+  metric: "sales" | "qty";
+  kind: GrowthPctKind;
+  projectedLabel: string;
+}) {
+  const pct = growthPctForRow(row, metric, kind);
+  const isProjected = kind.endsWith("_eom") && row.is_partial;
+  return (
+    <td
+      className={`py-2 pr-4 tabular-nums ${pctClass(pct)} ${isProjected ? "font-medium" : ""}`}
+      title={
+        isProjected
+          ? `${projectedLabel} run-rate projection vs prior period`
+          : kind.endsWith("_mtd")
+            ? "Month-to-date actual vs prior period"
+            : undefined
+      }
+    >
+      {formatPct(pct)}
+    </td>
+  );
 }
 
 function SortableHeader({
@@ -146,6 +215,7 @@ export default function SalesPage() {
   const [metric, setMetric] = useState<"sales" | "qty">("qty");
   const [chartView, setChartView] = useState<ChartView>("total");
   const [points, setPoints] = useState<FranchiseGrowthPoint[]>([]);
+  const [coverage, setCoverage] = useState<PeriodCoverage | null>(null);
   const [channels, setChannels] = useState<FilterOption[]>([]);
   const [franchises, setFranchises] = useState<FilterOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,7 +260,8 @@ export default function SalesPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to load");
         const raw: FranchiseGrowthPoint[] = data.points ?? [];
-        setPoints(channelId ? raw : sumGrowthAcrossChannels(raw, grain));
+        setPoints(raw);
+        setCoverage(data.coverage ?? null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load");
       } finally {
@@ -211,16 +282,24 @@ export default function SalesPage() {
   }, [points, franchises, franchiseId, channelId, sortKey, sortDir, metric]);
 
   const metrics = useMemo(
-    () => computeGrowthMetrics(points, grain, metric),
-    [points, grain, metric],
+    () => computeGrowthMetrics(points, grain, metric, coverage),
+    [points, grain, metric, coverage],
   );
 
   const isSales = metric === "sales";
   const headlineValue = isSales
     ? formatCurrency(metrics.totalSales)
     : `${formatNumber(metrics.totalQty)} units`;
+  const headlineProjected = isSales
+    ? metrics.projectedSales
+    : metrics.projectedQty;
   const headlineMom = isSales ? metrics.salesMomPct : metrics.qtyMomPct;
   const headlineYoy = isSales ? metrics.salesYoyPct : metrics.qtyYoyPct;
+  const projectedEndLabel =
+    grain === "week" ? "EOW" : grain === "month" ? "EOM" : "EOY";
+  const showSplitGrowth =
+    Boolean(coverage?.isPartial) &&
+    (grain === "month" || grain === "week");
 
   return (
     <PageShell wide={true}>
@@ -298,25 +377,33 @@ export default function SalesPage() {
             label={isSales ? "Latest net sales" : "Latest units"}
             value={headlineValue}
             hint={
-              metrics.latestPeriod
-                ? `Period ${metrics.latestPeriod}`
-                : undefined
+              metrics.isPartialPeriod && headlineProjected != null
+                ? `MTD · projected ${isSales ? formatCurrency(headlineProjected) : `${formatNumber(headlineProjected)} units`} ${projectedEndLabel}`
+                : metrics.latestPeriod
+                  ? `Period ${metrics.latestPeriod}`
+                  : undefined
             }
           />
           <StatCard
             label="MoM change"
             value={formatPct(headlineMom)}
             hint={
-              metrics.prevPeriod
-                ? `vs ${metrics.prevPeriod}`
-                : "No prior period"
+              metrics.isPartialPeriod
+                ? `Projected vs ${metrics.prevPeriod ?? "prior period"} · ${metrics.periodCoverageHint ?? ""}`
+                : metrics.prevPeriod
+                  ? `vs ${metrics.prevPeriod}`
+                  : "No prior period"
             }
             tone={momTone(headlineMom)}
           />
           <StatCard
             label="YoY change"
             value={formatPct(headlineYoy)}
-            hint="vs same period last year"
+            hint={
+              metrics.isPartialPeriod
+                ? "Projected vs same period last year"
+                : "vs same period last year"
+            }
             tone={momTone(headlineYoy)}
           />
           <StatCard
@@ -376,6 +463,12 @@ export default function SalesPage() {
               <CardDescription>
                 {metric === "sales" ? "Net sales" : "Units sold"} over time.
                 Switch views to declutter or compare composition.
+                {coverage?.isPartial &&
+                  grain === "month" &&
+                  " The dashed line projects month-end from the MTD run rate."}
+                {coverage?.isPartial &&
+                  grain === "week" &&
+                  " The dashed line projects week-end from the run rate."}
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -403,7 +496,12 @@ export default function SalesPage() {
               page.
             </p>
           ) : (
-            <GrowthChart data={points} metric={metric} view={chartView} />
+            <GrowthChart
+              data={points}
+              metric={metric}
+              view={chartView}
+              coverage={coverage}
+            />
           )}
         </CardContent>
       </Card>
@@ -411,7 +509,11 @@ export default function SalesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Growth table</CardTitle>
-          <CardDescription>Latest period MoM / YoY</CardDescription>
+          <CardDescription>
+            Latest period MoM / YoY
+            {showSplitGrowth &&
+              ` — MTD compares actuals to date; ${projectedEndLabel} uses the run-rate projection.`}
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -441,26 +543,61 @@ export default function SalesPage() {
                   />
                 ) : null}
                 <SortableHeader
-                  label={metric === "sales" ? "Net sales" : "Qty"}
+                  label={metric === "sales" ? "Net sales (MTD)" : "Qty (MTD)"}
                   columnKey="value"
                   activeKey={sortKey}
                   sortDir={sortDir}
                   onSort={handleSort}
                 />
-                <SortableHeader
-                  label="MoM"
-                  columnKey="mom"
-                  activeKey={sortKey}
-                  sortDir={sortDir}
-                  onSort={handleSort}
-                />
-                <SortableHeader
-                  label="YoY"
-                  columnKey="yoy"
-                  activeKey={sortKey}
-                  sortDir={sortDir}
-                  onSort={handleSort}
-                />
+                {showSplitGrowth ? (
+                  <>
+                    <SortableHeader
+                      label="MoM MTD"
+                      columnKey="mom_mtd"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label={`MoM ${projectedEndLabel}`}
+                      columnKey="mom_eom"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="YoY MTD"
+                      columnKey="yoy_mtd"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label={`YoY ${projectedEndLabel}`}
+                      columnKey="yoy_eom"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <SortableHeader
+                      label="MoM"
+                      columnKey="mom"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="YoY"
+                      columnKey="yoy"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -474,21 +611,48 @@ export default function SalesPage() {
                     {channelId ? (
                       <td className="py-2 pr-4">{row.channel_name}</td>
                     ) : null}
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-4 tabular-nums">
                     {metric === "sales"
                       ? formatCurrency(row.total_net_sales)
-                      : row.total_qty}
+                      : formatNumber(row.total_qty)}
                   </td>
-                  <td className="py-2 pr-4">
-                    {formatPct(
-                      metric === "sales" ? row.sales_mom_pct : row.qty_mom_pct,
-                    )}
-                  </td>
-                  <td className="py-2">
-                    {formatPct(
-                      metric === "sales" ? row.sales_yoy_pct : row.qty_yoy_pct,
-                    )}
-                  </td>
+                  {showSplitGrowth ? (
+                    <>
+                      <GrowthPctCell
+                        row={row}
+                        metric={metric}
+                        kind="mom_mtd"
+                        projectedLabel={projectedEndLabel}
+                      />
+                      <GrowthPctCell
+                        row={row}
+                        metric={metric}
+                        kind="mom_eom"
+                        projectedLabel={projectedEndLabel}
+                      />
+                      <GrowthPctCell
+                        row={row}
+                        metric={metric}
+                        kind="yoy_mtd"
+                        projectedLabel={projectedEndLabel}
+                      />
+                      <GrowthPctCell
+                        row={row}
+                        metric={metric}
+                        kind="yoy_eom"
+                        projectedLabel={projectedEndLabel}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <td className={`py-2 pr-4 tabular-nums ${pctClass(growthPctForRow(row, metric, "mom_eom"))}`}>
+                        {formatPct(growthPctForRow(row, metric, "mom_eom"))}
+                      </td>
+                      <td className={`py-2 pr-4 tabular-nums ${pctClass(growthPctForRow(row, metric, "yoy_eom"))}`}>
+                        {formatPct(growthPctForRow(row, metric, "yoy_eom"))}
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

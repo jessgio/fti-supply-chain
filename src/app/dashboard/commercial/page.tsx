@@ -13,7 +13,7 @@ import {
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import {
-  sumGrowthAcrossChannels,
+  computeGrowthMetrics,
   summarizeGrowth,
 } from "@/lib/analytics/growth";
 import {
@@ -24,11 +24,13 @@ import {
 import { formatCurrency, formatNumber, formatPct } from "@/lib/utils";
 import type {
   FranchiseGrowthPoint,
+  PeriodCoverage,
   RestockRecommendation,
 } from "@/types/database";
 
 export default function CommercialPage() {
   const [points, setPoints] = useState<FranchiseGrowthPoint[]>([]);
+  const [coverage, setCoverage] = useState<PeriodCoverage | null>(null);
   const [recommendations, setRecommendations] = useState<
     RestockRecommendation[]
   >([]);
@@ -48,6 +50,7 @@ export default function CommercialPage() {
         if (!growthRes.ok)
           throw new Error(growthData.error ?? "Failed to load growth");
         setPoints(growthData.points ?? []);
+        setCoverage(growthData.coverage ?? null);
 
         const forecastData = await forecastRes.json();
         if (forecastRes.ok) {
@@ -71,28 +74,25 @@ export default function CommercialPage() {
     [points],
   );
 
-  // Per-franchise monthly totals (summed across channels) with MoM/YoY.
-  const byFranchise = useMemo(() => {
-    const summed = sumGrowthAcrossChannels(points, "month");
-    return summarizeGrowth(summed);
-  }, [points]);
+  // Per-franchise monthly totals with MoM/YoY (API returns channel-aggregated rows).
+  const byFranchise = useMemo(() => summarizeGrowth(points), [points]);
 
-  const monthlyTotals = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const p of points) {
-      map.set(p.period, (map.get(p.period) ?? 0) + p.total_net_sales);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [points]);
+  const growthMetrics = useMemo(
+    () => computeGrowthMetrics(points, "month", "sales", coverage),
+    [points, coverage],
+  );
 
-  const headline = useMemo(() => {
-    const n = monthlyTotals.length;
-    const current = n > 0 ? monthlyTotals[n - 1][1] : 0;
-    const previous = n > 1 ? monthlyTotals[n - 2][1] : 0;
-    const momPct =
-      previous === 0 ? null : ((current - previous) / previous) * 100;
-    return { current, momPct, activeFranchises: byFranchise.length };
-  }, [monthlyTotals, byFranchise]);
+  const headline = useMemo(
+    () => ({
+      current: growthMetrics.totalSales,
+      projected: growthMetrics.projectedSales,
+      momPct: growthMetrics.salesMomPct,
+      isPartial: growthMetrics.isPartialPeriod,
+      coverageHint: growthMetrics.periodCoverageHint,
+      activeFranchises: byFranchise.length,
+    }),
+    [growthMetrics, byFranchise.length],
+  );
 
   const channelMix = useMemo(() => {
     const map = new Map<string, number>();
@@ -181,11 +181,20 @@ export default function CommercialPage() {
             <StatCard
               label="Net sales (latest month)"
               value={formatCurrency(headline.current)}
-              hint={latestPeriod}
+              hint={
+                headline.isPartial && headline.projected != null
+                  ? `MTD · projected ${formatCurrency(headline.projected)} EOM`
+                  : latestPeriod
+              }
             />
             <StatCard
               label="Net sales MoM"
               value={formatPct(headline.momPct)}
+              hint={
+                headline.isPartial
+                  ? `Projected · ${headline.coverageHint ?? ""}`
+                  : undefined
+              }
               tone={
                 headline.momPct == null
                   ? "default"
@@ -217,6 +226,7 @@ export default function CommercialPage() {
                 <CardTitle>Top franchises</CardTitle>
                 <CardDescription>
                   Latest month net sales with month-on-month growth
+                  {headline.isPartial && " (MoM uses projected month-end run rate)"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="overflow-x-auto">

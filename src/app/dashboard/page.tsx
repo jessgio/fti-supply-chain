@@ -10,9 +10,10 @@ import {
 } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadGrowthAnalytics } from "@/lib/analytics/growth-load";
+import { computeGrowthMetrics } from "@/lib/analytics/growth";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
-import { fetchAllRpc } from "@/lib/supabase/fetch-all";
-import { formatCurrency, formatNumber, formatPct, pctChange } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatPct } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -135,30 +136,11 @@ async function loadSalesMom(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<number | null> {
   try {
-    const rows = await fetchAllRpc<Record<string, unknown>>(
-      supabase,
-      "get_franchise_period_totals",
-      {
-        p_grain: "month",
-        p_from: null,
-        p_to: null,
-        p_channel_id: null,
-        p_franchise_id: null,
-      },
-    );
-    const byMonth = new Map<string, number>();
-    for (const row of rows) {
-      const month = String(row.sale_date).slice(0, 7);
-      byMonth.set(
-        month,
-        (byMonth.get(month) ?? 0) + Number(row.total_net_sales ?? 0),
-      );
-    }
-    const months = [...byMonth.keys()].sort();
-    if (months.length < 2) return null;
-    const current = byMonth.get(months[months.length - 1]) ?? 0;
-    const previous = byMonth.get(months[months.length - 2]) ?? 0;
-    return pctChange(current, previous);
+    const { points, coverage } = await loadGrowthAnalytics(supabase, {
+      grain: "month",
+    });
+    return computeGrowthMetrics(points, "month", "sales", coverage)
+      .salesMomPct;
   } catch {
     return null;
   }

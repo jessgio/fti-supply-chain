@@ -5,6 +5,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
   Tooltip,
@@ -12,7 +13,7 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import type { FranchiseGrowthPoint } from "@/types/database";
+import type { FranchiseGrowthPoint, PeriodCoverage } from "@/types/database";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 
 export type ChartView = "total" | "franchise" | "stacked";
@@ -21,9 +22,11 @@ interface GrowthChartProps {
   data: FranchiseGrowthPoint[];
   metric?: "sales" | "qty";
   view?: ChartView;
+  coverage?: PeriodCoverage | null;
 }
 
 const TOTAL_KEY = "__total";
+const PROJECTED_TOTAL_KEY = "__total_projected";
 const CHART_HEIGHT = 352;
 const DEFAULT_CHART_WIDTH = 960;
 
@@ -89,17 +92,35 @@ function GrowthTooltip({
   payload,
   label,
   metric,
-}: TooltipProps<number, string> & { metric: "sales" | "qty" }) {
+  coverage,
+}: TooltipProps<number, string> & {
+  metric: "sales" | "qty";
+  coverage?: PeriodCoverage | null;
+}) {
   if (!active || !payload?.length) return null;
 
   const formatValue = (v: number) =>
     metric === "sales" ? formatCurrency(v) : `${formatNumber(v)} units`;
 
   const rows = [...payload]
-    .filter((entry) => entry.value !== undefined && entry.value !== null)
+    .filter(
+      (entry) =>
+        entry.value !== undefined &&
+        entry.value !== null &&
+        entry.dataKey !== PROJECTED_TOTAL_KEY,
+    )
     .sort((a, b) => Number(b.value) - Number(a.value));
 
-  if (rows.length === 0) return null;
+  const projected = payload.find(
+    (entry) => entry.dataKey === PROJECTED_TOTAL_KEY,
+  );
+
+  if (rows.length === 0 && !projected?.value) return null;
+
+  const showProjected =
+    coverage?.isPartial &&
+    label === coverage.period &&
+    projected?.value != null;
 
   return (
     <div className="pointer-events-none rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs shadow-md">
@@ -107,7 +128,7 @@ function GrowthTooltip({
       <ul className="space-y-1">
         {rows.map((entry) => {
           const name = entry.name ?? entry.dataKey ?? "";
-          const displayName = name === TOTAL_KEY ? "Total" : String(name);
+          const displayName = name === TOTAL_KEY ? "Total (MTD)" : String(name);
           return (
             <li
               key={String(entry.dataKey ?? name)}
@@ -126,12 +147,27 @@ function GrowthTooltip({
             </li>
           );
         })}
+        {showProjected && (
+          <li className="flex items-center justify-between gap-6 border-t border-stone-100 pt-1">
+            <span className="flex min-w-0 items-center gap-1.5 text-stone-600">
+              <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-emerald-700 bg-emerald-50" />
+              <span className="truncate">Projected EOM</span>
+            </span>
+            <span className="shrink-0 font-medium tabular-nums text-emerald-800">
+              {formatValue(Number(projected!.value))}
+            </span>
+          </li>
+        )}
       </ul>
     </div>
   );
 }
 
-function chartAxes(metric: "sales" | "qty", denseXAxis: boolean) {
+function chartAxes(
+  metric: "sales" | "qty",
+  denseXAxis: boolean,
+  coverage?: PeriodCoverage | null,
+) {
   // Recharts + React 19: avoid Fragment wrappers as direct chart children.
   return [
     <CartesianGrid
@@ -170,6 +206,7 @@ function chartAxes(metric: "sales" | "qty", denseXAxis: boolean) {
           payload={payload as TooltipProps<number, string>["payload"]}
           label={label}
           metric={metric}
+          coverage={coverage}
         />
       )}
       cursor={{ stroke: "#78716c", strokeWidth: 1, strokeDasharray: "4 4" }}
@@ -183,13 +220,19 @@ export function GrowthChart({
   data,
   metric = "sales",
   view = "total",
+  coverage = null,
 }: GrowthChartProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const { ref, width } = useChartWidth();
 
   const { series, franchises } = useMemo(() => {
     const franchiseList = [...new Set(data.map((d) => d.franchise_name))].sort();
-    const merged = new Map<string, Record<string, number | string>>();
+    const merged = new Map<string, Record<string, number | string | null>>();
+    const scale =
+      coverage?.isPartial && coverage.daysElapsed > 0
+        ? coverage.daysInPeriod / coverage.daysElapsed
+        : null;
+
     for (const d of data) {
       const value = metric === "sales" ? d.total_net_sales : d.total_qty;
       const row = merged.get(d.period) ?? { period: d.period };
@@ -197,16 +240,26 @@ export function GrowthChart({
       merged.set(d.period, row);
     }
     const series = [...merged.values()]
-      .map((row): Record<string, number | string> => {
+      .map((row): Record<string, number | string | null> => {
         const total = franchiseList.reduce(
           (sum, name) => sum + Number(row[name] ?? 0),
           0,
         );
-        return { ...row, [TOTAL_KEY]: total };
+        const projectedTotal =
+          scale != null &&
+          coverage?.isPartial &&
+          row.period === coverage.period
+            ? total * scale
+            : null;
+        return {
+          ...row,
+          [TOTAL_KEY]: total,
+          [PROJECTED_TOTAL_KEY]: projectedTotal,
+        };
       })
       .sort((a, b) => String(a.period).localeCompare(String(b.period)));
     return { series, franchises: franchiseList };
-  }, [data, metric]);
+  }, [data, metric, coverage]);
 
   const denseXAxis = series.length > 10;
   const chartMargin = {
@@ -227,11 +280,11 @@ export function GrowthChart({
   const colorFor = (name: string) =>
     PALETTE[franchises.indexOf(name) % PALETTE.length];
 
-  const axes = chartAxes(metric, denseXAxis);
+  const axes = chartAxes(metric, denseXAxis, coverage);
 
   const chartBody =
     view === "total" ? (
-      <AreaChart
+      <ComposedChart
         width={width}
         height={CHART_HEIGHT}
         data={series}
@@ -247,14 +300,27 @@ export function GrowthChart({
         <Area
           type="monotone"
           dataKey={TOTAL_KEY}
-          name="Total"
+          name="Total (MTD)"
           stroke="#047857"
           strokeWidth={2.5}
           fill="url(#totalFill)"
           dot={false}
           activeDot={ACTIVE_DOT}
         />
-      </AreaChart>
+        {coverage?.isPartial && (
+          <Line
+            type="monotone"
+            dataKey={PROJECTED_TOTAL_KEY}
+            name="Projected EOM"
+            stroke="#047857"
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            dot={{ r: 4, strokeWidth: 2, fill: "#ecfdf5" }}
+            connectNulls={false}
+            activeDot={ACTIVE_DOT}
+          />
+        )}
+      </ComposedChart>
     ) : view === "stacked" ? (
       <AreaChart
         width={width}
@@ -310,6 +376,13 @@ export function GrowthChart({
       >
         {chartBody}
       </div>
+
+      {coverage?.isPartial && view === "total" && (
+        <p className="text-xs text-stone-500">
+          Dashed line projects period-end from the MTD run rate (
+          {coverage.daysElapsed} of {coverage.daysInPeriod} days reported).
+        </p>
+      )}
 
       {view !== "total" && franchises.length > 1 && (
         <div className="flex flex-wrap gap-2">

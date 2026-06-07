@@ -108,10 +108,33 @@ export interface FranchiseGrowthPoint {
   channel_name: string;
   total_qty: number;
   total_net_sales: number;
+  /** Run-rate EOM projection when the period is still in progress. */
+  projected_qty?: number | null;
+  projected_net_sales?: number | null;
+  is_partial?: boolean;
+  /** Raw MTD comparison vs prior period. */
+  qty_mom_mtd_pct?: number | null;
+  sales_mom_mtd_pct?: number | null;
+  qty_yoy_mtd_pct?: number | null;
+  sales_yoy_mtd_pct?: number | null;
+  /** Run-rate projected comparison vs prior period (same as MoM/YoY when period is complete). */
+  qty_mom_eom_pct?: number | null;
+  sales_mom_eom_pct?: number | null;
+  qty_yoy_eom_pct?: number | null;
+  sales_yoy_eom_pct?: number | null;
   qty_mom_pct: number | null;
   sales_mom_pct: number | null;
   qty_yoy_pct: number | null;
   sales_yoy_pct: number | null;
+}
+
+/** Coverage of sales data within a period (from daily rows). */
+export interface PeriodCoverage {
+  period: string;
+  isPartial: boolean;
+  lastSaleDate: string | null;
+  daysElapsed: number;
+  daysInPeriod: number;
 }
 
 export type VelocityClass = "fast" | "normal" | "slow";
