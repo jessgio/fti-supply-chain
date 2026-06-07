@@ -67,6 +67,78 @@ async function resolveSkuId(
   return skuId;
 }
 
+const SKU_LOOKUP_CHUNK = 500;
+
+/** Resolve many SKU codes with batched selects + upserts instead of per-row queries. */
+async function ensureSkuIdsInCache(
+  supabase: SupabaseClient,
+  cache: Map<string, string>,
+  skuCodes: string[],
+): Promise<void> {
+  const unique = [...new Set(skuCodes.filter(Boolean))];
+  if (unique.length === 0) return;
+
+  for (let i = 0; i < unique.length; i += SKU_LOOKUP_CHUNK) {
+    const chunk = unique.slice(i, i + SKU_LOOKUP_CHUNK);
+    const { data, error } = await supabase
+      .from("skus")
+      .select("id, sku_code")
+      .in("sku_code", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      cache.set(row.sku_code, row.id);
+    }
+  }
+
+  const missing = unique.filter((code) => !cache.has(code));
+  for (let i = 0; i < missing.length; i += SKU_LOOKUP_CHUNK) {
+    const chunk = missing.slice(i, i + SKU_LOOKUP_CHUNK);
+    const { error: insertError } = await supabase.from("skus").upsert(
+      chunk.map((sku_code) => ({
+        sku_code,
+        name: sku_code,
+        is_bundle: false,
+      })),
+      { onConflict: "sku_code", ignoreDuplicates: true },
+    );
+    if (insertError) throw insertError;
+
+    const { data, error } = await supabase
+      .from("skus")
+      .select("id, sku_code")
+      .in("sku_code", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      cache.set(row.sku_code, row.id);
+    }
+  }
+}
+
+async function applyRetailPrices(
+  supabase: SupabaseClient,
+  retailBySku: Map<string, number>,
+  skuCache: Map<string, string>,
+): Promise<void> {
+  const updates = [...retailBySku.entries()].flatMap(([skuCode, retailPrice]) => {
+    const skuId = skuCache.get(skuCode);
+    return skuId ? [{ skuId, retailPrice }] : [];
+  });
+  const batchSize = 50;
+  for (let i = 0; i < updates.length; i += batchSize) {
+    await Promise.all(
+      updates.slice(i, i + batchSize).map(({ skuId, retailPrice }) =>
+        supabase
+          .from("skus")
+          .update({ retail_price: retailPrice })
+          .eq("id", skuId)
+          .then(({ error }) => {
+            if (error) throw error;
+          }),
+      ),
+    );
+  }
+}
+
 async function upsertSku(
   supabase: SupabaseClient,
   skuCode: string,
@@ -377,6 +449,12 @@ export async function importStock(
 
   const skuCache = new Map<string, string>();
   const retailBySku = new Map<string, number>();
+  await ensureSkuIdsInCache(
+    supabase,
+    skuCache,
+    aggregated.map((row) => row.sku_code),
+  );
+
   const chunkSize = 2000;
   let chunk: {
     sku_id: string;
@@ -396,7 +474,10 @@ export async function importStock(
   }
 
   for (const row of aggregated) {
-    const skuId = await resolveSkuId(supabase, skuCache, row.sku_code);
+    const skuId = skuCache.get(row.sku_code);
+    if (!skuId) {
+      throw new Error(`SKU not found after import: ${row.sku_code}`);
+    }
 
     if (row.retail_price && row.retail_price > 0) {
       const current = retailBySku.get(row.sku_code) ?? 0;
@@ -420,14 +501,7 @@ export async function importStock(
 
   await flushChunk();
 
-  for (const [skuCode, retailPrice] of retailBySku) {
-    const skuId = skuCache.get(skuCode);
-    if (!skuId) continue;
-    await supabase
-      .from("skus")
-      .update({ retail_price: retailPrice })
-      .eq("id", skuId);
-  }
+  await applyRetailPrices(supabase, retailBySku, skuCache);
 
   return { batchId: batch.id, rowCount: aggregated.length };
 }

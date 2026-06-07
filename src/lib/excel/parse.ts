@@ -227,33 +227,33 @@ function parseWmsStockRows(
   rows: Record<string, unknown>[],
   asOfDate: string,
 ): StockRow[] {
-  return rows
-    .filter((row) => !isArchivedStockRow(row))
-    .map((row) => {
-      const skuCode = String(pick(row, ["sku", "sku_code"]) ?? "").trim();
-      const location = String(pick(row, ["lokasi", "location"]) ?? "").trim();
-      const retailPrice = toNumber(
-        pick(row, ["harga jual", "hargajual", "harga", "retail_price", "rsp"]),
-      );
-      const qtyOnHand = pickTersediaQty(row);
-      if (qtyOnHand === null) return null;
+  const result: StockRow[] = [];
+  for (const row of rows) {
+    if (isArchivedStockRow(row)) continue;
 
-      const parsed = stockSchema.safeParse({
-        sku_code: skuCode,
-        location,
-        qty_on_hand: qtyOnHand,
-        as_of_date: asOfDate,
-        retail_price: retailPrice > 0 ? retailPrice : undefined,
-      });
-      return parsed.success ? parsed.data : null;
-    })
-    .filter(
-      (row): row is StockRow =>
-        row !== null &&
-        row.sku_code.length > 0 &&
-        row.sku_code !== "-" &&
-        isStockImportLocation(row.location),
+    const location = String(pick(row, ["lokasi", "location"]) ?? "").trim();
+    if (!isStockImportLocation(location)) continue;
+
+    const skuCode = String(pick(row, ["sku", "sku_code"]) ?? "").trim();
+    if (!skuCode || skuCode === "-") continue;
+
+    const qtyOnHand = pickTersediaQty(row);
+    if (qtyOnHand === null) continue;
+
+    const retailPrice = toNumber(
+      pick(row, ["harga jual", "hargajual", "harga", "retail_price", "rsp"]),
     );
+
+    const parsed = stockSchema.safeParse({
+      sku_code: skuCode,
+      location,
+      qty_on_hand: qtyOnHand,
+      as_of_date: asOfDate,
+      retail_price: retailPrice > 0 ? retailPrice : undefined,
+    });
+    if (parsed.success) result.push(parsed.data);
+  }
+  return result;
 }
 
 export function parseStockExcel(
