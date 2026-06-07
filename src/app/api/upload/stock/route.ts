@@ -4,7 +4,7 @@ import { importStock } from "@/lib/db/uploads";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
-import { stockAggregateLocationsLabel } from "@/lib/stock/locations";
+import { stockImportLocationsLabel } from "@/lib/stock/locations";
 
 export const maxDuration = 300;
 
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            `No valid stock rows found. Required columns: SKU, Lokasi, Tersedia (${stockAggregateLocationsLabel()} only).`,
+            `No valid stock rows found. Required columns: SKU, Lokasi, Tersedia (${stockImportLocationsLabel()} only).`,
         },
         { status: 400 },
       );

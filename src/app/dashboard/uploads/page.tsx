@@ -1,5 +1,5 @@
 import { UploadCard } from "@/components/dashboard/upload-card";
-import { stockAggregateLocationsLabel } from "@/lib/stock/locations";
+import { stockImportLocationsLabel } from "@/lib/stock/locations";
 
 export default function UploadsPage() {
   return (
@@ -25,7 +25,7 @@ export default function UploadsPage() {
         />
         <UploadCard
           title="Stock levels"
-          description={`Upload your WMS export (FTI Stock.xlsx): sheet Data1 with SKU, Lokasi, and Tersedia (not QTY). Negative Tersedia is kept — it reflects on-order qty, not available stock. Only ${stockAggregateLocationsLabel()} are imported. Archived rows are skipped; snapshot date = upload day.`}
+          description={`Upload your WMS export (FTI Stock.xlsx): sheet Data1 with SKU, Lokasi, and Tersedia (not QTY). Negative Tersedia is kept — it reflects on-order qty, not available stock. Only ${stockImportLocationsLabel()} are imported. Archived rows are skipped; snapshot date = upload day.`}
           endpoint="/api/upload/stock"
         />
       </div>

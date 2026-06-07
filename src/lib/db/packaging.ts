@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
+import { PACKAGING_STOCK_LOCATION } from "@/lib/stock/locations";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import type { PackagingPoLine, PackagingSkuRow } from "@/types/database";
 
@@ -24,7 +24,7 @@ async function latestStockDate(
   const { data, error } = await supabase
     .from("stock_levels")
     .select("as_of_date")
-    .in("location", [...STOCK_AGGREGATE_LOCATIONS])
+    .eq("location", PACKAGING_STOCK_LOCATION)
     .order("as_of_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -66,7 +66,7 @@ export async function listPackagingOverview(
         .select("sku_id, qty_on_hand")
         .in("sku_id", skuIds)
         .eq("as_of_date", stockAsOf)
-        .in("location", [...STOCK_AGGREGATE_LOCATIONS]),
+        .eq("location", PACKAGING_STOCK_LOCATION),
     );
     for (const row of stockRows) {
       stockBySku.set(

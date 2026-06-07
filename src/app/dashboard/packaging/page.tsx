@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { formatNumber } from "@/lib/utils";
+import { PACKAGING_STOCK_LOCATION, STOCK_QTY_COLUMN } from "@/lib/stock/locations";
 import type {
   PackagingPoLine,
   PackagingSkuRow,
@@ -171,8 +172,9 @@ export default function PackagingPage() {
         </div>
         <p className="mt-1 max-w-3xl text-stone-600">
           Track primary packaging inventory (UB, EFLUTE, JAR, PUMP, etc.) and
-          purchase orders before components go to the manufacturer. Stock comes
-          from the WMS upload; POs are managed in Procurement.
+          purchase orders before components go to the manufacturer. On-hand stock
+          comes from {PACKAGING_STOCK_LOCATION} ({STOCK_QTY_COLUMN} column in the
+          WMS upload); POs are managed in Procurement.
         </p>
       </div>
 
@@ -196,7 +198,9 @@ export default function PackagingPage() {
           label="On hand"
           value={formatNumber(summary.totalOnHand)}
           hint={
-            stockAsOf ? `Stock as of ${stockAsOf}` : "Upload stock file first"
+            stockAsOf
+              ? `${PACKAGING_STOCK_LOCATION} · ${stockAsOf}`
+              : `Upload WMS stock for ${PACKAGING_STOCK_LOCATION}`
           }
         />
         <StatCard
@@ -220,8 +224,8 @@ export default function PackagingPage() {
           <div>
             <CardTitle>Packaging inventory</CardTitle>
             <CardDescription>
-              On-hand from WMS aggregate locations plus units already on open
-              POs.
+              On-hand from {PACKAGING_STOCK_LOCATION} (WMS {STOCK_QTY_COLUMN})
+              plus units already on open POs.
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={refreshAll}>

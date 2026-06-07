@@ -3,7 +3,7 @@ import { z } from "zod";
 import { parseExcelDate } from "@/lib/excel/date-parse";
 import { isIncludedWmsSalesRow } from "@/lib/excel/sales-filters";
 import {
-  isStockAggregateLocation,
+  isStockImportLocation,
   STOCK_QTY_COLUMN,
 } from "@/lib/stock/locations";
 import type {
@@ -252,7 +252,7 @@ function parseWmsStockRows(
         row !== null &&
         row.sku_code.length > 0 &&
         row.sku_code !== "-" &&
-        isStockAggregateLocation(row.location),
+        isStockImportLocation(row.location),
     );
 }
 
@@ -298,7 +298,7 @@ export function parseStockExcel(
         row !== null &&
         row.sku_code.length > 0 &&
         row.sku_code !== "-" &&
-        isStockAggregateLocation(row.location),
+        isStockImportLocation(row.location),
     );
 }
 
