@@ -115,6 +115,10 @@ export interface RestockRecommendation {
   seasonal_uplift_reasons: string[];
   days_until_stockout: number | null;
   projected_stockout_date: string | null;
+  /** Expected arrival of the latest open PO batch (when POs exist). */
+  incoming_batch_arrival_date: string | null;
+  /** When the latest incoming PO batch runs out after current stock is consumed (FIFO). */
+  incoming_batch_stockout_date: string | null;
   recommended_restock_qty: number;
   reorder_point: number;
   safety_stock: number;

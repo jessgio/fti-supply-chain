@@ -7,6 +7,7 @@ import {
   DEFAULT_TARGET_STOCK_MONTHS,
   type SkuForecastInput,
 } from "@/lib/forecast/demand";
+import { enrichWithIncomingBatchStockout } from "@/lib/forecast/pipeline-stockout";
 import type { RestockRecommendation } from "@/types/database";
 
 export interface ForecastParams {
@@ -83,10 +84,13 @@ export async function loadRestockRecommendations(
     onOrderBySku.set(String(row.sku_code), Number(row.on_order_qty));
   }
 
-  const recommendations = buildRestockPlanFromSeries(
-    inputs,
-    { leadTimeDays, safetyStockMonths, targetStockMonths },
-    onOrderBySku,
+  const recommendations = await enrichWithIncomingBatchStockout(
+    supabase,
+    buildRestockPlanFromSeries(
+      inputs,
+      { leadTimeDays, safetyStockMonths, targetStockMonths },
+      onOrderBySku,
+    ),
   );
 
   return { recommendations, skuCount: inputs.length };

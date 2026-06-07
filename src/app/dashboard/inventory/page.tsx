@@ -95,6 +95,7 @@ type SortKey =
   | "forecast_monthly_demand"
   | "days_until_stockout"
   | "projected_stockout_date"
+  | "incoming_batch_stockout_date"
   | "reorder_point"
   | "recommended_restock_qty"
   | "confidence";
@@ -163,6 +164,15 @@ function compareRows(
     case "projected_stockout_date": {
       const aDate = a.projected_stockout_date ?? "";
       const bDate = b.projected_stockout_date ?? "";
+      if (!aDate && !bDate) cmp = 0;
+      else if (!aDate) cmp = 1;
+      else if (!bDate) cmp = -1;
+      else cmp = aDate.localeCompare(bDate);
+      break;
+    }
+    case "incoming_batch_stockout_date": {
+      const aDate = a.incoming_batch_stockout_date ?? "";
+      const bDate = b.incoming_batch_stockout_date ?? "";
       if (!aDate && !bDate) cmp = 0;
       else if (!aDate) cmp = 1;
       else if (!bDate) cmp = -1;
@@ -441,8 +451,10 @@ export default function InventoryPage() {
               <CardDescription>
                 Click column headers to sort; use filters below each label to
                 narrow results. Velocity = franchise rank by Fcst/day (includes
-                Ramadan / Q4 uplift when in the reorder window). Restock qty is
-                the standard {DEFAULT_TARGET_STOCK_MONTHS}-month batch.
+                Ramadan / Q4 uplift when in the reorder window). Stockout is
+                on-hand only; Batch stockout projects when the latest incoming
+                PO batch runs out after current stock (FIFO). Restock qty is the
+                standard {DEFAULT_TARGET_STOCK_MONTHS}-month batch.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -634,8 +646,15 @@ export default function InventoryPage() {
                       onSort={handleSort}
                     />
                     <SortableHeader
-                      label="Stockout"
+                      label="On-hand stockout"
                       columnKey="projected_stockout_date"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
+                      label="Batch stockout"
+                      columnKey="incoming_batch_stockout_date"
                       activeKey={sortKey}
                       sortDir={sortDir}
                       onSort={handleSort}
@@ -747,6 +766,18 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-2 pr-4">
                         {row.projected_stockout_date ?? "—"}
+                      </td>
+                      <td
+                        className="py-2 pr-4"
+                        title={
+                          row.incoming_batch_arrival_date
+                            ? `Latest batch arrives ${row.incoming_batch_arrival_date}; depletes after current stock is consumed`
+                            : row.on_order_qty > 0
+                              ? "Set PO expected date to project batch stockout"
+                              : undefined
+                        }
+                      >
+                        {row.incoming_batch_stockout_date ?? "—"}
                       </td>
                       <td className="py-2 pr-4">
                         {formatNumber(row.reorder_point)}
