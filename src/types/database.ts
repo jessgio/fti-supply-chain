@@ -1,0 +1,164 @@
+export type UploadType = "sales" | "stock" | "mappings";
+
+export type TimeGrain = "day" | "week" | "month" | "year";
+
+export interface ProductFranchise {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface SalesChannel {
+  id: string;
+  name: string;
+}
+
+export interface Sku {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  franchise_id: string | null;
+  is_bundle: boolean;
+  is_active: boolean;
+  retail_price: number | null;
+}
+
+export interface BundleComponent {
+  bundle_sku_code: string;
+  component_sku_code: string;
+  qty_per_bundle: number;
+}
+
+export interface SalesRow {
+  sale_date: string;
+  channel: string;
+  sku_code: string;
+  qty_sold: number;
+  net_sales: number;
+  retail_price?: number;
+}
+
+export interface StockRow {
+  sku_code: string;
+  location: string;
+  qty_on_hand: number;
+  as_of_date: string;
+  retail_price?: number;
+}
+
+export interface MappingRow {
+  sku_code: string;
+  franchise_name: string;
+  sku_name?: string;
+}
+
+export interface FranchiseGrowthPoint {
+  period: string;
+  franchise_id: string;
+  franchise_name: string;
+  channel_id: string;
+  channel_name: string;
+  total_qty: number;
+  total_net_sales: number;
+  qty_mom_pct: number | null;
+  sales_mom_pct: number | null;
+  qty_yoy_pct: number | null;
+  sales_yoy_pct: number | null;
+}
+
+export type VelocityClass = "fast" | "normal" | "slow";
+export type DemandPattern = "npd" | "volatile" | "steady";
+
+export interface RestockRecommendation {
+  sku_code: string;
+  franchise_name: string | null;
+  /** Fast / normal / slow vs other SKUs in the same franchise (Fcst/day tertiles). */
+  velocity_class: VelocityClass;
+  /** NPD (< 3 mo since launch), volatile, or steady monthly demand. */
+  demand_pattern: DemandPattern;
+  first_sale_date: string | null;
+  current_stock: number;
+  on_order_qty: number;
+  covered_by_po: boolean;
+  /** True when on-hand + on-order inventory is at or below the reorder point. */
+  needs_reorder: boolean;
+  avg_daily_demand: number;
+  /** L3M/L6M blend before Ramadan / Q4 uplift. */
+  base_forecast_daily_demand: number;
+  forecast_daily_demand: number;
+  /** 1 = no uplift; >1 when reorder window overlaps Ramadan or Q4. */
+  seasonal_uplift_multiplier: number;
+  seasonal_uplift_reasons: string[];
+  days_until_stockout: number | null;
+  projected_stockout_date: string | null;
+  recommended_restock_qty: number;
+  reorder_point: number;
+  safety_stock: number;
+  lead_time_days: number;
+  reorder_lead_days: number;
+  confidence: "low" | "medium" | "high";
+}
+
+export interface ForecastInsight {
+  summary: string;
+  highlights: string[];
+  risks: string[];
+}
+
+export type PoStatus =
+  | "planned"
+  | "ordered"
+  | "in_transit"
+  | "received"
+  | "cancelled";
+
+export interface Supplier {
+  id: string;
+  name: string;
+  lead_time_days: number;
+  contact: string | null;
+  notes: string | null;
+  created_at?: string;
+}
+
+export interface PurchaseOrderLine {
+  id: string;
+  po_id: string;
+  sku_id: string;
+  sku_code?: string;
+  sku_name?: string | null;
+  qty_ordered: number;
+  qty_received: number;
+  unit_cost: number | null;
+  receipts?: PoReceipt[];
+}
+
+export interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  supplier_id: string | null;
+  supplier_name?: string | null;
+  status: PoStatus;
+  order_date: string | null;
+  expected_date: string | null;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+  lines?: PurchaseOrderLine[];
+}
+
+export interface PoReceipt {
+  id: string;
+  po_line_id: string;
+  qty_received: number;
+  received_date: string;
+  location: string;
+}
+
+export type UserRole = "admin" | "supply_chain" | "sales_marketing" | "viewer";
+
+export interface Profile {
+  id: string;
+  full_name: string | null;
+  role: UserRole;
+}

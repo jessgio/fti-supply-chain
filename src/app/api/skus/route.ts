@@ -1,0 +1,40 @@
+import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { errorMessage } from "@/lib/errors";
+
+export async function GET() {
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("skus")
+      .select(
+        "id, sku_code, name, is_bundle, is_active, franchise_id, product_franchises(name)",
+      )
+      .or("franchise_id.not.is.null,is_bundle.eq.true")
+      .order("sku_code");
+    if (error) throw error;
+
+    const skus = (data ?? []).map((row) => {
+      const franchise = row.product_franchises as unknown as
+        | { name: string }
+        | { name: string }[]
+        | null;
+      const franchiseName = Array.isArray(franchise)
+        ? (franchise[0]?.name ?? null)
+        : (franchise?.name ?? null);
+      return {
+        id: row.id,
+        sku_code: row.sku_code,
+        name: row.name,
+        is_bundle: row.is_bundle,
+        is_active: row.is_active,
+        franchise_id: row.franchise_id,
+        franchise_name: franchiseName,
+      };
+    });
+
+    return NextResponse.json({ skus });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
