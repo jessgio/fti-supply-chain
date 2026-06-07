@@ -95,6 +95,8 @@ export function aggregateGrowthForView(
   points: FranchiseGrowthPoint[],
   grain: TimeGrain,
   channelId: string,
+  aggregateChannels = true,
 ): FranchiseGrowthPoint[] {
-  return channelId ? points : sumGrowthAcrossChannels(points, grain);
+  if (channelId || !aggregateChannels) return points;
+  return sumGrowthAcrossChannels(points, grain);
 }

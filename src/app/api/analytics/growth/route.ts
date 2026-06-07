@@ -17,6 +17,8 @@ export async function GET(request: Request) {
     const franchiseId = searchParams.get("franchise_id");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
+    const aggregateChannels =
+      searchParams.get("aggregate_channels") !== "false";
 
     const supabase = createAdminClient();
     const { points, coverage } = await loadGrowthAnalytics(supabase, {
@@ -27,7 +29,12 @@ export async function GET(request: Request) {
       to,
     });
 
-    const viewPoints = aggregateGrowthForView(points, grain, channelId ?? "");
+    const viewPoints = aggregateGrowthForView(
+      points,
+      grain,
+      channelId ?? "",
+      aggregateChannels,
+    );
 
     return NextResponse.json({ grain, points: viewPoints, coverage });
   } catch (error) {

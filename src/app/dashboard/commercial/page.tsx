@@ -14,6 +14,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import {
   computeGrowthMetrics,
+  sumGrowthAcrossChannels,
   summarizeGrowth,
 } from "@/lib/analytics/growth";
 import {
@@ -43,7 +44,7 @@ export default function CommercialPage() {
       setError(null);
       try {
         const [growthRes, forecastRes] = await Promise.all([
-          fetch("/api/analytics/growth?grain=month"),
+          fetch("/api/analytics/growth?grain=month&aggregate_channels=false"),
           fetch("/api/forecast"),
         ]);
         const growthData = await growthRes.json();
@@ -74,11 +75,20 @@ export default function CommercialPage() {
     [points],
   );
 
-  // Per-franchise monthly totals with MoM/YoY (API returns channel-aggregated rows).
-  const byFranchise = useMemo(() => summarizeGrowth(points), [points]);
+  // Per-franchise totals (channels summed); channel mix uses per-channel rows below.
+  const byFranchise = useMemo(
+    () => summarizeGrowth(sumGrowthAcrossChannels(points, "month")),
+    [points],
+  );
 
   const growthMetrics = useMemo(
-    () => computeGrowthMetrics(points, "month", "sales", coverage),
+    () =>
+      computeGrowthMetrics(
+        sumGrowthAcrossChannels(points, "month"),
+        "month",
+        "sales",
+        coverage,
+      ),
     [points, coverage],
   );
 
