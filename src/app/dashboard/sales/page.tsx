@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import {
   GrowthChart,
   type ChartView,
@@ -36,6 +37,103 @@ function momTone(pct: number | null) {
   return pct >= 0 ? ("success" as const) : ("danger" as const);
 }
 
+type SortKey =
+  | "period"
+  | "franchise"
+  | "channel"
+  | "value"
+  | "mom"
+  | "yoy";
+type SortDir = "asc" | "desc";
+
+function compareNullableNumber(
+  a: number | null,
+  b: number | null,
+  dir: SortDir,
+): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  const cmp = a - b;
+  return dir === "asc" ? cmp : -cmp;
+}
+
+function compareGrowthRows(
+  a: FranchiseGrowthPoint,
+  b: FranchiseGrowthPoint,
+  key: SortKey,
+  dir: SortDir,
+  metric: "sales" | "qty",
+): number {
+  let cmp = 0;
+  switch (key) {
+    case "period":
+      cmp = a.period.localeCompare(b.period);
+      break;
+    case "franchise":
+      cmp = a.franchise_name.localeCompare(b.franchise_name);
+      break;
+    case "channel":
+      cmp = a.channel_name.localeCompare(b.channel_name);
+      break;
+    case "value":
+      cmp =
+        metric === "sales"
+          ? a.total_net_sales - b.total_net_sales
+          : a.total_qty - b.total_qty;
+      break;
+    case "mom":
+      return compareNullableNumber(
+        metric === "sales" ? a.sales_mom_pct : a.qty_mom_pct,
+        metric === "sales" ? b.sales_mom_pct : b.qty_mom_pct,
+        dir,
+      );
+    case "yoy":
+      return compareNullableNumber(
+        metric === "sales" ? a.sales_yoy_pct : a.qty_yoy_pct,
+        metric === "sales" ? b.sales_yoy_pct : b.qty_yoy_pct,
+        dir,
+      );
+  }
+  return dir === "asc" ? cmp : -cmp;
+}
+
+function SortableHeader({
+  label,
+  columnKey,
+  activeKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  columnKey: SortKey;
+  activeKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = activeKey === columnKey;
+  return (
+    <th className="py-2 pr-4">
+      <button
+        type="button"
+        className="flex items-center gap-1 whitespace-nowrap text-left font-medium text-stone-500 hover:text-stone-800"
+        onClick={() => onSort(columnKey)}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? (
+            <ArrowUp className="h-3 w-3 shrink-0" />
+          ) : (
+            <ArrowDown className="h-3 w-3 shrink-0" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 interface FilterOption {
   id: string;
   name: string;
@@ -52,6 +150,17 @@ export default function SalesPage() {
   const [franchises, setFranchises] = useState<FilterOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("franchise");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
 
   useEffect(() => {
     async function loadMeta() {
@@ -91,14 +200,15 @@ export default function SalesPage() {
     load();
   }, [grain, channelId, franchiseId]);
 
-  const tableRows = useMemo(
-    () =>
-      latestPeriodGrowthRows(points, {
-        franchises: franchiseId || channelId ? undefined : franchises,
-        includeZeroSales: !franchiseId && !channelId,
-      }),
-    [points, franchises, franchiseId, channelId],
-  );
+  const tableRows = useMemo(() => {
+    const rows = latestPeriodGrowthRows(points, {
+      franchises: franchiseId || channelId ? undefined : franchises,
+      includeZeroSales: !franchiseId && !channelId,
+    });
+    return [...rows].sort((a, b) =>
+      compareGrowthRows(a, b, sortKey, sortDir, metric),
+    );
+  }, [points, franchises, franchiseId, channelId, sortKey, sortDir, metric]);
 
   const metrics = useMemo(
     () => computeGrowthMetrics(points, grain, metric),
@@ -307,14 +417,50 @@ export default function SalesPage() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-stone-200 text-stone-500">
-                <th className="py-2 pr-4">Period</th>
-                <th className="py-2 pr-4">Franchise</th>
-                  {channelId ? <th className="py-2 pr-4">Channel</th> : null}
-                <th className="py-2 pr-4">
-                  {metric === "sales" ? "Net sales" : "Qty"}
-                </th>
-                <th className="py-2 pr-4">MoM</th>
-                <th className="py-2">YoY</th>
+                <SortableHeader
+                  label="Period"
+                  columnKey="period"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Franchise"
+                  columnKey="franchise"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                />
+                {channelId ? (
+                  <SortableHeader
+                    label="Channel"
+                    columnKey="channel"
+                    activeKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                ) : null}
+                <SortableHeader
+                  label={metric === "sales" ? "Net sales" : "Qty"}
+                  columnKey="value"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="MoM"
+                  columnKey="mom"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="YoY"
+                  columnKey="yoy"
+                  activeKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                />
               </tr>
             </thead>
             <tbody>
