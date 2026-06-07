@@ -58,6 +58,7 @@ export default function PackagingPage() {
   const [loading, setLoading] = useState(true);
   const [toggleLoading, setToggleLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [inventorySearch, setInventorySearch] = useState("");
   const [search, setSearch] = useState("");
   const [packagingFilter, setPackagingFilter] =
     useState<PackagingFilter>("all");
@@ -116,6 +117,20 @@ export default function PackagingPage() {
       lowStock,
     };
   }, [items, openPoLines]);
+
+  const filteredItems = useMemo(() => {
+    const q = inventorySearch.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((row) => {
+      if (row.sku_code.toLowerCase().includes(q)) return true;
+      if (row.name?.toLowerCase().includes(q)) return true;
+      return row.linked_products.some(
+        (link) =>
+          link.product_sku_code.toLowerCase().includes(q) ||
+          (link.product_name?.toLowerCase().includes(q) ?? false),
+      );
+    });
+  }, [items, inventorySearch]);
 
   const filteredToggleSkus = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -230,8 +245,8 @@ export default function PackagingPage() {
         />
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 border-b border-stone-200 pb-4">
           <div>
             <CardTitle>Packaging inventory</CardTitle>
             <CardDescription>
@@ -246,35 +261,63 @@ export default function PackagingPage() {
               .
             </CardDescription>
           </div>
-          <Button size="sm" variant="outline" onClick={refreshAll}>
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="w-48"
+              placeholder="Search SKU or name…"
+              value={inventorySearch}
+              onChange={(e) => setInventorySearch(e.target.value)}
+            />
+            <Button size="sm" variant="outline" onClick={refreshAll}>
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {loading ? (
-            <p className="text-sm text-stone-500">Loading inventory…</p>
+            <p className="p-6 text-sm text-stone-500">Loading inventory…</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-stone-500">
+            <p className="p-6 text-sm text-stone-500">
               No packaging SKUs yet. Mark materials like UB, EFLUTE, JAR, or
               PUMP in the section below.
             </p>
+          ) : filteredItems.length === 0 ? (
+            <p className="p-6 text-sm text-stone-500">
+              No SKUs match your search.
+            </p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-stone-200">
+            <div className="max-h-[min(70vh,calc(100vh-14rem))] overflow-auto px-6 pb-6">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2 text-right">On hand</th>
-                    <th className="px-3 py-2 text-right">On order</th>
-                    <th className="px-3 py-2 text-right">From FG restock</th>
-                    <th className="px-3 py-2 text-right">Suggested PO</th>
-                    <th className="px-3 py-2 text-right">Total available</th>
-                    <th className="px-3 py-2">Action</th>
+                  <tr className="text-stone-500">
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 shadow-[inset_0_-1px_0_#e7e5e4]">
+                      SKU
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Name
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 text-right shadow-[inset_0_-1px_0_#e7e5e4]">
+                      On hand
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 text-right shadow-[inset_0_-1px_0_#e7e5e4]">
+                      On order
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 text-right shadow-[inset_0_-1px_0_#e7e5e4]">
+                      From FG restock
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 text-right shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Suggested PO
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 text-right shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Total available
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 px-3 py-2 shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((row) => {
+                  {filteredItems.map((row) => {
                     const total = row.qty_on_hand + row.on_order_qty;
                     const hasLinks = row.linked_products.length > 0;
                     const expanded = expandedPackagingId === row.id;
