@@ -6,6 +6,7 @@ import {
   updatePurchaseOrder,
   type UpdatePoLineInput,
 } from "@/lib/db/procurement";
+import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -119,6 +120,7 @@ export async function PATCH(
 
     const supabase = createAdminClient();
     const purchaseOrder = await updatePurchaseOrder(supabase, id, input);
+    invalidateForecastCache();
     return NextResponse.json({ purchaseOrder });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -136,6 +138,7 @@ export async function DELETE(
     const { id } = await params;
     const supabase = createAdminClient();
     await deletePurchaseOrder(supabase, id);
+    invalidateForecastCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

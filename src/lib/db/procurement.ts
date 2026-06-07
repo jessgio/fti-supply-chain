@@ -373,6 +373,19 @@ export interface OpenPoBatch {
   expected_date: string | null;
 }
 
+type OpenPoLineRow = {
+  id: string;
+  sku_id: string;
+  qty_ordered: number;
+  qty_received: number;
+  skus: { sku_code: string } | null;
+  purchase_orders: {
+    id: string;
+    expected_date: string | null;
+    status: string;
+  } | null;
+};
+
 export async function listOpenPoBatchesBySkus(
   supabase: SupabaseClient,
   skuIds: string[],
@@ -380,37 +393,28 @@ export async function listOpenPoBatchesBySkus(
   if (skuIds.length === 0) return [];
 
   const { data, error } = await supabase
-    .from("purchase_orders")
+    .from("purchase_order_lines")
     .select(
-      "id, expected_date, purchase_order_lines(id, sku_id, qty_ordered, qty_received, skus(sku_code))",
+      "id, sku_id, qty_ordered, qty_received, skus(sku_code), purchase_orders!inner(id, expected_date, status)",
     )
-    .in("status", ["planned", "ordered", "in_transit"]);
+    .in("sku_id", skuIds)
+    .in("purchase_orders.status", ["planned", "ordered", "in_transit"]);
   if (error) throw error;
 
-  const skuSet = new Set(skuIds);
   const batches: OpenPoBatch[] = [];
-
-  for (const po of data ?? []) {
-    const lines = (po.purchase_order_lines ?? []) as unknown as {
-      id: string;
-      sku_id: string;
-      qty_ordered: number;
-      qty_received: number;
-      skus: { sku_code: string } | null;
-    }[];
-    for (const line of lines) {
-      if (!skuSet.has(line.sku_id)) continue;
-      const openQty = Number(line.qty_ordered) - Number(line.qty_received);
-      if (openQty <= 0) continue;
-      batches.push({
-        line_id: line.id,
-        po_id: po.id,
-        sku_id: line.sku_id,
-        sku_code: line.skus?.sku_code ?? "",
-        open_qty: openQty,
-        expected_date: po.expected_date,
-      });
-    }
+  for (const line of (data ?? []) as unknown as OpenPoLineRow[]) {
+    const po = line.purchase_orders;
+    if (!po) continue;
+    const openQty = Number(line.qty_ordered) - Number(line.qty_received);
+    if (openQty <= 0) continue;
+    batches.push({
+      line_id: line.id,
+      po_id: po.id,
+      sku_id: line.sku_id,
+      sku_code: line.skus?.sku_code ?? "",
+      open_qty: openQty,
+      expected_date: po.expected_date,
+    });
   }
 
   return batches;

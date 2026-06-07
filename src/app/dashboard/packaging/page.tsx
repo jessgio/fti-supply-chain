@@ -150,6 +150,7 @@ export default function PackagingPage() {
 
   async function togglePackaging(sku: SkuToggleRow) {
     if (sku.is_bundle) return;
+    const marking = !sku.is_packaging;
     setUpdatingId(sku.id);
     try {
       const res = await fetch(`/api/skus/${sku.id}`, {
@@ -166,7 +167,11 @@ export default function PackagingPage() {
             : row,
         ),
       );
-      await loadOverview();
+      if (marking) {
+        await loadOverview();
+      } else {
+        setItems((prev) => prev.filter((row) => row.id !== sku.id));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
     } finally {

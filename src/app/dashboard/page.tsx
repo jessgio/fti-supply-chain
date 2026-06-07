@@ -57,7 +57,7 @@ async function loadOverview(): Promise<Overview | null> {
   try {
     const supabase = createAdminClient();
 
-    const [{ recommendations, skuCount }, skusRes, posRes, stockRes] =
+    const [{ recommendations, skuCount }, skusRes, posRes, stockRes, salesMomPct] =
       await Promise.all([
         loadRestockRecommendations(supabase),
         supabase.from("skus").select("sku_code, retail_price"),
@@ -69,6 +69,7 @@ async function loadOverview(): Promise<Overview | null> {
           .select("as_of_date")
           .order("as_of_date", { ascending: false })
           .limit(1),
+        loadSalesMom(supabase),
       ]);
 
     const reorderNow = recommendations.filter(
@@ -112,8 +113,6 @@ async function loadOverview(): Promise<Overview | null> {
           ),
         0,
       );
-
-    const salesMomPct = await loadSalesMom(supabase);
 
     return {
       reorderNow,

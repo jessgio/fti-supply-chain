@@ -5,6 +5,7 @@ import {
   listPurchaseOrders,
   type NewPoLineInput,
 } from "@/lib/db/procurement";
+import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
       notes: body.notes ?? null,
       lines,
     });
+    invalidateForecastCache();
     return NextResponse.json({ purchaseOrder });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

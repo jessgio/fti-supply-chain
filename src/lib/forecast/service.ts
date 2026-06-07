@@ -23,7 +23,7 @@ export interface ForecastParams {
  * Pulls per-SKU demand series + stock from Postgres, nets in open-PO quantity,
  * and returns the ranked restock plan.
  */
-export async function loadRestockRecommendations(
+export async function loadRestockRecommendationsUncached(
   supabase: SupabaseClient,
   params: ForecastParams = {},
 ): Promise<{ recommendations: RestockRecommendation[]; skuCount: number }> {
@@ -36,30 +36,18 @@ export async function loadRestockRecommendations(
   const historyDays = params.historyDays ?? 90;
   const ewmaDays = params.ewmaDays ?? 30;
 
-  const [{ data, error }, mappedRes] = await Promise.all([
+  const [{ data, error }, onOrderRes] = await Promise.all([
     supabase.rpc("get_sku_forecast_base", {
       p_history_days: historyDays,
       p_ewma_days: ewmaDays,
     }),
-    supabase
-      .from("skus")
-      .select("sku_code")
-      .not("franchise_id", "is", null)
-      .eq("is_bundle", false)
-      .eq("is_active", true),
+    supabase.rpc("get_on_order_qty_by_sku"),
   ]);
   if (error) throw error;
-  if (mappedRes.error) throw mappedRes.error;
+  if (onOrderRes.error) throw onOrderRes.error;
 
-  const mappedSkuCodes = new Set(
-    (mappedRes.data ?? []).map((row) => String(row.sku_code)),
-  );
-
-  const inputs: SkuForecastInput[] = (data ?? [])
-    .filter((row: Record<string, unknown>) =>
-      mappedSkuCodes.has(String(row.sku_code)),
-    )
-    .map((row: Record<string, unknown>) => ({
+  const inputs: SkuForecastInput[] = (data ?? []).map(
+    (row: Record<string, unknown>) => ({
       sku_code: String(row.sku_code),
       franchise_name: row.franchise_name ? String(row.franchise_name) : null,
       qty_on_hand: Number(row.qty_on_hand),
@@ -72,26 +60,31 @@ export async function loadRestockRecommendations(
         ? String(row.first_sale_date)
         : null,
       demand_qtys: (row.demand_qtys as number[] | null)?.map(Number) ?? [],
-    }));
-
-  const { data: onOrderData, error: onOrderError } = await supabase.rpc(
-    "get_on_order_qty_by_sku",
+    }),
   );
-  if (onOrderError) throw onOrderError;
 
   const onOrderBySku = new Map<string, number>();
-  for (const row of (onOrderData ?? []) as Record<string, unknown>[]) {
+  for (const row of (onOrderRes.data ?? []) as Record<string, unknown>[]) {
     onOrderBySku.set(String(row.sku_code), Number(row.on_order_qty));
   }
 
-  const recommendations = await enrichWithIncomingBatchStockout(
-    supabase,
-    buildRestockPlanFromSeries(
-      inputs,
-      { leadTimeDays, safetyStockMonths, targetStockMonths },
-      onOrderBySku,
-    ),
+  const plan = buildRestockPlanFromSeries(
+    inputs,
+    { leadTimeDays, safetyStockMonths, targetStockMonths },
+    onOrderBySku,
   );
 
+  const recommendations = await enrichWithIncomingBatchStockout(supabase, plan);
+
   return { recommendations, skuCount: inputs.length };
+}
+
+export async function loadRestockRecommendations(
+  _supabase: SupabaseClient,
+  params: ForecastParams = {},
+): Promise<{ recommendations: RestockRecommendation[]; skuCount: number }> {
+  const { getCachedRestockRecommendations } = await import(
+    "@/lib/forecast/cache"
+  );
+  return getCachedRestockRecommendations(params)();
 }

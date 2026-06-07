@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseStockExcel } from "@/lib/excel/parse";
 import { importStock } from "@/lib/db/uploads";
+import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
     const result = await importStock(supabase, rows, file.name);
+    invalidateForecastCache();
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Stock upload failed:", error);

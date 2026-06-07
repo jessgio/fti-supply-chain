@@ -38,61 +38,68 @@ async function latestStockDate(
 export async function listPackagingOverview(
   supabase: SupabaseClient,
 ): Promise<PackagingOverview> {
-  const stockAsOf = await latestStockDate(supabase);
-
-  const packagingSkus = await fetchAllRows<{
-    id: string;
-    sku_code: string;
-    name: string | null;
-  }>(() =>
-    supabase
-      .from("skus")
-      .select("id, sku_code, name")
-      .eq("is_packaging", true)
-      .order("sku_code"),
-  );
+  const [stockAsOf, packagingSkus] = await Promise.all([
+    latestStockDate(supabase),
+    fetchAllRows<{
+      id: string;
+      sku_code: string;
+      name: string | null;
+    }>(() =>
+      supabase
+        .from("skus")
+        .select("id, sku_code, name")
+        .eq("is_packaging", true)
+        .order("sku_code"),
+    ),
+  ]);
 
   if (packagingSkus.length === 0) {
     return { stockAsOf, items: [], openPoLines: [] };
   }
 
   const skuIds = packagingSkus.map((s) => s.id);
-  const stockBySku = new Map<string, number>();
 
-  if (stockAsOf) {
-    const stockRows = await fetchAllRows<{
-      sku_id: string;
-      qty_on_hand: number;
-    }>(() =>
-      supabase
-        .from("stock_levels")
-        .select("sku_id, qty_on_hand")
-        .in("sku_id", skuIds)
-        .eq("as_of_date", stockAsOf)
-        .eq("location", PACKAGING_STOCK_LOCATION),
+  const [
+    stockRows,
+    onOrderRes,
+    links,
+    { recommendations },
+    openPoLines,
+  ] = await Promise.all([
+    stockAsOf
+      ? fetchAllRows<{
+          sku_id: string;
+          qty_on_hand: number;
+        }>(() =>
+          supabase
+            .from("stock_levels")
+            .select("sku_id, qty_on_hand")
+            .in("sku_id", skuIds)
+            .eq("as_of_date", stockAsOf)
+            .eq("location", PACKAGING_STOCK_LOCATION),
+        )
+      : Promise.resolve([]),
+    supabase.rpc("get_on_order_qty_by_sku"),
+    listProductPackagingLinks(supabase),
+    loadRestockRecommendations(supabase),
+    listOpenPackagingPoLines(supabase, skuIds),
+  ]);
+
+  if (onOrderRes.error) throw onOrderRes.error;
+
+  const stockBySku = new Map<string, number>();
+  for (const row of stockRows) {
+    stockBySku.set(
+      row.sku_id,
+      (stockBySku.get(row.sku_id) ?? 0) + Number(row.qty_on_hand),
     );
-    for (const row of stockRows) {
-      stockBySku.set(
-        row.sku_id,
-        (stockBySku.get(row.sku_id) ?? 0) + Number(row.qty_on_hand),
-      );
-    }
   }
 
-  const { data: onOrderRows, error: onOrderError } = await supabase.rpc(
-    "get_on_order_qty_by_sku",
-  );
-  if (onOrderError) throw onOrderError;
-
   const onOrderBySku = new Map<string, number>();
-  for (const row of onOrderRows ?? []) {
+  for (const row of onOrderRes.data ?? []) {
     onOrderBySku.set(row.sku_id as string, Number(row.on_order_qty));
   }
 
-  const [links, { recommendations }] = await Promise.all([
-    listProductPackagingLinks(supabase),
-    loadRestockRecommendations(supabase),
-  ]);
   const recBySku = new Map(recommendations.map((r) => [r.sku_code, r]));
   const linksByPackagingId = new Map<string, typeof links>();
   for (const link of links) {
@@ -130,59 +137,63 @@ export async function listPackagingOverview(
     };
   });
 
-  const openPoLines = await listOpenPackagingPoLines(supabase);
-
   return { stockAsOf, items, openPoLines };
 }
 
-type OpenPoRow = {
-  id: string;
-  po_number: string;
-  status: string;
-  expected_date: string | null;
-  suppliers: { name: string } | null;
-  purchase_order_lines: {
-    qty_ordered: number;
-    qty_received: number;
-    skus: { sku_code: string; is_packaging: boolean } | null;
-  }[];
+type PackagingPoLineRow = {
+  qty_ordered: number;
+  qty_received: number;
+  skus: { sku_code: string } | null;
+  purchase_orders: {
+    id: string;
+    po_number: string;
+    status: string;
+    expected_date: string | null;
+    suppliers: { name: string } | null;
+  } | null;
 };
 
 export async function listOpenPackagingPoLines(
   supabase: SupabaseClient,
+  packagingSkuIds: string[],
 ): Promise<PackagingPoLine[]> {
+  if (packagingSkuIds.length === 0) return [];
+
   const { data, error } = await supabase
-    .from("purchase_orders")
+    .from("purchase_order_lines")
     .select(
-      "id, po_number, status, expected_date, suppliers(name), " +
-        "purchase_order_lines(qty_ordered, qty_received, skus(sku_code, is_packaging))",
+      "qty_ordered, qty_received, skus(sku_code), " +
+        "purchase_orders!inner(id, po_number, status, expected_date, suppliers(name))",
     )
-    .in("status", ["planned", "ordered", "in_transit"])
-    .order("expected_date", { ascending: true, nullsFirst: false });
+    .in("sku_id", packagingSkuIds)
+    .in("purchase_orders.status", ["planned", "ordered", "in_transit"])
+    .order("expected_date", {
+      ascending: true,
+      nullsFirst: false,
+      foreignTable: "purchase_orders",
+    });
   if (error) throw error;
 
-  const rows = (data ?? []) as unknown as OpenPoRow[];
   const lines: PackagingPoLine[] = [];
-  for (const po of rows) {
-    for (const line of po.purchase_order_lines ?? []) {
-      if (!line.skus?.is_packaging) continue;
-      const qtyOpen = Math.max(
-        0,
-        Number(line.qty_ordered) - Number(line.qty_received),
-      );
-      if (qtyOpen <= 0) continue;
-      lines.push({
-        po_id: po.id,
-        po_number: po.po_number,
-        po_status: po.status as PackagingPoLine["po_status"],
-        supplier_name: po.suppliers?.name ?? null,
-        expected_date: po.expected_date,
-        sku_code: line.skus.sku_code,
-        qty_ordered: Number(line.qty_ordered),
-        qty_received: Number(line.qty_received),
-        qty_open: qtyOpen,
-      });
-    }
+  for (const line of (data ?? []) as unknown as PackagingPoLineRow[]) {
+    const po = line.purchase_orders;
+    if (!po || !line.skus) continue;
+    const qtyOpen = Math.max(
+      0,
+      Number(line.qty_ordered) - Number(line.qty_received),
+    );
+    if (qtyOpen <= 0) continue;
+    lines.push({
+      po_id: po.id,
+      po_number: po.po_number,
+      po_status: po.status as PackagingPoLine["po_status"],
+      supplier_name: po.suppliers?.name ?? null,
+      expected_date: po.expected_date,
+      sku_code: line.skus.sku_code,
+      qty_ordered: Number(line.qty_ordered),
+      qty_received: Number(line.qty_received),
+      qty_open: qtyOpen,
+    });
   }
 
   return lines;

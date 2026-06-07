@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseMappingsExcel } from "@/lib/excel/parse";
 import { importMappings } from "@/lib/db/uploads";
+import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { errorMessage } from "@/lib/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWriteRole } from "@/lib/auth";
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
     const result = await importMappings(supabase, mappings, bundles, file.name);
+    invalidateForecastCache();
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Mappings upload failed:", error);

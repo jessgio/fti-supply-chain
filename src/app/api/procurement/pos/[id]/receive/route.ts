@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder, receivePoLine } from "@/lib/db/procurement";
+import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
@@ -33,6 +34,7 @@ export async function POST(
       body?.location ?? undefined,
     );
 
+    invalidateForecastCache();
     const purchaseOrder = await getPurchaseOrder(supabase, id);
     return NextResponse.json({ purchaseOrder });
   } catch (error) {
