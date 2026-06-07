@@ -20,6 +20,17 @@ export interface PackagingRestockNeed {
   linked_products: PackagingLinkContribution[];
 }
 
+/** FG batch size that drives packaging need (independent of FG PO coverage). */
+function fgBatchQtyForPackaging(rec: RestockRecommendation): number | null {
+  if (rec.needs_reorder) {
+    return rec.recommended_restock_qty;
+  }
+  if (rec.on_order_qty > 0) {
+    return rec.on_order_qty;
+  }
+  return null;
+}
+
 export function computePackagingRestockNeed(
   links: ProductPackagingInput[],
   recBySku: Map<string, RestockRecommendation>,
@@ -31,9 +42,7 @@ export function computePackagingRestockNeed(
 
   for (const link of links) {
     const rec = recBySku.get(link.product_sku_code);
-    const fgNeedsRestock =
-      rec != null && rec.needs_reorder && !rec.covered_by_po;
-    const fgRestockQty = fgNeedsRestock ? rec.recommended_restock_qty : null;
+    const fgRestockQty = rec != null ? fgBatchQtyForPackaging(rec) : null;
     const contribution =
       fgRestockQty != null ? fgRestockQty * link.qty_per_unit : 0;
 
