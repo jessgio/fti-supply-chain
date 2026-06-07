@@ -16,11 +16,40 @@ interface StatCardProps {
   value: string;
   hint?: string;
   tone?: Tone;
+  active?: boolean;
+  onClick?: () => void;
 }
 
-export function StatCard({ label, value, hint, tone = "default" }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  hint,
+  tone = "default",
+  active = false,
+  onClick,
+}: StatCardProps) {
+  const interactive = Boolean(onClick);
+
   return (
-    <Card>
+    <Card
+      className={cn(
+        interactive && "cursor-pointer transition-shadow hover:shadow-md",
+        active && "ring-2 ring-emerald-600 ring-offset-2",
+      )}
+      onClick={onClick}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+    >
       <CardContent className="p-5">
         <p className="text-sm text-stone-500">{label}</p>
         <p className={cn("mt-1 text-2xl font-semibold", TONE_CLASS[tone])}>

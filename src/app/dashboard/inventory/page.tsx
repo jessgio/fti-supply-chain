@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowDown,
@@ -108,6 +108,75 @@ interface ColumnFilters {
   pattern: DemandPattern | "";
   confidence: RestockRecommendation["confidence"] | "";
   franchise: string;
+}
+
+type MetricKey =
+  | "total"
+  | "fast"
+  | "slow"
+  | "npd"
+  | "volatile"
+  | "seasonalUplift"
+  | "reorder"
+  | "stockoutSoon"
+  | "onOrder"
+  | "overstock";
+
+const EMPTY_COLUMN_FILTERS: ColumnFilters = {
+  status: "",
+  velocity: "",
+  pattern: "",
+  confidence: "",
+  franchise: "",
+};
+
+function matchesMetric(
+  row: RestockRecommendation,
+  metric: MetricKey,
+): boolean {
+  switch (metric) {
+    case "total":
+      return true;
+    case "fast":
+      return row.velocity_class === "fast";
+    case "slow":
+      return row.velocity_class === "slow";
+    case "npd":
+      return row.demand_pattern === "npd";
+    case "volatile":
+      return row.demand_pattern === "volatile";
+    case "seasonalUplift":
+      return row.seasonal_uplift_multiplier > 1;
+    case "reorder":
+      return riskOf(row) === "reorder";
+    case "stockoutSoon":
+      return (
+        row.days_until_stockout !== null && row.days_until_stockout <= 30
+      );
+    case "onOrder":
+      return row.on_order_qty > 0;
+    case "overstock":
+      return riskOf(row) === "overstock";
+  }
+}
+
+function columnFiltersForMetric(metric: MetricKey): ColumnFilters {
+  switch (metric) {
+    case "reorder":
+      return { ...EMPTY_COLUMN_FILTERS, status: "reorder" };
+    case "overstock":
+      return { ...EMPTY_COLUMN_FILTERS, status: "overstock" };
+    case "fast":
+      return { ...EMPTY_COLUMN_FILTERS, velocity: "fast" };
+    case "slow":
+      return { ...EMPTY_COLUMN_FILTERS, velocity: "slow" };
+    case "npd":
+      return { ...EMPTY_COLUMN_FILTERS, pattern: "npd" };
+    case "volatile":
+      return { ...EMPTY_COLUMN_FILTERS, pattern: "volatile" };
+    default:
+      return EMPTY_COLUMN_FILTERS;
+  }
 }
 
 function compareNullableNumber(
@@ -241,14 +310,34 @@ export default function InventoryPage() {
   const [needsActionOnly, setNeedsActionOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({
-    status: "",
-    velocity: "",
-    pattern: "",
-    confidence: "",
-    franchise: "",
-  });
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(
+    EMPTY_COLUMN_FILTERS,
+  );
+  const [activeMetric, setActiveMetric] = useState<MetricKey | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  function handleMetricClick(metric: MetricKey) {
+    if (metric === "total" || activeMetric === metric) {
+      clearAllFilters();
+      return;
+    }
+    setActiveMetric(metric);
+    setColumnFilters(columnFiltersForMetric(metric));
+    tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleColumnFilterChange(
+    updater: (filters: ColumnFilters) => ColumnFilters,
+  ) {
+    setActiveMetric(null);
+    setColumnFilters(updater);
+  }
+
+  function clearAllFilters() {
+    setActiveMetric(null);
+    setColumnFilters(EMPTY_COLUMN_FILTERS);
+  }
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -323,6 +412,8 @@ export default function InventoryPage() {
     const rows = recommendations.filter((r) => {
       if (needsActionOnly && !(r.needs_reorder && !r.covered_by_po))
         return false;
+      if (activeMetric && activeMetric !== "total" && !matchesMetric(r, activeMetric))
+        return false;
       if (columnFilters.status && riskOf(r) !== columnFilters.status)
         return false;
       if (
@@ -347,9 +438,18 @@ export default function InventoryPage() {
     });
 
     return [...rows].sort((a, b) => compareRows(a, b, sortKey, sortDir));
-  }, [recommendations, search, needsActionOnly, columnFilters, sortKey, sortDir]);
+  }, [
+    recommendations,
+    search,
+    needsActionOnly,
+    activeMetric,
+    columnFilters,
+    sortKey,
+    sortDir,
+  ]);
 
   const hasColumnFilters =
+    activeMetric !== null ||
     columnFilters.status !== "" ||
     columnFilters.velocity !== "" ||
     columnFilters.pattern !== "" ||
@@ -391,58 +491,81 @@ export default function InventoryPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-10">
-        <StatCard label="SKUs tracked" value={formatNumber(summary.total)} />
+        <StatCard
+          label="SKUs tracked"
+          value={formatNumber(summary.total)}
+          onClick={() => handleMetricClick("total")}
+        />
         <StatCard
           label="Fast-moving"
           value={formatNumber(summary.fast)}
           hint="Top third by Fcst/day"
+          active={activeMetric === "fast"}
+          onClick={() => handleMetricClick("fast")}
         />
         <StatCard
           label="Slow-moving"
           value={formatNumber(summary.slow)}
           hint="Bottom third or no demand"
+          active={activeMetric === "slow"}
+          onClick={() => handleMetricClick("slow")}
         />
         <StatCard
           label="NPD"
           value={formatNumber(summary.npd)}
           hint="Launched < 3 months ago"
           tone="info"
+          active={activeMetric === "npd"}
+          onClick={() => handleMetricClick("npd")}
         />
         <StatCard
           label="Volatile"
           value={formatNumber(summary.volatile)}
           hint="Erratic monthly sales"
           tone="warning"
+          active={activeMetric === "volatile"}
+          onClick={() => handleMetricClick("volatile")}
         />
         <StatCard
           label="Seasonal uplift"
           value={formatNumber(summary.seasonalUplift)}
           hint="Ramadan or Q4 in reorder window"
           tone="warning"
+          active={activeMetric === "seasonalUplift"}
+          onClick={() => handleMetricClick("seasonalUplift")}
         />
         <StatCard
           label="Reorder now"
           value={formatNumber(summary.reorder)}
           tone="danger"
+          active={activeMetric === "reorder"}
+          onClick={() => handleMetricClick("reorder")}
         />
         <StatCard
           label="Stockout < 30 days"
           value={formatNumber(summary.stockoutSoon)}
           tone="warning"
+          active={activeMetric === "stockoutSoon"}
+          onClick={() => handleMetricClick("stockoutSoon")}
         />
         <StatCard
           label="SKUs on order"
           value={formatNumber(summary.onOrder)}
           tone="info"
+          active={activeMetric === "onOrder"}
+          onClick={() => handleMetricClick("onOrder")}
         />
         <StatCard
           label="Overstock"
           value={formatNumber(summary.overstock)}
           hint={`>${OVERSTOCK_MONTHS} mo cover`}
           tone={summary.overstock > 0 ? "info" : "default"}
+          active={activeMetric === "overstock"}
+          onClick={() => handleMetricClick("overstock")}
         />
       </div>
 
+      <div ref={tableRef}>
       <Card className="overflow-hidden">
         <CardHeader className="sticky top-0 z-20 border-b border-stone-200 bg-white pb-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -475,17 +598,9 @@ export default function InventoryPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() =>
-                    setColumnFilters({
-                      status: "",
-                      velocity: "",
-                      pattern: "",
-                      confidence: "",
-                      franchise: "",
-                    })
-                  }
+                  onClick={clearAllFilters}
                 >
-                  Clear column filters
+                  Clear filters
                 </Button>
               )}
             </div>
@@ -520,7 +635,7 @@ export default function InventoryPage() {
                           className="mt-1 h-7 w-full min-w-[6.5rem] py-0 text-xs"
                           value={columnFilters.status}
                           onChange={(e) =>
-                            setColumnFilters((f) => ({
+                            handleColumnFilterChange((f) => ({
                               ...f,
                               status: e.target.value as StockStatus | "",
                             }))
@@ -554,7 +669,7 @@ export default function InventoryPage() {
                           placeholder="Filter"
                           value={columnFilters.franchise}
                           onChange={(e) =>
-                            setColumnFilters((f) => ({
+                            handleColumnFilterChange((f) => ({
                               ...f,
                               franchise: e.target.value,
                             }))
@@ -573,7 +688,7 @@ export default function InventoryPage() {
                           className="mt-1 h-7 w-full min-w-[5.5rem] py-0 text-xs"
                           value={columnFilters.velocity}
                           onChange={(e) =>
-                            setColumnFilters((f) => ({
+                            handleColumnFilterChange((f) => ({
                               ...f,
                               velocity: e.target.value as VelocityClass | "",
                             }))
@@ -597,7 +712,7 @@ export default function InventoryPage() {
                           className="mt-1 h-7 w-full min-w-[5.5rem] py-0 text-xs"
                           value={columnFilters.pattern}
                           onChange={(e) =>
-                            setColumnFilters((f) => ({
+                            handleColumnFilterChange((f) => ({
                               ...f,
                               pattern: e.target.value as DemandPattern | "",
                             }))
@@ -684,7 +799,7 @@ export default function InventoryPage() {
                           className="mt-1 h-7 w-full min-w-[5rem] py-0 text-xs"
                           value={columnFilters.confidence}
                           onChange={(e) =>
-                            setColumnFilters((f) => ({
+                            handleColumnFilterChange((f) => ({
                               ...f,
                               confidence: e.target
                                 .value as RestockRecommendation["confidence"] | "",
@@ -812,6 +927,7 @@ export default function InventoryPage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </PageShell>
   );
 }
