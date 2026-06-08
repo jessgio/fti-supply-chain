@@ -10,31 +10,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { parseSalesExcel } from "@/lib/excel/parse";
-import {
-  filterSalesRowsForUpload,
-  SALES_UPLOAD_MONTHS,
-} from "@/lib/sales/upload-window";
-import type { SalesRow } from "@/types/database";
-
-const ROW_CHUNK = 2500;
+import { createClient } from "@/lib/supabase/client";
 
 interface SalesUploadCardProps {
   title: string;
   description: string;
-}
-
-function retailPricesFromRows(rows: SalesRow[]): Record<string, number> {
-  const retailBySku: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.retail_price && row.retail_price > 0) {
-      retailBySku[row.sku_code] = Math.max(
-        retailBySku[row.sku_code] ?? 0,
-        row.retail_price,
-      );
-    }
-  }
-  return retailBySku;
 }
 
 async function postImport(body: unknown) {
@@ -66,61 +46,42 @@ export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
   async function handleUpload() {
     if (!file) return;
     setLoading(true);
-    setStatus("Parsing Excel in your browser...");
+    setStatus("Requesting secure upload slot...");
     try {
-      const rows = await parseSalesExcel(await file.arrayBuffer());
-      const { eligible, skippedOlder, cutoff, rangeStart, rangeEnd } =
-        filterSalesRowsForUpload(rows);
-
-      if (eligible.length === 0) {
-        throw new Error(
-          `No sales rows on or after ${cutoff}. Upload the last ${SALES_UPLOAD_MONTHS} months only.`,
-        );
-      }
-
-      setStatus(`Preparing import of ${eligible.length.toLocaleString()} rows...`);
-      const init = await postImport({
-        phase: "init",
+      const { path, token } = await postImport({
+        phase: "upload-url",
         filename: file.name,
-        rowCount: eligible.length,
-        rangeStart,
-        rangeEnd,
-        skippedOlder,
-        cutoff,
       });
 
-      const batchId = String(init.batchId);
-
-      for (let i = 0; i < eligible.length; i += ROW_CHUNK) {
-        const slice = eligible.slice(i, i + ROW_CHUNK);
-        setStatus(
-          `Importing rows ${(i + 1).toLocaleString()}–${Math.min(
-            i + slice.length,
-            eligible.length,
-          ).toLocaleString()} of ${eligible.length.toLocaleString()}...`,
-        );
-        await postImport({
-          phase: "chunk",
-          batchId,
-          rows: slice,
+      setStatus(`Uploading ${file.name} to storage...`);
+      const supabase = createClient();
+      const { error: uploadError } = await supabase.storage
+        .from("data-uploads")
+        .uploadToSignedUrl(String(path), String(token), file, {
+          contentType:
+            file.type ||
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
-      }
 
-      setStatus("Finalizing import...");
-      await postImport({
-        phase: "finalize",
-        batchId,
-        retailBySku: retailPricesFromRows(eligible),
+      if (uploadError) throw uploadError;
+
+      setStatus("Processing import on server (large files may take a few minutes)...");
+      const result = await postImport({
+        phase: "process",
+        storagePath: String(path),
+        filename: file.name,
       });
 
       const parts = [
-        `Imported ${eligible.length.toLocaleString()} rows`,
-        `(${rangeStart} to ${rangeEnd})`,
-        Number(init.replacedCount) > 0
-          ? `replacing ${Number(init.replacedCount).toLocaleString()} existing`
+        `Imported ${Number(result.rowCount ?? 0).toLocaleString()} rows`,
+        result.rangeStart && result.rangeEnd
+          ? `(${result.rangeStart} to ${result.rangeEnd})`
           : null,
-        skippedOlder > 0
-          ? `${skippedOlder.toLocaleString()} older rows skipped`
+        Number(result.replacedCount) > 0
+          ? `replacing ${Number(result.replacedCount).toLocaleString()} existing`
+          : null,
+        Number(result.skippedOlder) > 0
+          ? `${Number(result.skippedOlder).toLocaleString()} older rows skipped`
           : null,
       ].filter(Boolean);
       setStatus(`${parts.join(", ")}.`);

@@ -21,7 +21,7 @@ export default function UploadsPage() {
         />
         <SalesUploadCard
           title="Sales transactions"
-          description="Upload FTI Sales.xlsx (WMS) for the last 3 months (current month plus the two prior). Older sales are kept; overlapping dates in the file replace existing records. FAKTUR rows only; CANCELED orders are excluded. Large files are parsed in your browser to avoid upload size limits."
+          description="Upload FTI Sales.xlsx (WMS) for the last 3 months (current month plus the two prior). Older sales are kept; overlapping dates in the file replace existing records. FAKTUR rows only; CANCELED orders are excluded. The file uploads directly to Supabase Storage, then the server imports it (avoids Vercel size limits)."
         />
         <UploadCard
           title="Stock levels"

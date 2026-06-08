@@ -4,13 +4,17 @@ import {
   appendSalesImportRows,
   beginSalesImport,
   finalizeSalesImport,
+  importSales,
 } from "@/lib/db/uploads";
+import { parseSalesExcel } from "@/lib/excel/parse";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
 export const maxDuration = 600;
+
+const UPLOAD_BUCKET = "data-uploads";
 
 const salesRowSchema = z.object({
   sale_date: z.string().min(1),
@@ -19,6 +23,17 @@ const salesRowSchema = z.object({
   qty_sold: z.number(),
   net_sales: z.number(),
   retail_price: z.number().optional(),
+});
+
+const uploadUrlSchema = z.object({
+  phase: z.literal("upload-url"),
+  filename: z.string().min(1),
+});
+
+const processFileSchema = z.object({
+  phase: z.literal("process"),
+  storagePath: z.string().min(1),
+  filename: z.string().min(1),
 });
 
 const initSchema = z.object({
@@ -34,7 +49,7 @@ const initSchema = z.object({
 const chunkSchema = z.object({
   phase: z.literal("chunk"),
   batchId: z.string().uuid(),
-  rows: z.array(salesRowSchema).min(1).max(3000),
+  rows: z.array(salesRowSchema).min(1).max(500),
 });
 
 const finalizeSchema = z.object({
@@ -44,10 +59,16 @@ const finalizeSchema = z.object({
 });
 
 const bodySchema = z.discriminatedUnion("phase", [
+  uploadUrlSchema,
+  processFileSchema,
   initSchema,
   chunkSchema,
   finalizeSchema,
 ]);
+
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+}
 
 export async function POST(request: Request) {
   try {
@@ -56,6 +77,40 @@ export async function POST(request: Request) {
 
     const body = bodySchema.parse(await request.json());
     const supabase = createAdminClient();
+
+    if (body.phase === "upload-url") {
+      const storagePath = `sales/${Date.now()}-${sanitizeFilename(body.filename)}`;
+      const { data, error } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .createSignedUploadUrl(storagePath);
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        path: data.path,
+        token: data.token,
+      });
+    }
+
+    if (body.phase === "process") {
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .download(body.storagePath);
+
+      if (downloadError) throw downloadError;
+      if (!fileData) {
+        throw new Error("Uploaded file not found in storage.");
+      }
+
+      const rows = await parseSalesExcel(await fileData.arrayBuffer());
+      const result = await importSales(supabase, rows, body.filename);
+
+      await supabase.storage.from(UPLOAD_BUCKET).remove([body.storagePath]);
+      invalidateForecastCache();
+
+      return NextResponse.json({ ok: true, ...result });
+    }
 
     if (body.phase === "init") {
       const { batchId, replacedCount } = await beginSalesImport(supabase, {
