@@ -75,7 +75,8 @@ async function resolveSkuId(
   return skuId;
 }
 
-const SKU_LOOKUP_CHUNK = 500;
+/** PostgREST puts `.in()` filters in the URL; ~16KB header limit with long SKU codes. */
+const SKU_LOOKUP_CHUNK = 80;
 
 /** Resolve many SKU codes with batched selects + upserts instead of per-row queries. */
 async function ensureSkuIdsInCache(
@@ -404,11 +405,12 @@ export async function finalizeSalesImport(
   retailBySku: Record<string, number> = {},
 ): Promise<void> {
   const skuCodes = Object.keys(retailBySku);
-  if (skuCodes.length > 0) {
+  for (let i = 0; i < skuCodes.length; i += SKU_LOOKUP_CHUNK) {
+    const chunk = skuCodes.slice(i, i + SKU_LOOKUP_CHUNK);
     const { data: skus, error: skuError } = await supabase
       .from("skus")
       .select("id, sku_code, retail_price")
-      .in("sku_code", skuCodes);
+      .in("sku_code", chunk);
     if (skuError) throw skuError;
 
     for (const sku of skus ?? []) {
