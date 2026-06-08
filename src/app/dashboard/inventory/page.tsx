@@ -1024,7 +1024,7 @@ export default function InventoryPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="mt-10">
         <CardHeader>
           <CardTitle>Upcoming NPD stock</CardTitle>
           <CardDescription>
