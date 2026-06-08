@@ -10,7 +10,6 @@ export async function GET() {
       .select(
         "id, sku_code, name, is_bundle, product_franchises(name)",
       )
-      .eq("is_bundle", false)
       .order("sku_code");
     if (error) throw error;
 
@@ -26,6 +25,7 @@ export async function GET() {
         id: row.id,
         sku_code: row.sku_code,
         name: row.name,
+        is_bundle: row.is_bundle,
         franchise_name: franchiseName,
       };
     });

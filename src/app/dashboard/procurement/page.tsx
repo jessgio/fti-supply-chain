@@ -43,6 +43,7 @@ interface SkuOption {
   id: string;
   sku_code: string;
   name: string | null;
+  is_bundle?: boolean;
   franchise_name?: string | null;
 }
 

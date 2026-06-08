@@ -8,6 +8,7 @@ export interface SkuSearchOption {
   id: string;
   sku_code: string;
   name: string | null;
+  is_bundle?: boolean;
   franchise_name?: string | null;
 }
 
@@ -159,8 +160,15 @@ export function SkuSearchInput({
                 onMouseEnter={() => setHighlight(idx)}
                 onClick={() => selectOption(option)}
               >
-                <span className="font-mono text-xs font-medium text-stone-900">
-                  {option.sku_code}
+                <span className="flex items-center gap-1.5">
+                  <span className="font-mono text-xs font-medium text-stone-900">
+                    {option.sku_code}
+                  </span>
+                  {option.is_bundle && (
+                    <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700">
+                      Bundle
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-stone-500">
                   {[option.franchise_name, option.name].filter(Boolean).join(" · ") ||
