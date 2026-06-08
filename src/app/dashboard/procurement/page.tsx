@@ -1,8 +1,18 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, PackageCheck, Truck, Pencil, Trash2 } from "lucide-react";
+import {
+  Plus,
+  PackageCheck,
+  Truck,
+  Pencil,
+  Trash2,
+  ChevronRight,
+  ChevronDown,
+  Search,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -85,6 +95,17 @@ function ProcurementInner() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(Boolean(initialSku));
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
+  const [skuQuery, setSkuQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   const [prefill, setPrefill] = useState<{ sku: string; qty: number } | null>(
     initialSku
       ? { sku: initialSku, qty: Number(searchParams.get("qty") ?? 0) }
@@ -162,6 +183,19 @@ function ProcurementInner() {
     };
   }, [pos, now]);
 
+  const skuQ = skuQuery.trim().toLowerCase();
+
+  const lineMatchesSku = (line: PurchaseOrderLine): boolean =>
+    skuQ.length > 0 &&
+    ((line.sku_code ?? "").toLowerCase().includes(skuQ) ||
+      (line.sku_name ?? "").toLowerCase().includes(skuQ));
+
+  const filteredPos = useMemo(() => {
+    if (!skuQ) return pos;
+    return pos.filter((po) => (po.lines ?? []).some(lineMatchesSku));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos, skuQ]);
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -223,11 +257,38 @@ function ProcurementInner() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Purchase orders</CardTitle>
-          <CardDescription>
-            {pos.length} order{pos.length === 1 ? "" : "s"}
-            {statusFilter ? ` · ${STATUS_LABELS[statusFilter]}` : ""}
-          </CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Purchase orders</CardTitle>
+              <CardDescription>
+                {skuQ
+                  ? `${filteredPos.length} of ${pos.length} order${
+                      pos.length === 1 ? "" : "s"
+                    } contain “${skuQuery.trim()}”`
+                  : `${pos.length} order${pos.length === 1 ? "" : "s"}`}
+                {statusFilter ? ` · ${STATUS_LABELS[statusFilter]}` : ""}
+              </CardDescription>
+            </div>
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+              <Input
+                className="pl-8 pr-8"
+                placeholder="Find POs by SKU or name…"
+                value={skuQuery}
+                onChange={(e) => setSkuQuery(e.target.value)}
+              />
+              {skuQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSkuQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                  aria-label="Clear SKU search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {loading ? (
@@ -239,10 +300,15 @@ function ProcurementInner() {
               No purchase orders yet. Create one from a forecast recommendation
               or with the button above.
             </p>
+          ) : filteredPos.length === 0 ? (
+            <p className="text-sm text-stone-500">
+              No purchase orders contain a SKU matching “{skuQuery.trim()}”.
+            </p>
           ) : (
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-stone-200 text-stone-500">
+                  <th className="w-8 py-2" />
                   <th className="py-2 pr-4">PO</th>
                   <th className="py-2 pr-4">Supplier</th>
                   <th className="py-2 pr-4">Status</th>
@@ -254,30 +320,140 @@ function ProcurementInner() {
                 </tr>
               </thead>
               <tbody>
-                {pos.map((po) => (
-                  <tr key={po.id} className="border-b border-stone-100">
-                    <td className="py-2 pr-4 font-medium text-stone-900">
-                      {po.po_number}
-                    </td>
-                    <td className="py-2 pr-4">{po.supplier_name ?? "—"}</td>
-                    <td className="py-2 pr-4">
-                      <StatusBadge status={po.status} />
-                    </td>
-                    <td className="py-2 pr-4">{po.lines?.length ?? 0}</td>
-                    <td className="py-2 pr-4">{formatNumber(poOpenQty(po))}</td>
-                    <td className="py-2 pr-4">{formatCurrency(poTotal(po))}</td>
-                    <td className="py-2 pr-4">{po.expected_date ?? "—"}</td>
-                    <td className="py-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setDetailPo(po)}
-                      >
-                        Manage
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredPos.map((po) => {
+                  const isOpen = expanded.has(po.id) || skuQ.length > 0;
+                  const lines = po.lines ?? [];
+                  return (
+                    <Fragment key={po.id}>
+                      <tr className="border-b border-stone-100">
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(po.id)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                            aria-label={isOpen ? "Collapse" : "Expand"}
+                            aria-expanded={isOpen}
+                          >
+                            {isOpen ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="py-2 pr-4 font-medium text-stone-900">
+                          {po.po_number}
+                        </td>
+                        <td className="py-2 pr-4">{po.supplier_name ?? "—"}</td>
+                        <td className="py-2 pr-4">
+                          <StatusBadge status={po.status} />
+                        </td>
+                        <td className="py-2 pr-4">{lines.length}</td>
+                        <td className="py-2 pr-4">
+                          {formatNumber(poOpenQty(po))}
+                        </td>
+                        <td className="py-2 pr-4">
+                          {formatCurrency(poTotal(po))}
+                        </td>
+                        <td className="py-2 pr-4">{po.expected_date ?? "—"}</td>
+                        <td className="py-2 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDetailPo(po)}
+                          >
+                            Manage
+                          </Button>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="border-b border-stone-100 bg-stone-50/60">
+                          <td />
+                          <td colSpan={8} className="py-2 pr-4">
+                            {lines.length === 0 ? (
+                              <p className="py-1 text-xs text-stone-500">
+                                No line items.
+                              </p>
+                            ) : (
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="text-stone-400">
+                                    <th className="py-1 pr-4 font-medium">
+                                      SKU
+                                    </th>
+                                    <th className="py-1 pr-4 text-right font-medium">
+                                      Ordered
+                                    </th>
+                                    <th className="py-1 pr-4 text-right font-medium">
+                                      Received
+                                    </th>
+                                    <th className="py-1 pr-4 text-right font-medium">
+                                      Open
+                                    </th>
+                                    <th className="py-1 pr-4 text-right font-medium">
+                                      Unit cost
+                                    </th>
+                                    <th className="py-1 text-right font-medium">
+                                      Line value
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {lines.map((line) => {
+                                    const open = Math.max(
+                                      0,
+                                      line.qty_ordered - line.qty_received,
+                                    );
+                                    const matched = lineMatchesSku(line);
+                                    return (
+                                      <tr
+                                        key={line.id}
+                                        className={
+                                          matched
+                                            ? "bg-amber-100/70"
+                                            : undefined
+                                        }
+                                      >
+                                        <td className="py-1 pr-4">
+                                          <span className="font-medium text-stone-800">
+                                            {line.sku_code ?? "—"}
+                                          </span>
+                                          {line.sku_name &&
+                                            line.sku_name !== line.sku_code && (
+                                              <span className="block text-stone-500">
+                                                {line.sku_name}
+                                              </span>
+                                            )}
+                                        </td>
+                                        <td className="py-1 pr-4 text-right">
+                                          {formatNumber(line.qty_ordered)}
+                                        </td>
+                                        <td className="py-1 pr-4 text-right">
+                                          {formatNumber(line.qty_received)}
+                                        </td>
+                                        <td className="py-1 pr-4 text-right">
+                                          {formatNumber(open)}
+                                        </td>
+                                        <td className="py-1 pr-4 text-right">
+                                          {line.unit_cost != null
+                                            ? formatCurrency(line.unit_cost)
+                                            : "—"}
+                                        </td>
+                                        <td className="py-1 text-right">
+                                          {formatCurrency(lineTotal(line))}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}
