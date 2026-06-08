@@ -19,6 +19,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
 
+    const fullReprocess = request.headers.get("x-sales-full-reprocess") === "1";
+
     const buffer = await file.arrayBuffer();
     const rows = await parseSalesExcel(buffer);
     if (rows.length === 0) {
@@ -32,7 +34,9 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient();
-    const result = await importSales(supabase, rows, file.name);
+    const result = await importSales(supabase, rows, file.name, {
+      mode: fullReprocess ? "full" : "incremental",
+    });
     invalidateForecastCache();
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {

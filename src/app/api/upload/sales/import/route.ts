@@ -34,6 +34,8 @@ const processFileSchema = z.object({
   phase: z.literal("process"),
   storagePath: z.string().min(1),
   filename: z.string().min(1),
+  /** Replace every sale_date in the file (signed qty / returns). Default: last 3 months only. */
+  fullReprocess: z.boolean().optional(),
 });
 
 const initSchema = z.object({
@@ -104,7 +106,9 @@ export async function POST(request: Request) {
       }
 
       const rows = await parseSalesExcel(await fileData.arrayBuffer());
-      const result = await importSales(supabase, rows, body.filename);
+      const result = await importSales(supabase, rows, body.filename, {
+        mode: body.fullReprocess ? "full" : "incremental",
+      });
 
       await supabase.storage.from(UPLOAD_BUCKET).remove([body.storagePath]);
       invalidateForecastCache();

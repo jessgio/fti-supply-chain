@@ -47,3 +47,31 @@ export function filterSalesRowsForUpload(
     rangeEnd: dates[dates.length - 1]!,
   };
 }
+
+/** Full WMS reprocess: every row in the file replaces its sale_date range in the DB. */
+export function filterSalesRowsForFullReprocess(rows: SalesRow[]): {
+  eligible: SalesRow[];
+  skippedOlder: number;
+  cutoff: string;
+  rangeStart: string;
+  rangeEnd: string;
+} {
+  if (rows.length === 0) {
+    return {
+      eligible: [],
+      skippedOlder: 0,
+      cutoff: "",
+      rangeStart: "",
+      rangeEnd: "",
+    };
+  }
+
+  const dates = rows.map((row) => row.sale_date).sort();
+  return {
+    eligible: rows,
+    skippedOlder: 0,
+    cutoff: dates[0]!,
+    rangeStart: dates[0]!,
+    rangeEnd: dates[dates.length - 1]!,
+  };
+}

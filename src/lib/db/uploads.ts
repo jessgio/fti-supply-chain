@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { filterSalesRowsForUpload, SALES_UPLOAD_MONTHS } from "@/lib/sales/upload-window";
+import {
+  filterSalesRowsForFullReprocess,
+  filterSalesRowsForUpload,
+  SALES_UPLOAD_MONTHS,
+} from "@/lib/sales/upload-window";
 import { slugify } from "@/lib/utils";
 import type { BundleComponent, MappingRow, SalesRow, StockRow } from "@/types/database";
 
@@ -406,22 +410,27 @@ export async function finalizeSalesImport(
   if (refreshError) throw refreshError;
 }
 
+export type SalesImportMode = "incremental" | "full";
+
 export async function importSales(
   supabase: SupabaseClient,
   rows: SalesRow[],
   filename: string,
+  options: { mode?: SalesImportMode } = {},
 ) {
-  const {
-    eligible,
-    skippedOlder,
-    cutoff,
-    rangeStart,
-    rangeEnd,
-  } = filterSalesRowsForUpload(rows);
+  const mode = options.mode ?? "incremental";
+  const filtered =
+    mode === "full"
+      ? filterSalesRowsForFullReprocess(rows)
+      : filterSalesRowsForUpload(rows);
+
+  const { eligible, skippedOlder, cutoff, rangeStart, rangeEnd } = filtered;
 
   if (eligible.length === 0) {
     throw new Error(
-      `No sales rows on or after ${cutoff}. Upload the last ${SALES_UPLOAD_MONTHS} months only; older data is kept automatically.`,
+      mode === "full"
+        ? "No sales rows found in file."
+        : `No sales rows on or after ${cutoff}. Upload the last ${SALES_UPLOAD_MONTHS} months only; older data is kept automatically.`,
     );
   }
 
@@ -452,6 +461,7 @@ export async function importSales(
     cutoff,
     rangeStart,
     rangeEnd,
+    mode,
   };
 }
 

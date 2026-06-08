@@ -1,7 +1,11 @@
 import { XMLParser } from "fast-xml-parser";
 import { SaxesParser, type SaxesTag } from "saxes";
 import yauzl from "yauzl";
-import { isIncludedWmsSalesRow } from "@/lib/excel/sales-filters";
+import {
+  isIncludedWmsSalesRow,
+  normalizeWmsSalesAmounts,
+  parseWmsSalesNumber,
+} from "@/lib/excel/sales-filters";
 import { parseExcelDate } from "@/lib/excel/date-parse";
 import type { SalesRow } from "@/types/database";
 
@@ -127,16 +131,19 @@ function rowToSales(
   const channel = get("channel").trim();
   if (!sale_date || !channel) return null;
 
-  const qty = toNumber(get("qty"));
-  const netSales = toNumber(get("nettsales"));
+  const amounts = normalizeWmsSalesAmounts(
+    status,
+    parseWmsSalesNumber(get("qty")),
+    parseWmsSalesNumber(get("nettsales")),
+  );
   const harga = toNumber(get("harga"));
 
   return {
     sale_date,
     channel,
     sku_code: sku,
-    qty_sold: qty,
-    net_sales: netSales,
+    qty_sold: amounts.qty_sold,
+    net_sales: amounts.net_sales,
     retail_price: harga > 0 ? harga : undefined,
   };
 }

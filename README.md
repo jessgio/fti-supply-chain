@@ -66,9 +66,11 @@ Supply chain and sales intelligence platform for **From This Island**. Upload Ex
 
 ### Sales (WMS export — `FTI Sales.xlsx`)
 
-Sheet `Data1`. `FAKTUR` rows are imported; `CANCELED` orders are excluded.
+Sheet `Data1`. `FAKTUR` rows are imported; `CANCELED` orders are excluded. Negative QTY / Nett Sales in the file are kept as-is; `RETURNED` rows with positive QTY are flipped to negative so franchise totals net out returns.
 
 Re-upload only the **last 3 calendar months** (current month plus the two prior). Rows older than that window are ignored. Existing records for the same date range are removed before import so duplicates are replaced; sales before the window are kept.
+
+For a **full historical reprocess** (e.g. after return-qty import fixes), check **Full reprocess** on the sales upload card or run `npx tsx scripts/reprocess-all-sales.ts path/to/FTI\ Sales.xlsx`. That replaces every `sale_date` present in the WMS file, not just the rolling 3-month window.
 
 | WMS column | Maps to |
 |------------|---------|

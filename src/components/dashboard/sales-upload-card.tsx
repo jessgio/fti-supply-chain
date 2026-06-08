@@ -40,6 +40,7 @@ async function postImport(body: unknown) {
 
 export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
   const [file, setFile] = useState<File | null>(null);
+  const [fullReprocess, setFullReprocess] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -70,6 +71,7 @@ export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
         phase: "process",
         storagePath: String(path),
         filename: file.name,
+        fullReprocess,
       });
 
       const parts = [
@@ -111,6 +113,16 @@ export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
             className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-stone-600">
+          <input
+            type="checkbox"
+            checked={fullReprocess}
+            onChange={(e) => setFullReprocess(e.target.checked)}
+            disabled={loading}
+          />
+          Full reprocess — replace every sale date in the file (use after return-qty
+          fixes; slower, needs complete WMS export)
         </label>
         <Button disabled={!file || loading} onClick={handleUpload}>
           {loading ? "Uploading..." : "Upload"}

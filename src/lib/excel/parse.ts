@@ -1,7 +1,11 @@
 import * as XLSX from "xlsx";
 import { z } from "zod";
 import { parseExcelDate } from "@/lib/excel/date-parse";
-import { isIncludedWmsSalesRow } from "@/lib/excel/sales-filters";
+import {
+  isIncludedWmsSalesRow,
+  normalizeWmsSalesAmounts,
+  parseWmsSalesNumber,
+} from "@/lib/excel/sales-filters";
 import {
   isStockImportLocation,
   STOCK_QTY_COLUMN,
@@ -105,6 +109,20 @@ function parseWmsSalesRows(rows: Record<string, unknown>[]): SalesRow[] {
     .filter(isIncludedSalesRow)
     .map((row) => {
       const retailPrice = toNumber(pick(row, ["harga", "price", "rsp"]));
+      const status = String(pick(row, ["status"]) ?? "");
+      const amounts = normalizeWmsSalesAmounts(
+        status,
+        parseWmsSalesNumber(pick(row, ["qty", "quantity", "qty_sold"])),
+        parseWmsSalesNumber(
+          pick(row, [
+            "nett sales",
+            "nettsales",
+            "net sales",
+            "netsales",
+            "net_sales",
+          ]),
+        ),
+      );
       const parsed = salesSchema.safeParse({
         sale_date: parseExcelDate(pick(row, ["tanggal", "sale_date", "date"])),
         channel: String(
@@ -114,16 +132,8 @@ function parseWmsSalesRows(rows: Record<string, unknown>[]): SalesRow[] {
         sku_code: String(
           pick(row, ["sku", "sku_code", "product_sku", "item_sku"]) ?? "",
         ).trim(),
-        qty_sold: toNumber(pick(row, ["qty", "quantity", "qty_sold"])),
-        net_sales: toNumber(
-          pick(row, [
-            "nett sales",
-            "nettsales",
-            "net sales",
-            "netsales",
-            "net_sales",
-          ]),
-        ),
+        qty_sold: amounts.qty_sold,
+        net_sales: amounts.net_sales,
         retail_price: retailPrice > 0 ? retailPrice : undefined,
       });
       return parsed.success ? parsed.data : null;
