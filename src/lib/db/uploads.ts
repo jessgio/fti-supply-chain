@@ -33,50 +33,68 @@ async function upsertChannel(
   return data.id;
 }
 
-async function upsertFranchise(
-  supabase: SupabaseClient,
-  name: string,
-): Promise<string> {
-  const slug = slugify(name);
-  const { data: existing } = await supabase
-    .from("product_franchises")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (existing?.id) return existing.id;
-
-  const { data, error } = await supabase
-    .from("product_franchises")
-    .insert({ name, slug })
-    .select("id")
-    .single();
-
-  if (error) throw error;
-  return data.id;
-}
-
-async function resolveSkuId(
-  supabase: SupabaseClient,
-  cache: Map<string, string>,
-  skuCode: string,
-): Promise<string> {
-  const cached = cache.get(skuCode);
-  if (cached) return cached;
-
-  const { data: sku } = await supabase
-    .from("skus")
-    .select("id")
-    .eq("sku_code", skuCode)
-    .maybeSingle();
-
-  const skuId = sku?.id ?? (await upsertSku(supabase, skuCode, null, false));
-  cache.set(skuCode, skuId);
-  return skuId;
-}
-
 /** PostgREST puts `.in()` filters in the URL; ~16KB header limit with long SKU codes. */
 const SKU_LOOKUP_CHUNK = 80;
+
+/** Upsert bodies go in the POST payload, so larger batches are safe. */
+const WRITE_CHUNK = 500;
+
+/** Batch upsert unique franchises (by slug) and return a slug → id map. */
+async function upsertFranchisesBatch(
+  supabase: SupabaseClient,
+  names: string[],
+): Promise<Map<string, string>> {
+  const bySlug = new Map<string, { name: string; slug: string }>();
+  for (const name of names) {
+    const slug = slugify(name);
+    if (slug) bySlug.set(slug, { name, slug });
+  }
+
+  const result = new Map<string, string>();
+  const rows = [...bySlug.values()];
+  if (rows.length === 0) return result;
+
+  for (let i = 0; i < rows.length; i += WRITE_CHUNK) {
+    const { error } = await supabase
+      .from("product_franchises")
+      .upsert(rows.slice(i, i + WRITE_CHUNK), {
+        onConflict: "slug",
+        ignoreDuplicates: true,
+      });
+    if (error) throw error;
+  }
+
+  const slugs = rows.map((row) => row.slug);
+  for (let i = 0; i < slugs.length; i += SKU_LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from("product_franchises")
+      .select("id, slug")
+      .in("slug", slugs.slice(i, i + SKU_LOOKUP_CHUNK));
+    if (error) throw error;
+    for (const row of data ?? []) result.set(row.slug, row.id);
+  }
+  return result;
+}
+
+interface SkuUpsertRow {
+  sku_code: string;
+  franchise_id: string | null;
+  is_bundle: boolean;
+  name: string;
+}
+
+/** Batch upsert SKU rows, overwriting franchise_id / is_bundle / name on conflict. */
+async function upsertSkuRows(
+  supabase: SupabaseClient,
+  rows: SkuUpsertRow[],
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += WRITE_CHUNK) {
+    const { error } = await supabase
+      .from("skus")
+      .upsert(rows.slice(i, i + WRITE_CHUNK), { onConflict: "sku_code" });
+    if (error) throw error;
+  }
+}
 
 /** Resolve many SKU codes with batched selects + upserts instead of per-row queries. */
 async function ensureSkuIdsInCache(
@@ -148,42 +166,6 @@ async function applyRetailPrices(
   }
 }
 
-async function upsertSku(
-  supabase: SupabaseClient,
-  skuCode: string,
-  franchiseId: string | null,
-  isBundle: boolean,
-  name?: string,
-): Promise<string> {
-  const { data: existing } = await supabase
-    .from("skus")
-    .select("id")
-    .eq("sku_code", skuCode)
-    .maybeSingle();
-
-  if (existing?.id) {
-    await supabase
-      .from("skus")
-      .update({ franchise_id: franchiseId, is_bundle: isBundle, name })
-      .eq("id", existing.id);
-    return existing.id;
-  }
-
-  const { data, error } = await supabase
-    .from("skus")
-    .insert({
-      sku_code: skuCode,
-      franchise_id: franchiseId,
-      is_bundle: isBundle,
-      name: name ?? skuCode,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw error;
-  return data.id;
-}
-
 export async function importMappings(
   supabase: SupabaseClient,
   mappings: MappingRow[],
@@ -202,28 +184,45 @@ export async function importMappings(
 
   if (batchError) throw batchError;
 
-  const skuIdByCode = new Map<string, string>();
   const mappedSkuCodes = new Set(mappings.map((row) => row.sku_code));
 
-  // Franchise sheet: single SKUs only — franchises roll up aggregated unit sales
-  for (const row of mappings) {
-    const franchiseId = await upsertFranchise(supabase, row.franchise_name);
-    const skuId = await upsertSku(
-      supabase,
-      row.sku_code,
-      franchiseId,
-      false,
-      row.sku_name,
-    );
-    skuIdByCode.set(row.sku_code, skuId);
-  }
+  // Franchise sheet: single SKUs only — franchises roll up aggregated unit sales.
+  const franchiseIdBySlug = await upsertFranchisesBatch(
+    supabase,
+    mappings.map((row) => row.franchise_name),
+  );
 
-  // Bundle sheet: parent bundle SKUs (no franchise); components must be single SKUs
-  const bundleSkuCodes = new Set(bundles.map((b) => b.bundle_sku_code));
-  for (const bundleSkuCode of bundleSkuCodes) {
-    const skuId = await upsertSku(supabase, bundleSkuCode, null, true);
-    skuIdByCode.set(bundleSkuCode, skuId);
+  const singleByCode = new Map<string, SkuUpsertRow>();
+  for (const row of mappings) {
+    singleByCode.set(row.sku_code, {
+      sku_code: row.sku_code,
+      franchise_id: franchiseIdBySlug.get(slugify(row.franchise_name)) ?? null,
+      is_bundle: false,
+      name: row.sku_name ?? row.sku_code,
+    });
   }
+  await upsertSkuRows(supabase, [...singleByCode.values()]);
+
+  // Bundle sheet: parent bundle SKUs (no franchise); components must be single SKUs.
+  const bundleSkuCodes = [...new Set(bundles.map((b) => b.bundle_sku_code))];
+  await upsertSkuRows(
+    supabase,
+    bundleSkuCodes.map((sku_code) => ({
+      sku_code,
+      franchise_id: null,
+      is_bundle: true,
+      name: sku_code,
+    })),
+  );
+
+  // Resolve every SKU id in one batched pass; brand-new components are inserted
+  // (without clobbering existing franchise mappings) by ensureSkuIdsInCache.
+  const skuIdByCode = new Map<string, string>();
+  await ensureSkuIdsInCache(supabase, skuIdByCode, [
+    ...singleByCode.keys(),
+    ...bundleSkuCodes,
+    ...bundles.map((b) => b.component_sku_code),
+  ]);
 
   const bundleInsertByPair = new Map<
     string,
@@ -235,16 +234,6 @@ export async function importMappings(
   >();
 
   for (const bundle of bundles) {
-    if (!skuIdByCode.has(bundle.component_sku_code)) {
-      const skuId = await upsertSku(
-        supabase,
-        bundle.component_sku_code,
-        null,
-        false,
-      );
-      skuIdByCode.set(bundle.component_sku_code, skuId);
-    }
-
     const bundleId = skuIdByCode.get(bundle.bundle_sku_code);
     const componentId = skuIdByCode.get(bundle.component_sku_code);
     if (!bundleId || !componentId) continue;
@@ -259,9 +248,8 @@ export async function importMappings(
 
   const bundleInserts = [...bundleInsertByPair.values()];
 
-  const bundleChunkSize = 500;
-  for (let i = 0; i < bundleInserts.length; i += bundleChunkSize) {
-    const chunk = bundleInserts.slice(i, i + bundleChunkSize);
+  for (let i = 0; i < bundleInserts.length; i += WRITE_CHUNK) {
+    const chunk = bundleInserts.slice(i, i + WRITE_CHUNK);
     const { error } = await supabase.from("bundle_components").upsert(chunk, {
       onConflict: "bundle_sku_id,component_sku_id",
     });
@@ -280,9 +268,8 @@ export async function importMappings(
     .filter((sku) => !mappedSkuCodes.has(sku.sku_code))
     .map((sku) => sku.id);
   if (staleIds.length > 0) {
-    const chunkSize = 500;
-    for (let i = 0; i < staleIds.length; i += chunkSize) {
-      const chunk = staleIds.slice(i, i + chunkSize);
+    for (let i = 0; i < staleIds.length; i += WRITE_CHUNK) {
+      const chunk = staleIds.slice(i, i + WRITE_CHUNK);
       const { error: clearError } = await supabase
         .from("skus")
         .update({ franchise_id: null })
