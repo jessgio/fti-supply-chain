@@ -10,12 +10,46 @@ import { parseExcelDate } from "@/lib/excel/date-parse";
 import type { SalesRow } from "@/types/database";
 
 function attr(tag: SaxesTag, name: string): string | undefined {
-  const value = tag.attributes[name];
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && "value" in value) {
-    return String(value.value);
+  const attrs = tag.attributes;
+  const direct = attrs[name];
+  if (typeof direct === "string") return direct;
+  if (direct && typeof direct === "object" && "value" in direct) {
+    return String(direct.value);
+  }
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key !== name && !key.endsWith(`:${name}`)) continue;
+    if (typeof value === "string") return value;
+    if (value && typeof value === "object" && "value" in value) {
+      return String(value.value);
+    }
   }
   return undefined;
+}
+
+function buildColumnValues(row: Map<number, string>): string[] {
+  let maxCol = 0;
+  const values: string[] = [];
+  for (const [col, value] of row) {
+    values[col] = value;
+    maxCol = Math.max(maxCol, col);
+  }
+  return values.length === 0 ? values : values.slice(0, maxCol + 1);
+}
+
+function buildHeaderMap(values: string[]): Record<string, number> | null {
+  const headerMap: Record<string, number> = {};
+  values.forEach((header, index) => {
+    const key = normalizeHeader(header);
+    if (key) headerMap[key] = index;
+  });
+  if (
+    headerMap.tanggal === undefined ||
+    headerMap.channel === undefined ||
+    headerMap.sku === undefined
+  ) {
+    return null;
+  }
+  return headerMap;
 }
 
 function normalizeHeader(value: string): string {
@@ -153,23 +187,25 @@ async function streamSheetRows(
   sharedStrings: string[],
   onRow: (values: string[]) => void,
 ): Promise<void> {
-  const parser = new SaxesParser();
+  const parser = new SaxesParser({ xmlns: true });
 
   let inCell = false;
   let inValue = false;
+  let inInlineString = false;
+  let inInlineText = false;
   let cellType: string | undefined;
   let cellRef = "";
   let cellValue = "";
+  let inlineValue = "";
   let currentRow = new Map<number, string>();
+  /** WMS exports often omit `r`; cells are sequential within the row. */
+  let nextCol = 0;
 
   const flushRow = () => {
     if (currentRow.size === 0) return;
-    const values: string[] = [];
-    for (const [col, value] of currentRow) {
-      values[col] = value;
-    }
-    onRow(values);
+    onRow(buildColumnValues(currentRow));
     currentRow = new Map();
+    nextCol = 0;
   };
 
   parser.on("opentag", (tag) => {
@@ -179,25 +215,42 @@ async function streamSheetRows(
       cellType = attr(tag, "t");
       cellRef = attr(tag, "r") ?? "";
       cellValue = "";
+      inlineValue = "";
     } else if (name === "v" && inCell) {
       inValue = true;
       cellValue = "";
+    } else if (name === "is" && inCell) {
+      inInlineString = true;
+    } else if (name === "t" && inInlineString) {
+      inInlineText = true;
+      inlineValue = "";
     }
   });
 
   parser.on("text", (text) => {
     if (inValue) cellValue += text;
+    if (inInlineText) inlineValue += text;
   });
 
   parser.on("closetag", (tag) => {
     const name = tag.name.replace(/^.*:/, "");
-    if (name === "v" && inCell) {
+    if (name === "t" && inInlineString) {
+      inInlineText = false;
+    } else if (name === "is") {
+      inInlineString = false;
+    } else if (name === "v" && inCell) {
       inValue = false;
     } else if (name === "c" && inCell) {
-      const col = columnToIndex(cellColumn(cellRef));
+      const col = cellRef
+        ? columnToIndex(cellColumn(cellRef))
+        : nextCol;
       if (col >= 0) {
-        const value = resolveCellValue(cellValue, cellType, sharedStrings);
+        const value =
+          cellType === "inlineStr" || inlineValue
+            ? inlineValue
+            : resolveCellValue(cellValue, cellType, sharedStrings);
         currentRow.set(col, value);
+        nextCol = col + 1;
       }
       inCell = false;
     } else if (name === "row") {
@@ -283,12 +336,8 @@ export async function scanFtiSalesStatusCounts(buffer: Buffer): Promise<{
 
     await streamSheetRows(sheetStream, sharedStrings, (values) => {
       if (!headerMap) {
-        headerMap = {};
-        values.forEach((header, index) => {
-          const key = normalizeHeader(header);
-          if (key) headerMap![key] = index;
-        });
-        return;
+        headerMap = buildHeaderMap(values);
+        if (!headerMap) return;
       }
 
       const status = getRowField(values, headerMap, "status").trim() || "(empty)";
@@ -343,19 +392,7 @@ export async function iterateFtiSalesXlsx(
 
     await streamSheetRows(sheetStream, sharedStrings, (values) => {
       if (!headerMap) {
-        headerMap = {};
-        values.forEach((header, index) => {
-          const key = normalizeHeader(header);
-          if (key) headerMap![key] = index;
-        });
-        return;
-      }
-
-      if (
-        headerMap.tanggal === undefined ||
-        headerMap.channel === undefined ||
-        headerMap.sku === undefined
-      ) {
+        headerMap = buildHeaderMap(values);
         return;
       }
 
