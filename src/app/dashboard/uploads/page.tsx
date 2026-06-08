@@ -1,4 +1,5 @@
 import { UploadCard } from "@/components/dashboard/upload-card";
+import { SalesUploadCard } from "@/components/dashboard/sales-upload-card";
 import { stockImportLocationsLabel } from "@/lib/stock/locations";
 
 export default function UploadsPage() {
@@ -18,10 +19,9 @@ export default function UploadsPage() {
           description="Upload FTI Product Franchises.xlsx first, then FTI Bundles and Components.xlsx. Or upload the combined bundles file (includes both sheets)."
           endpoint="/api/upload/mappings"
         />
-        <UploadCard
+        <SalesUploadCard
           title="Sales transactions"
-          description="Upload FTI Sales.xlsx (WMS) for the last 3 months (current month plus the two prior). Older sales are kept; overlapping dates in the file replace existing records. FAKTUR rows only; CANCELED orders are excluded."
-          endpoint="/api/upload/sales"
+          description="Upload FTI Sales.xlsx (WMS) for the last 3 months (current month plus the two prior). Older sales are kept; overlapping dates in the file replace existing records. FAKTUR rows only; CANCELED orders are excluded. Large files are parsed in your browser to avoid upload size limits."
         />
         <UploadCard
           title="Stock levels"

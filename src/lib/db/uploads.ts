@@ -294,6 +294,118 @@ export async function importMappings(
   };
 }
 
+export async function beginSalesImport(
+  supabase: SupabaseClient,
+  params: {
+    filename: string;
+    rangeStart: string;
+    rangeEnd: string;
+    rowCount: number;
+  },
+): Promise<{ batchId: string; replacedCount: number }> {
+  const { data: replacedCount, error: replaceError } = await supabase.rpc(
+    "replace_sales_records_in_range",
+    { from_date: params.rangeStart, to_date: params.rangeEnd },
+  );
+  if (replaceError) throw replaceError;
+
+  const { data: batch, error: batchError } = await supabase
+    .from("upload_batches")
+    .insert({
+      upload_type: "sales",
+      filename: params.filename,
+      row_count: params.rowCount,
+    })
+    .select("id")
+    .single();
+
+  if (batchError) throw batchError;
+
+  return { batchId: batch.id, replacedCount: replacedCount ?? 0 };
+}
+
+export async function appendSalesImportRows(
+  supabase: SupabaseClient,
+  batchId: string,
+  rows: SalesRow[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  const channelCache = new Map<string, string>();
+  const skuCache = new Map<string, string>();
+  const chunkSize = 2000;
+  let chunk: {
+    sale_date: string;
+    channel_id: string;
+    sku_id: string;
+    qty_sold: number;
+    net_sales: number;
+    upload_batch_id: string;
+  }[] = [];
+
+  async function flushChunk() {
+    if (chunk.length === 0) return;
+    const { error } = await supabase.from("sales_records").insert(chunk);
+    if (error) throw error;
+    chunk = [];
+  }
+
+  for (const row of rows) {
+    let channelId = channelCache.get(row.channel);
+    if (!channelId) {
+      channelId = await upsertChannel(supabase, row.channel);
+      channelCache.set(row.channel, channelId);
+    }
+
+    const skuId = await resolveSkuId(supabase, skuCache, row.sku_code);
+
+    chunk.push({
+      sale_date: row.sale_date,
+      channel_id: channelId,
+      sku_id: skuId,
+      qty_sold: row.qty_sold,
+      net_sales: row.net_sales,
+      upload_batch_id: batchId,
+    });
+
+    if (chunk.length >= chunkSize) {
+      await flushChunk();
+    }
+  }
+
+  await flushChunk();
+  return rows.length;
+}
+
+export async function finalizeSalesImport(
+  supabase: SupabaseClient,
+  retailBySku: Record<string, number> = {},
+): Promise<void> {
+  const skuCodes = Object.keys(retailBySku);
+  if (skuCodes.length > 0) {
+    const { data: skus, error: skuError } = await supabase
+      .from("skus")
+      .select("id, sku_code, retail_price")
+      .in("sku_code", skuCodes);
+    if (skuError) throw skuError;
+
+    for (const sku of skus ?? []) {
+      const nextPrice = retailBySku[sku.sku_code];
+      if (!nextPrice || nextPrice <= Number(sku.retail_price ?? 0)) continue;
+      const { error } = await supabase
+        .from("skus")
+        .update({ retail_price: nextPrice })
+        .eq("id", sku.id);
+      if (error) throw error;
+    }
+  }
+
+  const { error: refreshError } = await supabase.rpc(
+    "refresh_franchise_sales_daily_agg",
+  );
+  if (refreshError) throw refreshError;
+}
+
 export async function importSales(
   supabase: SupabaseClient,
   rows: SalesRow[],
@@ -313,94 +425,29 @@ export async function importSales(
     );
   }
 
-  const { data: replacedCount, error: replaceError } = await supabase.rpc(
-    "replace_sales_records_in_range",
-    { from_date: rangeStart, to_date: rangeEnd },
-  );
-  if (replaceError) throw replaceError;
-
-  const { data: batch, error: batchError } = await supabase
-    .from("upload_batches")
-    .insert({
-      upload_type: "sales",
-      filename,
-      row_count: eligible.length,
-    })
-    .select("id")
-    .single();
-
-  if (batchError) throw batchError;
-
-  const channelCache = new Map<string, string>();
-  const skuCache = new Map<string, string>();
-  const retailBySku = new Map<string, number>();
-  const chunkSize = 2000;
-  let chunk: {
-    sale_date: string;
-    channel_id: string;
-    sku_id: string;
-    qty_sold: number;
-    net_sales: number;
-    upload_batch_id: string;
-  }[] = [];
-
-  async function flushChunk() {
-    if (chunk.length === 0) return;
-    const { error } = await supabase.from("sales_records").insert(chunk);
-    if (error) throw error;
-    chunk = [];
-  }
-
+  const retailBySku: Record<string, number> = {};
   for (const row of eligible) {
-    let channelId = channelCache.get(row.channel);
-    if (!channelId) {
-      channelId = await upsertChannel(supabase, row.channel);
-      channelCache.set(row.channel, channelId);
-    }
-
-    const skuId = await resolveSkuId(supabase, skuCache, row.sku_code);
-
     if (row.retail_price && row.retail_price > 0) {
-      const current = retailBySku.get(row.sku_code) ?? 0;
-      if (row.retail_price > current) {
-        retailBySku.set(row.sku_code, row.retail_price);
-      }
-    }
-
-    chunk.push({
-      sale_date: row.sale_date,
-      channel_id: channelId,
-      sku_id: skuId,
-      qty_sold: row.qty_sold,
-      net_sales: row.net_sales,
-      upload_batch_id: batch.id,
-    });
-
-    if (chunk.length >= chunkSize) {
-      await flushChunk();
+      retailBySku[row.sku_code] = Math.max(
+        retailBySku[row.sku_code] ?? 0,
+        row.retail_price,
+      );
     }
   }
 
-  await flushChunk();
-
-  for (const [skuCode, retailPrice] of retailBySku) {
-    const skuId = skuCache.get(skuCode);
-    if (!skuId) continue;
-    await supabase
-      .from("skus")
-      .update({ retail_price: retailPrice })
-      .eq("id", skuId);
-  }
-
-  const { error: refreshError } = await supabase.rpc(
-    "refresh_franchise_sales_daily_agg",
-  );
-  if (refreshError) throw refreshError;
+  const { batchId, replacedCount } = await beginSalesImport(supabase, {
+    filename,
+    rangeStart,
+    rangeEnd,
+    rowCount: eligible.length,
+  });
+  await appendSalesImportRows(supabase, batchId, eligible);
+  await finalizeSalesImport(supabase, retailBySku);
 
   return {
-    batchId: batch.id,
+    batchId,
     rowCount: eligible.length,
-    replacedCount: replacedCount ?? 0,
+    replacedCount,
     skippedOlder,
     cutoff,
     rangeStart,
