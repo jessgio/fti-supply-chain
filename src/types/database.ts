@@ -187,6 +187,25 @@ export interface ForecastInsight {
   risks: string[];
 }
 
+/**
+ * Upcoming NPD: a SKU that has physical stock in the forecast locations but no
+ * sales history, so it is excluded from the demand forecast. Surfaced on its
+ * own so on-hand stock and incoming PO batches are still visible.
+ */
+export interface NpdStockRow {
+  sku_code: string;
+  sku_name: string | null;
+  franchise_name: string | null;
+  qty_on_hand: number;
+  stock_as_of: string | null;
+  /** Total open (un-received) qty across the SKU's incoming PO batches. */
+  incoming_qty: number;
+  /** Earliest expected arrival across open PO batches, if any has a date. */
+  earliest_incoming_batch_date: string | null;
+  /** Number of open PO batches (incl. those without an expected date). */
+  open_batch_count: number;
+}
+
 export type PoStatus =
   | "planned"
   | "ordered"

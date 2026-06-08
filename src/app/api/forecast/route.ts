@@ -5,6 +5,7 @@ import {
   DEFAULT_SAFETY_STOCK_MONTHS,
   DEFAULT_TARGET_STOCK_MONTHS,
 } from "@/lib/forecast/demand";
+import { loadNpdStockSkus } from "@/lib/forecast/npd-stock";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
@@ -29,20 +30,21 @@ export async function GET(request: Request) {
 
     const supabase = createAdminClient();
 
-    const { recommendations, skuCount } = await loadRestockRecommendations(
-      supabase,
-      {
+    const [{ recommendations, skuCount }, npdSkus] = await Promise.all([
+      loadRestockRecommendations(supabase, {
         leadTimeDays,
         safetyStockMonths,
         targetStockMonths,
         historyDays,
         ewmaDays,
-      },
-    );
+      }),
+      loadNpdStockSkus(supabase),
+    ]);
 
     return NextResponse.json({
       recommendations,
       sku_count: skuCount,
+      npd_skus: npdSkus,
     });
   } catch (error) {
     console.error("Forecast failed:", error);

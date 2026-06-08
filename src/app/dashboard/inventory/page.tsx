@@ -37,6 +37,7 @@ import {
 import { applySeasonalityToggle } from "@/lib/forecast/seasonality-toggle";
 import type {
   DemandPattern,
+  NpdStockRow,
   RestockRecommendation,
   VelocityClass,
 } from "@/types/database";
@@ -315,6 +316,7 @@ export default function InventoryPage() {
   const [rawRecommendations, setRawRecommendations] = useState<
     RestockRecommendation[]
   >([]);
+  const [npdSkus, setNpdSkus] = useState<NpdStockRow[]>([]);
   const [seasonalityEnabled, setSeasonalityEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -371,6 +373,7 @@ export default function InventoryPage() {
         if (!res.ok) throw new Error(data.error ?? "Forecast failed");
         if (!active) return;
         setRawRecommendations(data.recommendations ?? []);
+        setNpdSkus(data.npd_skus ?? []);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Forecast failed");
       } finally {
@@ -1015,6 +1018,73 @@ export default function InventoryPage() {
                   );
                 })}
               </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Upcoming NPD stock</CardTitle>
+          <CardDescription>
+            SKUs with no sales yet that either hold stock in Gudang Finished
+            Goods, Gudang Inventory, or Gudang Inventory Offline, or have an open
+            purchase order (stock ordered ahead of launch). These are excluded
+            from the demand forecast above. Shows on-hand stock and any incoming
+            PO batches.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-sm text-stone-500">Loading…</p>
+          ) : npdSkus.length === 0 ? (
+            <p className="text-sm text-stone-500">
+              No upcoming NPD stock detected. SKUs appear here once stock arrives
+              but before they record any sales.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-stone-200">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
+                    <th className="px-3 py-2">SKU</th>
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Franchise</th>
+                    <th className="px-3 py-2 text-right">On hand</th>
+                    <th className="px-3 py-2">Stock as of</th>
+                    <th className="px-3 py-2 text-right">Incoming qty</th>
+                    <th className="px-3 py-2">Next batch in</th>
+                    <th className="px-3 py-2 text-right">Open batches</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {npdSkus.map((row) => (
+                    <tr
+                      key={row.sku_code}
+                      className="border-b border-stone-100 last:border-0"
+                    >
+                      <td className="px-3 py-2 font-medium">{row.sku_code}</td>
+                      <td className="px-3 py-2">{row.sku_name ?? "—"}</td>
+                      <td className="px-3 py-2">{row.franchise_name ?? "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        {formatNumber(row.qty_on_hand)}
+                      </td>
+                      <td className="px-3 py-2">{row.stock_as_of ?? "—"}</td>
+                      <td className="px-3 py-2 text-right text-sky-700">
+                        {row.incoming_qty > 0
+                          ? formatNumber(row.incoming_qty)
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.earliest_incoming_batch_date ?? "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {row.open_batch_count > 0 ? row.open_batch_count : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           )}
