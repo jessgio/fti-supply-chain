@@ -43,9 +43,27 @@ export async function enrichWithIncomingBatchStockout(
 
   return recommendations.map((rec) => {
     const skuBatches = batchesBySkuCode.get(rec.sku_code);
+
+    // Earliest scheduled arrival is independent of demand; show it whenever
+    // an open PO batch with an expected date exists.
+    const earliestIncomingBatchDate = skuBatches?.length
+      ? skuBatches.reduce(
+          (min, b) => (b.expected_date < min ? b.expected_date : min),
+          skuBatches[0].expected_date,
+        )
+      : null;
+
+    // Out-of-stock gap: on-hand stock empties before the next batch arrives.
+    const hasStockoutGap =
+      rec.projected_stockout_date != null &&
+      earliestIncomingBatchDate != null &&
+      rec.projected_stockout_date < earliestIncomingBatchDate;
+
     if (!skuBatches?.length || rec.forecast_daily_demand <= 0) {
       return {
         ...rec,
+        earliest_incoming_batch_date: earliestIncomingBatchDate,
+        has_stockout_gap: hasStockoutGap,
         incoming_batch_arrival_date: null,
         incoming_batch_stockout_date: null,
       };
@@ -71,6 +89,8 @@ export async function enrichWithIncomingBatchStockout(
 
     return {
       ...rec,
+      earliest_incoming_batch_date: earliestIncomingBatchDate,
+      has_stockout_gap: hasStockoutGap,
       incoming_batch_arrival_date: latestBatch?.expected_date ?? null,
       incoming_batch_stockout_date: latestLineId
         ? (pipeline.batch_depletion_by_line.get(latestLineId) ?? null)

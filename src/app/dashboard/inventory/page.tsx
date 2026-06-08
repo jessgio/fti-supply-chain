@@ -96,6 +96,7 @@ type SortKey =
   | "forecast_monthly_demand"
   | "days_until_stockout"
   | "projected_stockout_date"
+  | "earliest_incoming_batch_date"
   | "incoming_batch_stockout_date"
   | "reorder_point"
   | "recommended_restock_qty"
@@ -234,6 +235,15 @@ function compareRows(
     case "projected_stockout_date": {
       const aDate = a.projected_stockout_date ?? "";
       const bDate = b.projected_stockout_date ?? "";
+      if (!aDate && !bDate) cmp = 0;
+      else if (!aDate) cmp = 1;
+      else if (!bDate) cmp = -1;
+      else cmp = aDate.localeCompare(bDate);
+      break;
+    }
+    case "earliest_incoming_batch_date": {
+      const aDate = a.earliest_incoming_batch_date ?? "";
+      const bDate = b.earliest_incoming_batch_date ?? "";
       if (!aDate && !bDate) cmp = 0;
       else if (!aDate) cmp = 1;
       else if (!bDate) cmp = -1;
@@ -794,6 +804,13 @@ export default function InventoryPage() {
                       onSort={handleSort}
                     />
                     <SortableHeader
+                      label="Next batch in"
+                      columnKey="earliest_incoming_batch_date"
+                      activeKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableHeader
                       label="Batch stockout"
                       columnKey="incoming_batch_stockout_date"
                       activeKey={sortKey}
@@ -846,6 +863,16 @@ export default function InventoryPage() {
                 {filtered.map((row) => {
                   const risk = riskOf(row);
                   const badge = RISK_BADGE[risk];
+                  const stockoutGapDays =
+                    row.has_stockout_gap &&
+                    row.projected_stockout_date &&
+                    row.earliest_incoming_batch_date
+                      ? Math.round(
+                          (Date.parse(row.earliest_incoming_batch_date) -
+                            Date.parse(row.projected_stockout_date)) /
+                            86_400_000,
+                        )
+                      : null;
                   return (
                     <tr key={row.sku_code} className="border-b border-stone-100">
                       <td className="py-2 pr-4">
@@ -921,6 +948,32 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-2 pr-4">
                         {row.projected_stockout_date ?? "—"}
+                      </td>
+                      <td className="py-2 pr-4">
+                        {row.earliest_incoming_batch_date ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span>{row.earliest_incoming_batch_date}</span>
+                            {row.has_stockout_gap && (
+                              <Badge
+                                className="w-fit bg-red-100 text-red-800"
+                                title={`Stock runs out ${row.projected_stockout_date} but the next batch only arrives ${row.earliest_incoming_batch_date} — projected out of stock${
+                                  stockoutGapDays != null
+                                    ? ` for ~${stockoutGapDays} day${
+                                        stockoutGapDays === 1 ? "" : "s"
+                                      }`
+                                    : ""
+                                }.`}
+                              >
+                                OOS gap
+                                {stockoutGapDays != null
+                                  ? ` ~${stockoutGapDays}d`
+                                  : ""}
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td
                         className="py-2 pr-4"

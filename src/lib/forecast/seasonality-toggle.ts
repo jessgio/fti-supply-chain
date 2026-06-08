@@ -19,6 +19,7 @@ function recomputeWithoutSeasonality(
       needs_reorder: false,
       covered_by_po: row.on_order_qty > 0,
       recommended_restock_qty: 0,
+      has_stockout_gap: false,
       incoming_batch_stockout_date: null,
     };
   }
@@ -62,6 +63,10 @@ function recomputeWithoutSeasonality(
       pipeline.batch_depletion_by_line.get("__latest") ?? null;
   }
 
+  const hasStockoutGap =
+    row.earliest_incoming_batch_date != null &&
+    projectedStockoutDate < row.earliest_incoming_batch_date;
+
   return {
     ...row,
     forecast_daily_demand: Number(dailyBurn.toFixed(2)),
@@ -72,6 +77,7 @@ function recomputeWithoutSeasonality(
     needs_reorder: needsReorder,
     covered_by_po: coveredByPo,
     recommended_restock_qty: recommendedRestockQty,
+    has_stockout_gap: hasStockoutGap,
     incoming_batch_stockout_date: incomingBatchStockoutDate,
   };
 }

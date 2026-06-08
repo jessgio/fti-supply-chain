@@ -376,6 +376,8 @@ export function buildRestockPlan(
       seasonal_uplift_reasons: seasonalUpliftReasons,
       days_until_stockout: daysUntilStockout,
       projected_stockout_date: projectedStockoutDate,
+      earliest_incoming_batch_date: null,
+      has_stockout_gap: false,
       incoming_batch_arrival_date: null,
       incoming_batch_stockout_date: null,
       recommended_restock_qty: recommendedRestockQty,
