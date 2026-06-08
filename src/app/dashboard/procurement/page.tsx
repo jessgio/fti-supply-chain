@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SkuSearchInput } from "@/components/packaging/sku-search-input";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -32,6 +33,7 @@ interface SkuOption {
   id: string;
   sku_code: string;
   name: string | null;
+  franchise_name?: string | null;
 }
 
 const STATUS_LABELS: Record<PoStatus, string> = {
@@ -533,19 +535,15 @@ function CreatePoDialog({
           </div>
           {lines.map((line, idx) => (
             <div key={idx} className="flex gap-2">
-              <Select
+              <SkuSearchInput
                 className="flex-1"
-                value={line.sku_id}
-                onChange={(e) => updateLine(idx, { sku_id: e.target.value })}
-              >
-                <option value="">Select SKU</option>
-                {skus.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.sku_code}
-                    {s.name ? ` · ${s.name}` : ""}
-                  </option>
-                ))}
-              </Select>
+                options={skus}
+                value={skus.find((s) => s.id === line.sku_id) ?? null}
+                onChange={(option) =>
+                  updateLine(idx, { sku_id: option?.id ?? "" })
+                }
+                placeholder="Search SKU or name…"
+              />
               <Input
                 className="w-24"
                 type="number"
@@ -836,21 +834,15 @@ function EditPoDialog({
                         disabled
                       />
                     ) : (
-                      <Select
+                      <SkuSearchInput
                         className="flex-1"
-                        value={line.sku_id}
-                        onChange={(e) =>
-                          updateLine(idx, { sku_id: e.target.value })
+                        options={skus}
+                        value={skus.find((s) => s.id === line.sku_id) ?? null}
+                        onChange={(option) =>
+                          updateLine(idx, { sku_id: option?.id ?? "" })
                         }
-                      >
-                        <option value="">Select SKU</option>
-                        {skus.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.sku_code}
-                            {s.name ? ` · ${s.name}` : ""}
-                          </option>
-                        ))}
-                      </Select>
+                        placeholder="Search SKU or name…"
+                      />
                     )}
                     <Input
                       className="w-24"
