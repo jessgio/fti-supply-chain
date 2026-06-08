@@ -129,18 +129,20 @@ export default function CommercialPage() {
   );
 
   // Popular products at risk of stocking out — the marketing-facing view of
-  // supply risk: high demand SKUs that need restocking soon.
+  // supply risk: high demand SKUs that need restocking soon. We surface every
+  // at-risk SKU (no cap) but drop any that already have a replenishment landing
+  // before on-hand stock runs out (reordered with no coverage gap). SKUs that
+  // are on order yet still face a gap stay flagged — they remain exposed.
   const hotSellersAtRisk = useMemo(
     () =>
       [...recommendations]
         .filter(
           (r) =>
-            !r.covered_by_po &&
             r.days_until_stockout !== null &&
-            r.days_until_stockout <= 45,
+            r.days_until_stockout <= 45 &&
+            !(r.on_order_qty > 0 && !r.has_stockout_gap),
         )
-        .sort((a, b) => b.forecast_daily_demand - a.forecast_daily_demand)
-        .slice(0, 8),
+        .sort((a, b) => b.forecast_daily_demand - a.forecast_daily_demand),
     [recommendations],
   );
 
@@ -153,11 +155,6 @@ export default function CommercialPage() {
             (b.days_until_stockout ?? 0) - (a.days_until_stockout ?? 0),
         ),
     [recommendations],
-  );
-
-  const overstockToPush = useMemo(
-    () => overstockSkus.slice(0, 8),
-    [overstockSkus],
   );
 
   return (
@@ -314,8 +311,8 @@ export default function CommercialPage() {
             </Card>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <Card className="lg:col-span-1">
               <CardHeader>
                 <CardTitle>Fastest growing</CardTitle>
                 <CardDescription>
@@ -347,15 +344,16 @@ export default function CommercialPage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="lg:col-span-2">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
                   Hot sellers running low
                 </CardTitle>
                 <CardDescription>
-                  High-demand SKUs projected to stock out within 45 days — flag
-                  before promoting
+                  High-demand SKUs projected to stock out within 45 days, unless
+                  a reorder lands before on-hand stock runs out — flag before
+                  promoting
                 </CardDescription>
               </CardHeader>
               <CardContent className="overflow-x-auto">
@@ -369,6 +367,7 @@ export default function CommercialPage() {
                       <tr className="border-b border-stone-200 text-stone-500">
                         <th className="py-2 pr-4">SKU</th>
                         <th className="py-2 pr-4">Franchise</th>
+                        <th className="py-2 pr-4">On hand</th>
                         <th className="py-2 pr-4">Demand/day</th>
                         <th className="py-2">Stockout</th>
                       </tr>
@@ -384,6 +383,9 @@ export default function CommercialPage() {
                           </td>
                           <td className="py-2 pr-4">
                             {r.franchise_name ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {formatNumber(r.current_stock)}
                           </td>
                           <td className="py-2 pr-4">
                             {formatNumber(r.forecast_daily_demand, 1)}
@@ -412,7 +414,7 @@ export default function CommercialPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
-              {overstockToPush.length === 0 ? (
+              {overstockSkus.length === 0 ? (
                 <p className="text-sm text-stone-500">
                   No SKUs exceed {OVERSTOCK_MONTHS}-month cover right now.
                 </p>
@@ -429,7 +431,7 @@ export default function CommercialPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {overstockToPush.map((r) => {
+                    {overstockSkus.map((r) => {
                       const cover = monthsOfCover(r);
                       return (
                         <tr
