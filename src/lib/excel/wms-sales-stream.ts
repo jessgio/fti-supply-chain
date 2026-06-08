@@ -112,25 +112,46 @@ function readZipEntry(zipfile: yauzl.ZipFile, targetName: string): Promise<Buffe
   });
 }
 
+function extractSharedStringText(si: unknown): string {
+  if (!si || typeof si !== "object") return "";
+  const item = si as Record<string, unknown>;
+
+  if (typeof item.t === "string") return item.t;
+  if (Array.isArray(item.t)) return item.t.map(String).join("");
+  if (item.t && typeof item.t === "object" && "#text" in item.t) {
+    return String((item.t as Record<string, unknown>)["#text"] ?? "");
+  }
+
+  if (item.r) {
+    const runs = Array.isArray(item.r) ? item.r : [item.r];
+    return runs
+      .map((run) => {
+        if (!run || typeof run !== "object") return "";
+        const part = run as Record<string, unknown>;
+        if (typeof part.t === "string") return part.t;
+        if (Array.isArray(part.t)) return part.t.map(String).join("");
+        if (part.t && typeof part.t === "object" && "#text" in part.t) {
+          return String((part.t as Record<string, unknown>)["#text"] ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
 function parseSharedStrings(xml: Buffer): string[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     removeNSPrefix: true,
-    isArray: (name) => name === "si" || name === "t",
+    isArray: (name) => name === "si" || name === "t" || name === "r",
   });
   const doc = parser.parse(xml.toString("utf8"));
   const items = doc?.sst?.si ?? [];
   const list = Array.isArray(items) ? items : [items];
 
-  return list.map((si) => {
-    if (!si) return "";
-    if (typeof si.t === "string") return si.t;
-    if (Array.isArray(si.t)) return si.t.join("");
-    if (si.t && typeof si.t === "object" && "#text" in si.t) {
-      return String(si.t["#text"] ?? "");
-    }
-    return "";
-  });
+  return list.map((si) => extractSharedStringText(si));
 }
 
 function resolveCellValue(
@@ -169,6 +190,7 @@ function rowToSales(
     status,
     parseWmsSalesNumber(get("qty")),
     parseWmsSalesNumber(get("nettsales")),
+    tipe,
   );
   const harga = toNumber(get("harga"));
 

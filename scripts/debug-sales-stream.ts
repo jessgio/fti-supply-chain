@@ -70,8 +70,23 @@ async function debug() {
   console.log("header sample", header.slice(0, 15));
 
   const rows = await parseFtiSalesXlsxStream(buffer);
+  const neg = rows.filter((r) => r.qty_sold < 0);
+  const trm = rows.filter(
+    (r) =>
+      r.sku_code === "FSE-TRM-POWERCADVANCED-25ML" &&
+      r.sale_date >= "2026-06-01" &&
+      r.sale_date <= "2026-06-30",
+  );
   console.log("parsed sales rows", rows.length);
+  console.log("negative qty rows", neg.length);
+  console.log(
+    "TRM June sum",
+    trm.reduce((s, r) => s + r.qty_sold, 0),
+    "neg rows",
+    trm.filter((r) => r.qty_sold < 0).length,
+  );
   console.log("sample parsed", rows[0]);
+  console.log("sample negative", neg[0]);
 }
 
 debug().catch(console.error);

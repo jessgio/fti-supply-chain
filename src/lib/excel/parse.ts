@@ -110,6 +110,9 @@ function parseWmsSalesRows(rows: Record<string, unknown>[]): SalesRow[] {
     .map((row) => {
       const retailPrice = toNumber(pick(row, ["harga", "price", "rsp"]));
       const status = String(pick(row, ["status"]) ?? "");
+      const tipe = String(
+        pick(row, ["tipe transaksi", "tipetransaksi", "transactiontype"]) ?? "",
+      );
       const amounts = normalizeWmsSalesAmounts(
         status,
         parseWmsSalesNumber(pick(row, ["qty", "quantity", "qty_sold"])),
@@ -122,6 +125,7 @@ function parseWmsSalesRows(rows: Record<string, unknown>[]): SalesRow[] {
             "net_sales",
           ]),
         ),
+        tipe,
       );
       const parsed = salesSchema.safeParse({
         sale_date: parseExcelDate(pick(row, ["tanggal", "sale_date", "date"])),
