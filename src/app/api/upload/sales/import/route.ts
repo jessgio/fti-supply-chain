@@ -5,8 +5,8 @@ import {
   beginSalesImport,
   finalizeSalesImport,
   importSales,
+  importSalesFromBufferStreaming,
 } from "@/lib/db/uploads";
-import { parseSalesExcel } from "@/lib/excel/parse";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
@@ -51,7 +51,7 @@ const initSchema = z.object({
 const chunkSchema = z.object({
   phase: z.literal("chunk"),
   batchId: z.string().uuid(),
-  rows: z.array(salesRowSchema).min(1).max(500),
+  rows: z.array(salesRowSchema).min(1).max(2500),
 });
 
 const finalizeSchema = z.object({
@@ -105,10 +105,14 @@ export async function POST(request: Request) {
         throw new Error("Uploaded file not found in storage.");
       }
 
-      const rows = await parseSalesExcel(await fileData.arrayBuffer());
-      const result = await importSales(supabase, rows, body.filename, {
-        mode: body.fullReprocess ? "full" : "incremental",
-      });
+      const buffer = Buffer.from(await fileData.arrayBuffer());
+      const mode = body.fullReprocess ? "full" : "incremental";
+      const result = await importSalesFromBufferStreaming(
+        supabase,
+        buffer,
+        body.filename,
+        mode,
+      );
 
       await supabase.storage.from(UPLOAD_BUCKET).remove([body.storagePath]);
       invalidateForecastCache();

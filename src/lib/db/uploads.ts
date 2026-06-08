@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   filterSalesRowsForFullReprocess,
   filterSalesRowsForUpload,
+  getSalesUploadCutoff,
+  isSalesRowEligibleForImport,
+  mergeRetailPrice,
   SALES_UPLOAD_MONTHS,
+  type SalesImportMode,
 } from "@/lib/sales/upload-window";
 import { slugify } from "@/lib/utils";
 import type { BundleComponent, MappingRow, SalesRow, StockRow } from "@/types/database";
@@ -332,11 +336,22 @@ export async function appendSalesImportRows(
   supabase: SupabaseClient,
   batchId: string,
   rows: SalesRow[],
+  caches?: {
+    channelCache?: Map<string, string>;
+    skuCache?: Map<string, string>;
+  },
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
-  const channelCache = new Map<string, string>();
-  const skuCache = new Map<string, string>();
+  const channelCache = caches?.channelCache ?? new Map<string, string>();
+  const skuCache = caches?.skuCache ?? new Map<string, string>();
+
+  await ensureSkuIdsInCache(
+    supabase,
+    skuCache,
+    rows.map((row) => row.sku_code),
+  );
+
   const chunkSize = 2000;
   let chunk: {
     sale_date: string;
@@ -361,7 +376,10 @@ export async function appendSalesImportRows(
       channelCache.set(row.channel, channelId);
     }
 
-    const skuId = await resolveSkuId(supabase, skuCache, row.sku_code);
+    const skuId = skuCache.get(row.sku_code);
+    if (!skuId) {
+      throw new Error(`SKU not resolved: ${row.sku_code}`);
+    }
 
     chunk.push({
       sale_date: row.sale_date,
@@ -410,7 +428,106 @@ export async function finalizeSalesImport(
   if (refreshError) throw refreshError;
 }
 
-export type SalesImportMode = "incremental" | "full";
+export type { SalesImportMode } from "@/lib/sales/upload-window";
+
+const SALES_INSERT_BATCH = 2000;
+
+export async function importSalesFromBufferStreaming(
+  supabase: SupabaseClient,
+  buffer: Buffer,
+  filename: string,
+  mode: SalesImportMode = "incremental",
+) {
+  const { iterateFtiSalesXlsx } = await import("@/lib/excel/wms-sales-stream");
+  const cutoff = mode === "full" ? "" : getSalesUploadCutoff();
+  const deleteFrom = mode === "full" ? "2020-01-01" : cutoff;
+  const deleteTo = "2099-12-31";
+
+  let batchId: string | undefined;
+  let replacedCount = 0;
+  let rowCount = 0;
+  let skippedOlder = 0;
+  let rangeStart = "";
+  let rangeEnd = "";
+  const retailBySku: Record<string, number> = {};
+  const channelCache = new Map<string, string>();
+  const skuCache = new Map<string, string>();
+  const pending: SalesRow[] = [];
+  let insertChain = Promise.resolve();
+
+  async function ensureBatchStarted() {
+    if (batchId) return;
+    const started = await beginSalesImport(supabase, {
+      filename,
+      rangeStart: deleteFrom,
+      rangeEnd: deleteTo,
+      rowCount: 0,
+    });
+    batchId = started.batchId;
+    replacedCount = started.replacedCount;
+  }
+
+  const queueInsert = (slice: SalesRow[]) => {
+    insertChain = insertChain.then(async () => {
+      await ensureBatchStarted();
+      await appendSalesImportRows(supabase, batchId!, slice, {
+        channelCache,
+        skuCache,
+      });
+    });
+  };
+
+  await iterateFtiSalesXlsx(buffer, (row) => {
+    if (!isSalesRowEligibleForImport(row, mode, cutoff)) {
+      skippedOlder++;
+      return;
+    }
+    rowCount++;
+    if (!rangeStart || row.sale_date < rangeStart) rangeStart = row.sale_date;
+    if (!rangeEnd || row.sale_date > rangeEnd) rangeEnd = row.sale_date;
+    mergeRetailPrice(retailBySku, row);
+    pending.push(row);
+    if (pending.length >= SALES_INSERT_BATCH) {
+      queueInsert(pending.splice(0, SALES_INSERT_BATCH));
+    }
+  });
+
+  await insertChain;
+
+  if (rowCount === 0) {
+    throw new Error(
+      mode === "full"
+        ? "No sales rows found in file."
+        : `No sales rows on or after ${cutoff}. Upload the last ${SALES_UPLOAD_MONTHS} months only; older data is kept automatically.`,
+    );
+  }
+
+  if (pending.length > 0) {
+    await ensureBatchStarted();
+    await appendSalesImportRows(supabase, batchId!, pending, {
+      channelCache,
+      skuCache,
+    });
+  }
+
+  await supabase
+    .from("upload_batches")
+    .update({ row_count: rowCount })
+    .eq("id", batchId!);
+
+  await finalizeSalesImport(supabase, retailBySku);
+
+  return {
+    batchId: batchId!,
+    rowCount,
+    replacedCount,
+    skippedOlder,
+    cutoff: mode === "full" ? rangeStart : cutoff,
+    rangeStart,
+    rangeEnd,
+    mode,
+  };
+}
 
 export async function importSales(
   supabase: SupabaseClient,

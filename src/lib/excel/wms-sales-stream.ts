@@ -314,11 +314,12 @@ export async function scanFtiSalesStatusCounts(buffer: Buffer): Promise<{
 }
 
 /**
- * Streaming parser for large FTI WMS sales exports that SheetJS cannot load.
+ * Stream-parse large FTI WMS sales exports without loading all rows into memory.
  */
-export async function parseFtiSalesXlsxStream(
+export async function iterateFtiSalesXlsx(
   buffer: Buffer,
-): Promise<SalesRow[]> {
+  onRow: (row: SalesRow) => void | Promise<void>,
+): Promise<void> {
   const stringsZip = await openZipFromBuffer(buffer);
   let sharedStrings: string[] = [];
   try {
@@ -339,7 +340,6 @@ export async function parseFtiSalesXlsxStream(
     );
 
     let headerMap: Record<string, number> | null = null;
-    const rows: SalesRow[] = [];
 
     await streamSheetRows(sheetStream, sharedStrings, (values) => {
       if (!headerMap) {
@@ -360,11 +360,22 @@ export async function parseFtiSalesXlsxStream(
       }
 
       const parsed = rowToSales(values, headerMap);
-      if (parsed) rows.push(parsed);
+      if (parsed) void onRow(parsed);
     });
-
-    return rows;
   } finally {
     sheetZip.close();
   }
+}
+
+/**
+ * Streaming parser for large FTI WMS sales exports that SheetJS cannot load.
+ */
+export async function parseFtiSalesXlsxStream(
+  buffer: Buffer,
+): Promise<SalesRow[]> {
+  const rows: SalesRow[] = [];
+  await iterateFtiSalesXlsx(buffer, (row) => {
+    rows.push(row);
+  });
+  return rows;
 }

@@ -1,6 +1,8 @@
 import { format, startOfMonth, subMonths } from "date-fns";
 import type { SalesRow } from "@/types/database";
 
+export type SalesImportMode = "incremental" | "full";
+
 /** Rolling upload window: current month plus the two prior calendar months. */
 export const SALES_UPLOAD_MONTHS = 3;
 
@@ -74,4 +76,24 @@ export function filterSalesRowsForFullReprocess(rows: SalesRow[]): {
     rangeStart: dates[0]!,
     rangeEnd: dates[dates.length - 1]!,
   };
+}
+
+export function isSalesRowEligibleForImport(
+  row: SalesRow,
+  mode: SalesImportMode,
+  cutoff: string,
+): boolean {
+  return mode === "full" || row.sale_date >= cutoff;
+}
+
+export function mergeRetailPrice(
+  retailBySku: Record<string, number>,
+  row: SalesRow,
+): void {
+  if (row.retail_price && row.retail_price > 0) {
+    retailBySku[row.sku_code] = Math.max(
+      retailBySku[row.sku_code] ?? 0,
+      row.retail_price,
+    );
+  }
 }

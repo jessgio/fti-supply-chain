@@ -7,8 +7,7 @@
  *   npx tsx scripts/reprocess-all-sales.ts --storage   # latest file in data-uploads/sales
  */
 import * as fs from "node:fs";
-import { parseSalesExcel } from "../src/lib/excel/parse";
-import { importSales } from "../src/lib/db/uploads";
+import { importSalesFromBufferStreaming } from "../src/lib/db/uploads";
 import { createAdminClient } from "../src/lib/supabase/admin";
 
 for (const line of fs.readFileSync(".env.local", "utf8").split("\n")) {
@@ -63,20 +62,15 @@ async function main() {
     );
   }
 
-  console.log("Parsing with signed RETURNED qty...");
-  console.time("parse");
-  const rows = await parseSalesExcel(buffer);
-  console.timeEnd("parse");
-  console.log("Parsed rows:", rows.length);
-
-  const negativeQty = rows.filter((r) => r.qty_sold < 0).length;
-  const negativeNet = rows.filter((r) => r.net_sales < 0).length;
-  console.log(`Negative QTY rows: ${negativeQty}, negative Nett Sales rows: ${negativeNet}`);
-
   const supabase = createAdminClient();
-  console.log("Full reprocess import (all sale_dates in file)...");
+  console.log("Streaming full reprocess (signed RETURNED qty)...");
   console.time("import");
-  const result = await importSales(supabase, rows, filename, { mode: "full" });
+  const result = await importSalesFromBufferStreaming(
+    supabase,
+    Buffer.from(buffer),
+    filename,
+    "full",
+  );
   console.timeEnd("import");
   console.log("Done:", result);
 }

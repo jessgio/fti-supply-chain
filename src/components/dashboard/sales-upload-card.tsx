@@ -66,7 +66,11 @@ export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
 
       if (uploadError) throw uploadError;
 
-      setStatus("Processing import on server (large files may take a few minutes)...");
+      setStatus(
+        fullReprocess
+          ? "Full reprocess on server — scanning and importing all rows (may take 10–15 minutes). Keep this tab open…"
+          : "Processing import on server (large files may take several minutes). Keep this tab open…",
+      );
       const result = await postImport({
         phase: "process",
         storagePath: String(path),
