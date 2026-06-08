@@ -66,7 +66,7 @@ Supply chain and sales intelligence platform for **From This Island**. Upload Ex
 
 ### Sales (WMS export — `FTI Sales.xlsx`)
 
-Sheet `Data1`. `FAKTUR` rows are imported; `CANCELED` orders are excluded. Negative QTY / Nett Sales in the file are kept as-is; `RETURNED` rows with positive QTY are flipped to negative so franchise totals net out returns.
+Sheet `Data1`. Every row is imported except `CANCELED` orders. QTY and Nett Sales are taken from the file with their sign preserved: sales (`FAKTUR`) stay positive and returns (`Tipe Transaksi` = `RETUR`, already negative in the export) stay negative, so a returned order's invoice and its return net out without any sign-flipping.
 
 Re-upload only the **last 3 calendar months** (current month plus the two prior). Rows older than that window are ignored. Existing records for the same date range are removed before import so duplicates are replaced; sales before the window are kept.
 

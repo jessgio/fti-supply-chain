@@ -3,7 +3,6 @@ import { SaxesParser, type SaxesTag } from "saxes";
 import yauzl from "yauzl";
 import {
   isIncludedWmsSalesRow,
-  normalizeWmsSalesAmounts,
   parseWmsSalesNumber,
 } from "@/lib/excel/sales-filters";
 import { parseExcelDate } from "@/lib/excel/date-parse";
@@ -186,20 +185,14 @@ function rowToSales(
   const channel = get("channel").trim();
   if (!sale_date || !channel) return null;
 
-  const amounts = normalizeWmsSalesAmounts(
-    status,
-    parseWmsSalesNumber(get("qty")),
-    parseWmsSalesNumber(get("nettsales")),
-    tipe,
-  );
   const harga = toNumber(get("harga"));
 
   return {
     sale_date,
     channel,
     sku_code: sku,
-    qty_sold: amounts.qty_sold,
-    net_sales: amounts.net_sales,
+    qty_sold: parseWmsSalesNumber(get("qty")),
+    net_sales: parseWmsSalesNumber(get("nettsales")),
     retail_price: harga > 0 ? harga : undefined,
   };
 }
