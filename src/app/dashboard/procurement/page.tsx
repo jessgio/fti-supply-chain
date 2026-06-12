@@ -201,6 +201,10 @@ function ProcurementInner() {
   }, [statusFilter, refreshKey]);
 
   useEffect(() => {
+    setExpanded(new Set(pos.map((p) => p.id)));
+  }, [pos]);
+
+  useEffect(() => {
     let active = true;
     async function loadOpenValue() {
       setOpenValueLoading(true);
