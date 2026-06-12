@@ -128,6 +128,8 @@ function ProcurementInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [openValue, setOpenValue] = useState<string>("—");
+  const [openValueLoading, setOpenValueLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(Boolean(initialSku));
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -198,6 +200,29 @@ function ProcurementInner() {
     };
   }, [statusFilter, refreshKey]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadOpenValue() {
+      setOpenValueLoading(true);
+      try {
+        const qs = statusFilter ? `?status=${statusFilter}` : "";
+        const res = await fetch(`/api/procurement/open-value${qs}`);
+        const data = await res.json();
+        if (!active) return;
+        if (!res.ok) throw new Error(data.error ?? "Failed to load open value");
+        setOpenValue(data.formatted ?? formatPoMoney(0, DEFAULT_PO_CURRENCY));
+      } catch {
+        if (active) setOpenValue("Unavailable");
+      } finally {
+        if (active) setOpenValueLoading(false);
+      }
+    }
+    loadOpenValue();
+    return () => {
+      active = false;
+    };
+  }, [statusFilter, refreshKey]);
+
   const summary = useMemo(() => {
     const open = pos.filter((p) =>
       ["planned", "ordered", "in_transit"].includes(p.status),
@@ -205,19 +230,6 @@ function ProcurementInner() {
     const unitsOnOrder = pos
       .filter((p) => ["ordered", "in_transit"].includes(p.status))
       .reduce((sum, p) => sum + poOpenQty(p), 0);
-    const openCurrencies = new Set(
-      open.map((p) => p.currency ?? DEFAULT_PO_CURRENCY),
-    );
-    const openValueTotal = open.reduce((sum, p) => sum + poInvoiceTotal(p), 0);
-    const openValue =
-      openCurrencies.size === 1
-        ? formatPoMoney(
-            openValueTotal,
-            [...openCurrencies][0] ?? DEFAULT_PO_CURRENCY,
-          )
-        : open.length > 0
-          ? "Mixed currencies"
-          : formatPoMoney(0, DEFAULT_PO_CURRENCY);
     const arrivingSoon = pos.filter(
       (p) =>
         ["ordered", "in_transit"].includes(p.status) &&
@@ -227,7 +239,6 @@ function ProcurementInner() {
     return {
       openCount: open.length,
       unitsOnOrder,
-      openValue,
       arrivingSoon,
     };
   }, [pos, now]);
@@ -293,7 +304,8 @@ function ProcurementInner() {
         />
         <SummaryStat
           label="Open PO value"
-          value={summary.openValue}
+          value={openValueLoading ? "…" : openValue}
+          hint="Converted to IDR at order-date rates"
         />
         <SummaryStat
           label="Arriving in 30 days"
@@ -579,12 +591,21 @@ function ProcurementInner() {
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function SummaryStat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
     <Card>
       <CardContent className="p-5">
         <p className="text-sm text-stone-500">{label}</p>
         <p className="mt-1 text-2xl font-semibold text-stone-900">{value}</p>
+        {hint && <p className="mt-1 text-xs text-stone-400">{hint}</p>}
       </CardContent>
     </Card>
   );
