@@ -32,6 +32,10 @@ export async function POST(request: Request) {
       lead_time_days:
         body.lead_time_days != null ? Number(body.lead_time_days) : undefined,
       contact: body.contact ?? null,
+      address: body.address ?? null,
+      pic_name: body.pic_name ?? null,
+      pic_email: body.pic_email ?? null,
+      pic_phone: body.pic_phone ?? null,
       notes: body.notes ?? null,
     });
     return NextResponse.json({ supplier });

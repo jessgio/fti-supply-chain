@@ -7,6 +7,7 @@ import {
   type UpdatePoLineInput,
 } from "@/lib/db/procurement";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
+import { isValidPoCurrency } from "@/lib/procurement/currencies";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -68,15 +69,38 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
+    if (body?.currency !== undefined && !isValidPoCurrency(String(body.currency))) {
+      return NextResponse.json(
+        { error: "A valid currency code is required." },
+        { status: 400 },
+      );
+    }
+
     const input: {
+      po_number?: string;
       supplier_id?: string | null;
       status?: PoStatus;
       order_date?: string | null;
       expected_date?: string | null;
+      down_payment_pct?: number;
+      discount_amount?: number;
+      tax_pct?: number;
+      other_charges?: number;
+      currency?: string;
       notes?: string | null;
       lines?: UpdatePoLineInput[];
     } = {};
 
+    if (body?.po_number !== undefined) {
+      const trimmed = String(body.po_number).trim();
+      if (!trimmed) {
+        return NextResponse.json(
+          { error: "PO number cannot be empty." },
+          { status: 400 },
+        );
+      }
+      input.po_number = trimmed;
+    }
     if (body?.supplier_id !== undefined) {
       input.supplier_id = body.supplier_id ?? null;
     }
@@ -95,6 +119,21 @@ export async function PATCH(
     }
     if (body?.expected_date !== undefined) {
       input.expected_date = body.expected_date ?? null;
+    }
+    if (body?.down_payment_pct !== undefined) {
+      input.down_payment_pct = Number(body.down_payment_pct);
+    }
+    if (body?.discount_amount !== undefined) {
+      input.discount_amount = Number(body.discount_amount);
+    }
+    if (body?.tax_pct !== undefined) {
+      input.tax_pct = Number(body.tax_pct);
+    }
+    if (body?.other_charges !== undefined) {
+      input.other_charges = Number(body.other_charges);
+    }
+    if (body?.currency !== undefined) {
+      input.currency = String(body.currency);
     }
     if (body?.notes !== undefined) {
       input.notes = body.notes ?? null;

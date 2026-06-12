@@ -6,6 +6,7 @@ import {
   type NewPoLineInput,
 } from "@/lib/db/procurement";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
+import { isValidPoCurrency } from "@/lib/procurement/currencies";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -48,13 +49,31 @@ export async function POST(request: Request) {
       );
     }
 
+    if (body?.currency != null && !isValidPoCurrency(String(body.currency))) {
+      return NextResponse.json(
+        { error: "A valid currency code is required." },
+        { status: 400 },
+      );
+    }
+
     const supabase = createAdminClient();
     const purchaseOrder = await createPurchaseOrder(supabase, {
-      po_number: body.po_number,
+      po_number:
+        body.po_number != null && String(body.po_number).trim()
+          ? String(body.po_number).trim()
+          : undefined,
       supplier_id: body.supplier_id ?? null,
       status: (body.status as PoStatus) ?? "planned",
       order_date: body.order_date ?? null,
       expected_date: body.expected_date ?? null,
+      down_payment_pct:
+        body.down_payment_pct != null ? Number(body.down_payment_pct) : undefined,
+      discount_amount:
+        body.discount_amount != null ? Number(body.discount_amount) : undefined,
+      tax_pct: body.tax_pct != null ? Number(body.tax_pct) : undefined,
+      other_charges:
+        body.other_charges != null ? Number(body.other_charges) : undefined,
+      currency: body.currency ?? undefined,
       notes: body.notes ?? null,
       lines,
     });

@@ -218,8 +218,43 @@ export interface Supplier {
   name: string;
   lead_time_days: number;
   contact: string | null;
+  address: string | null;
+  pic_name: string | null;
+  pic_email: string | null;
+  pic_phone: string | null;
+  payment_terms: string | null;
+  lead_time_note: string | null;
+  delivery_time: string | null;
+  packaging_notes: string | null;
+  beneficiary_name: string | null;
+  beneficiary_account_number: string | null;
+  swift_code: string | null;
+  beneficiary_country: string | null;
+  beneficiary_address: string | null;
+  beneficiary_bank: string | null;
+  beneficiary_bank_address: string | null;
+  bank_code: string | null;
+  branch_code: string | null;
   notes: string | null;
   created_at?: string;
+}
+
+export interface CompanySettings {
+  id: string;
+  company_name: string;
+  address: string | null;
+  pic_name: string | null;
+  pic_email: string | null;
+  pic_phone: string | null;
+  logo_path: string | null;
+  updated_at?: string;
+}
+
+export interface VendorProductMapping {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  vendor_product_name: string | null;
 }
 
 export interface PurchaseOrderLine {
@@ -242,6 +277,11 @@ export interface PurchaseOrder {
   status: PoStatus;
   order_date: string | null;
   expected_date: string | null;
+  down_payment_pct: number;
+  discount_amount: number;
+  tax_pct: number;
+  other_charges: number;
+  currency: string;
   notes: string | null;
   created_at?: string;
   updated_at?: string;

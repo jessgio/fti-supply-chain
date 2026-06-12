@@ -18,6 +18,11 @@ export interface NewPoInput {
   status?: PoStatus;
   order_date?: string | null;
   expected_date?: string | null;
+  down_payment_pct?: number;
+  discount_amount?: number;
+  tax_pct?: number;
+  other_charges?: number;
+  currency?: string;
   notes?: string | null;
   lines: NewPoLineInput[];
 }
@@ -30,10 +35,16 @@ export interface UpdatePoLineInput {
 }
 
 export interface UpdatePoInput {
+  po_number?: string;
   supplier_id?: string | null;
   status?: PoStatus;
   order_date?: string | null;
   expected_date?: string | null;
+  down_payment_pct?: number;
+  discount_amount?: number;
+  tax_pct?: number;
+  other_charges?: number;
+  currency?: string;
   notes?: string | null;
   lines?: UpdatePoLineInput[];
 }
@@ -42,8 +53,55 @@ export interface NewSupplierInput {
   name: string;
   lead_time_days?: number;
   contact?: string | null;
+  address?: string | null;
+  pic_name?: string | null;
+  pic_email?: string | null;
+  pic_phone?: string | null;
+  payment_terms?: string | null;
+  lead_time_note?: string | null;
+  delivery_time?: string | null;
+  packaging_notes?: string | null;
+  beneficiary_name?: string | null;
+  beneficiary_account_number?: string | null;
+  swift_code?: string | null;
+  beneficiary_country?: string | null;
+  beneficiary_address?: string | null;
+  beneficiary_bank?: string | null;
+  beneficiary_bank_address?: string | null;
+  bank_code?: string | null;
+  branch_code?: string | null;
   notes?: string | null;
 }
+
+export interface UpdateSupplierInput {
+  name?: string;
+  lead_time_days?: number;
+  contact?: string | null;
+  address?: string | null;
+  pic_name?: string | null;
+  pic_email?: string | null;
+  pic_phone?: string | null;
+  payment_terms?: string | null;
+  lead_time_note?: string | null;
+  delivery_time?: string | null;
+  packaging_notes?: string | null;
+  beneficiary_name?: string | null;
+  beneficiary_account_number?: string | null;
+  swift_code?: string | null;
+  beneficiary_country?: string | null;
+  beneficiary_address?: string | null;
+  beneficiary_bank?: string | null;
+  beneficiary_bank_address?: string | null;
+  bank_code?: string | null;
+  branch_code?: string | null;
+  notes?: string | null;
+}
+
+const SUPPLIER_SELECT =
+  "id, name, lead_time_days, contact, address, pic_name, pic_email, pic_phone, " +
+  "payment_terms, lead_time_note, delivery_time, packaging_notes, " +
+  "beneficiary_name, beneficiary_account_number, swift_code, beneficiary_country, " +
+  "beneficiary_address, beneficiary_bank, beneficiary_bank_address, bank_code, branch_code, notes";
 
 function generatePoNumber(): string {
   const date = new Date();
@@ -60,10 +118,23 @@ export async function listSuppliers(
 ): Promise<Supplier[]> {
   const { data, error } = await supabase
     .from("suppliers")
-    .select("id, name, lead_time_days, contact, notes")
+    .select(SUPPLIER_SELECT)
     .order("name");
   if (error) throw error;
-  return (data ?? []) as Supplier[];
+  return (data ?? []) as unknown as Supplier[];
+}
+
+export async function getSupplier(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<Supplier | null> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select(SUPPLIER_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as unknown as Supplier) ?? null;
 }
 
 export async function createSupplier(
@@ -76,12 +147,75 @@ export async function createSupplier(
       name: input.name,
       lead_time_days: input.lead_time_days ?? 90,
       contact: input.contact ?? null,
+      address: input.address ?? null,
+      pic_name: input.pic_name ?? null,
+      pic_email: input.pic_email ?? null,
+      pic_phone: input.pic_phone ?? null,
+      payment_terms: input.payment_terms ?? null,
+      lead_time_note: input.lead_time_note ?? null,
+      delivery_time: input.delivery_time ?? null,
+      packaging_notes: input.packaging_notes ?? null,
+      beneficiary_name: input.beneficiary_name ?? null,
+      beneficiary_account_number: input.beneficiary_account_number ?? null,
+      swift_code: input.swift_code ?? null,
+      beneficiary_country: input.beneficiary_country ?? null,
+      beneficiary_address: input.beneficiary_address ?? null,
+      beneficiary_bank: input.beneficiary_bank ?? null,
+      beneficiary_bank_address: input.beneficiary_bank_address ?? null,
+      bank_code: input.bank_code ?? null,
+      branch_code: input.branch_code ?? null,
       notes: input.notes ?? null,
     })
-    .select("id, name, lead_time_days, contact, notes")
+    .select(SUPPLIER_SELECT)
     .single();
   if (error) throw error;
-  return data as Supplier;
+  return data as unknown as Supplier;
+}
+
+export async function updateSupplier(
+  supabase: SupabaseClient,
+  id: string,
+  input: UpdateSupplierInput,
+): Promise<Supplier> {
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.lead_time_days !== undefined)
+    patch.lead_time_days = input.lead_time_days;
+  if (input.contact !== undefined) patch.contact = input.contact;
+  if (input.address !== undefined) patch.address = input.address;
+  if (input.pic_name !== undefined) patch.pic_name = input.pic_name;
+  if (input.pic_email !== undefined) patch.pic_email = input.pic_email;
+  if (input.pic_phone !== undefined) patch.pic_phone = input.pic_phone;
+  if (input.payment_terms !== undefined) patch.payment_terms = input.payment_terms;
+  if (input.lead_time_note !== undefined) patch.lead_time_note = input.lead_time_note;
+  if (input.delivery_time !== undefined) patch.delivery_time = input.delivery_time;
+  if (input.packaging_notes !== undefined)
+    patch.packaging_notes = input.packaging_notes;
+  if (input.beneficiary_name !== undefined)
+    patch.beneficiary_name = input.beneficiary_name;
+  if (input.beneficiary_account_number !== undefined)
+    patch.beneficiary_account_number = input.beneficiary_account_number;
+  if (input.swift_code !== undefined) patch.swift_code = input.swift_code;
+  if (input.beneficiary_country !== undefined)
+    patch.beneficiary_country = input.beneficiary_country;
+  if (input.beneficiary_address !== undefined)
+    patch.beneficiary_address = input.beneficiary_address;
+  if (input.beneficiary_bank !== undefined)
+    patch.beneficiary_bank = input.beneficiary_bank;
+  if (input.beneficiary_bank_address !== undefined)
+    patch.beneficiary_bank_address = input.beneficiary_bank_address;
+  if (input.bank_code !== undefined) patch.bank_code = input.bank_code;
+  if (input.branch_code !== undefined) patch.branch_code = input.branch_code;
+  if (input.notes !== undefined) patch.notes = input.notes;
+
+  const { data, error } = await supabase
+    .from("suppliers")
+    .update(patch)
+    .eq("id", id)
+    .select(SUPPLIER_SELECT)
+    .single();
+  if (error) throw error;
+  return data as unknown as Supplier;
 }
 
 type PoRow = {
@@ -91,6 +225,11 @@ type PoRow = {
   status: PoStatus;
   order_date: string | null;
   expected_date: string | null;
+  down_payment_pct: number;
+  discount_amount: number;
+  tax_pct: number;
+  other_charges: number;
+  currency: string;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -139,6 +278,11 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     status: row.status,
     order_date: row.order_date,
     expected_date: row.expected_date,
+    down_payment_pct: Number(row.down_payment_pct ?? 30),
+    discount_amount: Number(row.discount_amount ?? 0),
+    tax_pct: Number(row.tax_pct ?? 11),
+    other_charges: Number(row.other_charges ?? 0),
+    currency: row.currency ?? "IDR",
     notes: row.notes,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -147,12 +291,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 }
 
 const PO_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name))";
 
 const PO_DETAIL_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location))";
@@ -202,6 +346,11 @@ export async function createPurchaseOrder(
       status: input.status ?? "planned",
       order_date: input.order_date ?? null,
       expected_date: input.expected_date ?? null,
+      down_payment_pct: input.down_payment_pct ?? 30,
+      discount_amount: input.discount_amount ?? 0,
+      tax_pct: input.tax_pct ?? 11,
+      other_charges: input.other_charges ?? 0,
+      currency: input.currency ?? "IDR",
       notes: input.notes ?? null,
     })
     .select("id")
@@ -246,10 +395,16 @@ export async function updatePurchaseOrder(
   if (lockedStatus) {
     const notesOnly =
       input.notes !== undefined &&
+      input.po_number === undefined &&
       input.supplier_id === undefined &&
       input.status === undefined &&
       input.order_date === undefined &&
       input.expected_date === undefined &&
+      input.down_payment_pct === undefined &&
+      input.discount_amount === undefined &&
+      input.tax_pct === undefined &&
+      input.other_charges === undefined &&
+      input.currency === undefined &&
       input.lines === undefined;
     if (!notesOnly) {
       throw new Error(
@@ -261,11 +416,26 @@ export async function updatePurchaseOrder(
   const headerPatch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
+  if (input.po_number !== undefined) {
+    const trimmed = input.po_number.trim();
+    if (!trimmed) {
+      throw new Error("PO number cannot be empty.");
+    }
+    headerPatch.po_number = trimmed;
+  }
   if (input.supplier_id !== undefined) headerPatch.supplier_id = input.supplier_id;
   if (input.status !== undefined) headerPatch.status = input.status;
   if (input.order_date !== undefined) headerPatch.order_date = input.order_date;
   if (input.expected_date !== undefined)
     headerPatch.expected_date = input.expected_date;
+  if (input.down_payment_pct !== undefined)
+    headerPatch.down_payment_pct = input.down_payment_pct;
+  if (input.discount_amount !== undefined)
+    headerPatch.discount_amount = input.discount_amount;
+  if (input.tax_pct !== undefined) headerPatch.tax_pct = input.tax_pct;
+  if (input.other_charges !== undefined)
+    headerPatch.other_charges = input.other_charges;
+  if (input.currency !== undefined) headerPatch.currency = input.currency;
   if (input.notes !== undefined) headerPatch.notes = input.notes;
 
   if (Object.keys(headerPatch).length > 1) {
