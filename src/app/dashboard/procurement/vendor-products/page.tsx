@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Save, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -210,7 +210,7 @@ export default function VendorProductsPage() {
                         {row.sku_name ?? "—"}
                       </td>
                       <td className="py-2.5">
-                        <Input
+                        <AutoResizeTextarea
                           value={draft[row.sku_id] ?? ""}
                           onChange={(e) =>
                             setDraft((prev) => ({
@@ -233,5 +233,35 @@ export default function VendorProductsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function AutoResizeTextarea({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="min-h-10 w-full resize-none overflow-hidden break-words rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+    />
   );
 }

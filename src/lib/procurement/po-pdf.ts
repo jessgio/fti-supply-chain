@@ -38,6 +38,15 @@ function lineTotal(qty: number, unitCost: number | null): number {
   return (unitCost ?? 0) * qty;
 }
 
+function measureTextHeight(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  options: { width: number; font?: string; fontSize: number },
+): number {
+  doc.font(options.font ?? "Helvetica").fontSize(options.fontSize);
+  return doc.heightOfString(text, { width: options.width });
+}
+
 function contactBlock(
   doc: PDFKit.PDFDocument,
   x: number,
@@ -199,7 +208,27 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
       const productLabel = resolveVendorLineLabel(line, vendorNames);
       const showInternalSku =
         vendorNames.has(line.sku_id) && line.sku_code && line.sku_code !== productLabel;
-      const rowHeight = showInternalSku ? 34 : 22;
+
+      const productWidth = colSku - 8;
+      const paddingTop = 6;
+      const paddingBottom = 6;
+      const skuGap = 2;
+
+      const productHeight = measureTextHeight(doc, productLabel, {
+        width: productWidth,
+        fontSize: 9,
+      });
+      const skuHeight = showInternalSku
+        ? measureTextHeight(doc, line.sku_code!, { width: productWidth, fontSize: 8 })
+        : 0;
+
+      const rowHeight = Math.max(
+        22,
+        paddingTop +
+          productHeight +
+          (showInternalSku ? skuGap + skuHeight : 0) +
+          paddingBottom,
+      );
 
       if (rowY + rowHeight > doc.page.height - 120) {
         doc.addPage();
@@ -213,26 +242,31 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
         .lineWidth(0.5)
         .stroke();
 
-      doc.text(productLabel, left + 8, rowY + 6, { width: colSku - 8 });
+      const productY = rowY + paddingTop;
+      doc.font("Helvetica").fontSize(9).fillColor("#111111");
+      doc.text(productLabel, left + 8, productY, { width: productWidth });
+
       if (showInternalSku) {
         doc
           .fontSize(8)
           .fillColor("#78716c")
-          .text(line.sku_code!, left + 8, rowY + 18, { width: colSku - 8 });
+          .text(line.sku_code!, left + 8, productY + productHeight + skuGap, {
+            width: productWidth,
+          });
         doc.fontSize(9).fillColor("#111111");
       }
 
-      doc.text(formatNumber(line.qty_ordered), left + colSku, rowY + 6, {
+      doc.text(formatNumber(line.qty_ordered), left + colSku, rowY + paddingTop, {
         width: colQty,
         align: "right",
       });
       doc.text(
         line.unit_cost != null ? formatCurrency(line.unit_cost, currency) : "—",
         left + colSku + colQty,
-        rowY + 6,
+        rowY + paddingTop,
         { width: colUnit, align: "right" },
       );
-      doc.text(formatCurrency(total, currency), left + colSku + colQty + colUnit, rowY + 6, {
+      doc.text(formatCurrency(total, currency), left + colSku + colQty + colUnit, rowY + paddingTop, {
         width: colTotal - 8,
         align: "right",
       });
