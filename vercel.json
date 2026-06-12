@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/stock-alerts",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}
