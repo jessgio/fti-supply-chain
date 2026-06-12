@@ -9,6 +9,7 @@ export interface SkuSearchOption {
   sku_code: string;
   name: string | null;
   is_bundle?: boolean;
+  is_active?: boolean;
   franchise_name?: string | null;
 }
 
@@ -19,7 +20,14 @@ interface SkuSearchInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Minimum typed characters before showing matches. Default 1. */
+  minQueryLength?: number;
+  /** Max dropdown rows. Default 50. */
+  maxResults?: number;
 }
+
+const DEFAULT_MIN_QUERY_LENGTH = 1;
+const DEFAULT_MAX_RESULTS = 50;
 
 function optionLabel(option: SkuSearchOption): string {
   const parts = [option.sku_code];
@@ -28,14 +36,54 @@ function optionLabel(option: SkuSearchOption): string {
   return parts.join(" · ");
 }
 
-function rankMatch(option: SkuSearchOption, query: string): number {
+function normalizeSearchText(text: string): string {
+  return text.toLowerCase().replace(/[\s\-_./]+/g, "");
+}
+
+function tokenizeQuery(query: string): string[] {
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+export function matchesSkuSearchOption(
+  option: SkuSearchOption,
+  query: string,
+): boolean {
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return false;
+
+  const fields = [
+    option.sku_code,
+    option.name ?? "",
+    option.franchise_name ?? "",
+  ];
+  const haystack = fields.join(" ").toLowerCase();
+  const normalizedHaystack = fields.map(normalizeSearchText).join("");
+
+  return tokens.every((token) => {
+    const normalizedToken = normalizeSearchText(token);
+    return (
+      haystack.includes(token) || normalizedHaystack.includes(normalizedToken)
+    );
+  });
+}
+
+export function rankSkuSearchMatch(
+  option: SkuSearchOption,
+  query: string,
+): number {
+  const q = query.trim().toLowerCase();
   const code = option.sku_code.toLowerCase();
   const name = option.name?.toLowerCase() ?? "";
   const franchise = option.franchise_name?.toLowerCase() ?? "";
-  if (code.startsWith(query)) return 0;
-  if (code.includes(query)) return 1;
-  if (name.includes(query) || franchise.includes(query)) return 2;
-  return 99;
+  const normalizedCode = normalizeSearchText(option.sku_code);
+  const normalizedQuery = normalizeSearchText(q);
+
+  if (code === q || normalizedCode === normalizedQuery) return 0;
+  if (code.startsWith(q) || normalizedCode.startsWith(normalizedQuery)) return 1;
+  if (code.includes(q) || normalizedCode.includes(normalizedQuery)) return 2;
+  if (name.includes(q) || franchise.includes(q)) return 3;
+  if (option.is_active === false) return 5;
+  return 4;
 }
 
 export function SkuSearchInput({
@@ -45,6 +93,8 @@ export function SkuSearchInput({
   placeholder = "Search SKU, name, or franchise…",
   disabled = false,
   className,
+  minQueryLength = DEFAULT_MIN_QUERY_LENGTH,
+  maxResults = DEFAULT_MAX_RESULTS,
 }: SkuSearchInputProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -66,25 +116,29 @@ export function SkuSearchInput({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options.slice(0, 12);
-    return options
-      .filter((option) => {
-        const haystack = [
-          option.sku_code,
-          option.name ?? "",
-          option.franchise_name ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(q);
-      })
+  const { results, overflowCount } = useMemo(() => {
+    const q = query.trim();
+    if (q.length < minQueryLength) {
+      return { results: [] as SkuSearchOption[], overflowCount: 0 };
+    }
+
+    const matches = options
+      .filter((option) => matchesSkuSearchOption(option, q))
       .sort(
-        (a, b) => rankMatch(a, q) - rankMatch(b, q) || a.sku_code.localeCompare(b.sku_code),
-      )
-      .slice(0, 12);
-  }, [options, query]);
+        (a, b) =>
+          rankSkuSearchMatch(a, q) - rankSkuSearchMatch(b, q) ||
+          a.sku_code.localeCompare(b.sku_code),
+      );
+
+    return {
+      results: matches.slice(0, maxResults),
+      overflowCount: Math.max(matches.length - maxResults, 0),
+    };
+  }, [options, query, minQueryLength, maxResults]);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [results]);
 
   function selectOption(option: SkuSearchOption) {
     onChange(option);
@@ -97,6 +151,13 @@ export function SkuSearchInput({
     setQuery("");
     setOpen(true);
   }
+
+  const trimmedQuery = query.trim();
+  const queryTooShort =
+    open && trimmedQuery.length > 0 && trimmedQuery.length < minQueryLength;
+  const showEmptyHint = open && trimmedQuery.length === 0 && !value;
+  const showNoMatches =
+    open && trimmedQuery.length >= minQueryLength && results.length === 0;
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
@@ -112,7 +173,6 @@ export function SkuSearchInput({
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
-          setHighlight(0);
           if (value && e.target.value !== optionLabel(value)) {
             onChange(null);
           }
@@ -121,13 +181,13 @@ export function SkuSearchInput({
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setOpen(true);
-            setHighlight((h) => Math.min(h + 1, Math.max(filtered.length - 1, 0)));
+            setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
           } else if (e.key === "ArrowUp") {
             e.preventDefault();
             setHighlight((h) => Math.max(h - 1, 0));
-          } else if (e.key === "Enter" && open && filtered[highlight]) {
+          } else if (e.key === "Enter" && open && results[highlight]) {
             e.preventDefault();
-            selectOption(filtered[highlight]);
+            selectOption(results[highlight]);
           } else if (e.key === "Escape") {
             setOpen(false);
           }
@@ -143,13 +203,13 @@ export function SkuSearchInput({
           Clear
         </button>
       )}
-      {open && filtered.length > 0 && (
+      {open && results.length > 0 && (
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
+          className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
         >
-          {filtered.map((option, idx) => (
+          {results.map((option, idx) => (
             <li key={option.id} role="option" aria-selected={idx === highlight}>
               <button
                 type="button"
@@ -169,6 +229,11 @@ export function SkuSearchInput({
                       Bundle
                     </span>
                   )}
+                  {option.is_active === false && (
+                    <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-600">
+                      Inactive
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-stone-500">
                   {[option.franchise_name, option.name].filter(Boolean).join(" · ") ||
@@ -177,11 +242,28 @@ export function SkuSearchInput({
               </button>
             </li>
           ))}
+          {overflowCount > 0 && (
+            <li className="border-t border-stone-100 px-3 py-2 text-xs text-stone-500">
+              {overflowCount} more match{overflowCount === 1 ? "" : "es"} — type
+              more to narrow down
+            </li>
+          )}
         </ul>
       )}
-      {open && query.trim() && filtered.length === 0 && (
+      {showEmptyHint && (
         <p className="absolute z-20 mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-500 shadow-lg">
-          No matches for &ldquo;{query.trim()}&rdquo;
+          Type a SKU code, product name, or franchise to search
+        </p>
+      )}
+      {queryTooShort && (
+        <p className="absolute z-20 mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-500 shadow-lg">
+          Type at least {minQueryLength} character
+          {minQueryLength === 1 ? "" : "s"} to search
+        </p>
+      )}
+      {showNoMatches && (
+        <p className="absolute z-20 mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-500 shadow-lg">
+          No matches for &ldquo;{trimmedQuery}&rdquo;
         </p>
       )}
     </div>

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProductPackagingLink } from "@/types/database";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 type LinkRow = {
   id: string;
@@ -123,32 +124,37 @@ export interface FinishedGoodSkuOption {
   sku_code: string;
   name: string | null;
   franchise_name: string | null;
+  is_active: boolean;
 }
+
+type FinishedGoodRow = {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_active: boolean;
+  product_franchises: { name: string } | null;
+};
 
 export async function listFinishedGoodSkus(
   supabase: SupabaseClient,
 ): Promise<FinishedGoodSkuOption[]> {
-  const { data, error } = await supabase
-    .from("skus")
-    .select("id, sku_code, name, product_franchises(name)")
-    .eq("is_packaging", false)
-    .eq("is_active", true)
-    .order("sku_code");
-  if (error) throw error;
+  const rows = await fetchAllRows<FinishedGoodRow>(() =>
+    supabase
+      .from("skus")
+      .select("id, sku_code, name, is_active, product_franchises(name)")
+      .eq("is_packaging", false)
+      .order("sku_code") as unknown as Parameters<
+      typeof fetchAllRows<FinishedGoodRow>
+    >[0] extends () => infer Q
+      ? Q
+      : never,
+  );
 
-  return (data ?? []).map((row) => {
-    const franchise = row.product_franchises as unknown as
-      | { name: string }
-      | { name: string }[]
-      | null;
-    const franchiseName = Array.isArray(franchise)
-      ? (franchise[0]?.name ?? null)
-      : (franchise?.name ?? null);
-    return {
-      id: row.id,
-      sku_code: row.sku_code,
-      name: row.name,
-      franchise_name: franchiseName,
-    };
-  });
+  return rows.map((row) => ({
+    id: row.id,
+    sku_code: row.sku_code,
+    name: row.name,
+    franchise_name: row.product_franchises?.name ?? null,
+    is_active: row.is_active,
+  }));
 }

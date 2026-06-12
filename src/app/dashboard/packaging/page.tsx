@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { matchesSkuSearchOption } from "@/components/packaging/sku-search-input";
 import { formatNumber } from "@/lib/utils";
 import { PACKAGING_STOCK_LOCATION, STOCK_QTY_COLUMN } from "@/lib/stock/locations";
 import type {
@@ -61,15 +62,18 @@ export default function PackagingPage() {
   const [inventorySearch, setInventorySearch] = useState("");
   const [search, setSearch] = useState("");
   const [packagingFilter, setPackagingFilter] =
-    useState<PackagingFilter>("all");
+    useState<PackagingFilter>("other");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedPackagingId, setExpandedPackagingId] = useState<string | null>(
     null,
   );
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadOverview = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch("/api/packaging");
       const data = await res.json();
@@ -78,9 +82,11 @@ export default function PackagingPage() {
       setOpenPoLines(data.openPoLines ?? []);
       setStockAsOf(data.stockAsOf ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      if (!silent) {
+        setError(err instanceof Error ? err.message : "Failed to load");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -133,46 +139,68 @@ export default function PackagingPage() {
   }, [items, inventorySearch]);
 
   const filteredToggleSkus = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     return toggleSkus.filter((sku) => {
       if (packagingFilter === "packaging" && !sku.is_packaging) return false;
       if (packagingFilter === "other" && sku.is_packaging) return false;
       if (!q) return true;
-      return (
-        sku.sku_code.toLowerCase().includes(q) ||
-        (sku.name?.toLowerCase().includes(q) ?? false) ||
-        (sku.franchise_name?.toLowerCase().includes(q) ?? false)
-      );
+      return matchesSkuSearchOption(sku, q);
     });
   }, [toggleSkus, search, packagingFilter]);
 
   const packagingCount = toggleSkus.filter((s) => s.is_packaging).length;
 
+  function buildPlaceholderPackagingRow(sku: SkuToggleRow): PackagingSkuRow {
+    return {
+      id: sku.id,
+      sku_code: sku.sku_code,
+      name: sku.name,
+      is_packaging: true,
+      qty_on_hand: 0,
+      on_order_qty: 0,
+      stock_as_of: stockAsOf,
+      suggested_from_fg_restock: 0,
+      recommended_po_qty: 0,
+      linked_products: [],
+    };
+  }
+
   async function togglePackaging(sku: SkuToggleRow) {
-    if (sku.is_bundle) return;
+    if (sku.is_bundle || updatingId === sku.id) return;
+
     const marking = !sku.is_packaging;
+    const previousToggleSkus = toggleSkus;
+    const previousItems = items;
+
     setUpdatingId(sku.id);
+    setToggleSkus((prev) =>
+      prev.map((row) =>
+        row.id === sku.id ? { ...row, is_packaging: marking } : row,
+      ),
+    );
+    if (marking) {
+      setItems((prev) => {
+        if (prev.some((row) => row.id === sku.id)) return prev;
+        return [...prev, buildPlaceholderPackagingRow(sku)].sort((a, b) =>
+          a.sku_code.localeCompare(b.sku_code),
+        );
+      });
+    } else {
+      setItems((prev) => prev.filter((row) => row.id !== sku.id));
+    }
+
     try {
       const res = await fetch(`/api/skus/${sku.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_packaging: !sku.is_packaging }),
+        body: JSON.stringify({ is_packaging: marking }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Update failed");
-      setToggleSkus((prev) =>
-        prev.map((row) =>
-          row.id === sku.id
-            ? { ...row, is_packaging: !row.is_packaging }
-            : row,
-        ),
-      );
-      if (marking) {
-        await loadOverview();
-      } else {
-        setItems((prev) => prev.filter((row) => row.id !== sku.id));
-      }
+      void loadOverview({ silent: true });
     } catch (err) {
+      setToggleSkus(previousToggleSkus);
+      setItems(previousItems);
       setError(err instanceof Error ? err.message : "Update failed");
     } finally {
       setUpdatingId(null);
@@ -504,12 +532,13 @@ export default function PackagingPage() {
             Flag primary packaging materials (UB, EFLUTE, JAR, PUMP, etc.). Like
             active/inactive status, this is not reset when you re-upload
             mappings or stock. Bundle parent SKUs cannot be marked as packaging.
+            Filter defaults to non-packaging SKUs for faster assignment.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-3">
             <Input
-              placeholder="Search SKU or name…"
+              placeholder="Search SKU, name, or franchise…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="max-w-xs"
@@ -546,7 +575,7 @@ export default function PackagingPage() {
           ) : filteredToggleSkus.length === 0 ? (
             <p className="text-sm text-stone-500">No SKUs match your filters.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-stone-200">
+            <div className="max-h-[min(70vh,calc(100vh-14rem))] overflow-auto rounded-lg border border-stone-200">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
@@ -605,11 +634,9 @@ export default function PackagingPage() {
                             disabled={updatingId === sku.id}
                             onClick={() => togglePackaging(sku)}
                           >
-                            {updatingId === sku.id
-                              ? "Saving…"
-                              : sku.is_packaging
-                                ? "Unmark packaging"
-                                : "Mark packaging"}
+                            {sku.is_packaging
+                              ? "Unmark packaging"
+                              : "Mark packaging"}
                           </Button>
                         )}
                       </td>

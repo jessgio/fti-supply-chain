@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Link2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +22,10 @@ import { DEFAULT_TARGET_STOCK_MONTHS } from "@/lib/forecast/demand";
 import { formatNumber } from "@/lib/utils";
 import type { ProductPackagingLink } from "@/types/database";
 
-export default function PackagingLinksPage() {
+function PackagingLinksInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const productFromUrl = searchParams.get("product");
   const [products, setProducts] = useState<SkuSearchOption[]>([]);
   const [packagingSkus, setPackagingSkus] = useState<SkuSearchOption[]>([]);
   const [links, setLinks] = useState<ProductPackagingLink[]>([]);
@@ -81,6 +85,27 @@ export default function PackagingLinksPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!productFromUrl || loading || products.length === 0) return;
+    const product = products.find((p) => p.id === productFromUrl) ?? null;
+    if (product) {
+      setSelectedProduct((current) =>
+        current?.id === product.id ? current : product,
+      );
+    }
+  }, [productFromUrl, loading, products]);
+
+  function selectProduct(product: SkuSearchOption | null) {
+    setSelectedProduct(product);
+    const params = new URLSearchParams(searchParams.toString());
+    if (product) params.set("product", product.id);
+    else params.delete("product");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "/dashboard/packaging/links", {
+      scroll: false,
+    });
+  }
+
   const linksByProduct = useMemo(() => {
     const map = new Map<string, ProductPackagingLink[]>();
     for (const link of links) {
@@ -135,9 +160,9 @@ export default function PackagingLinksPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add");
+      setLinks((prev) => [...prev, data.link]);
       setAddPackaging(null);
       setAddQty("1");
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add");
     } finally {
@@ -158,7 +183,9 @@ export default function PackagingLinksPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update");
-      await load();
+      setLinks((prev) =>
+        prev.map((row) => (row.id === data.link.id ? data.link : row)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update");
     }
@@ -170,7 +197,7 @@ export default function PackagingLinksPage() {
       const res = await fetch(`/api/packaging/links/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to remove");
-      await load();
+      setLinks((prev) => prev.filter((row) => row.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove");
     }
@@ -178,7 +205,7 @@ export default function PackagingLinksPage() {
 
   function selectProductById(id: string) {
     const product = products.find((p) => p.id === id) ?? null;
-    setSelectedProduct(product);
+    selectProduct(product);
   }
 
   return (
@@ -279,8 +306,8 @@ export default function PackagingLinksPage() {
             <SkuSearchInput
               options={products}
               value={selectedProduct}
-              onChange={setSelectedProduct}
-              placeholder="Type to find a finished good…"
+              onChange={selectProduct}
+              placeholder="Type SKU code, name, or franchise…"
               disabled={loading}
             />
 
@@ -471,5 +498,19 @@ export default function PackagingLinksPage() {
         </Card>
       )}
     </PageShell>
+  );
+}
+
+export default function PackagingLinksPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageShell wide>
+          <p className="text-sm text-stone-500">Loading…</p>
+        </PageShell>
+      }
+    >
+      <PackagingLinksInner />
+    </Suspense>
   );
 }
