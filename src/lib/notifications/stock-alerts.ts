@@ -8,9 +8,11 @@ import type { PoStatus, RestockRecommendation } from "@/types/database";
 
 const DEFAULT_STOCKOUT_SOON_DAYS = 30;
 const DEFAULT_UPCOMING_SHIPMENT_DAYS = 14;
-const MAX_ITEMS_PER_SECTION = 12;
+const MAX_TABLE_ROWS = 10;
 
 const OPEN_PO_STATUSES: PoStatus[] = ["planned", "ordered", "in_transit"];
+
+type LarkElement = Record<string, unknown>;
 
 export interface UpcomingShipmentAlert {
   po_number: string;
@@ -49,7 +51,7 @@ function openUnitsOnPo(
   );
 }
 
-function truncateList<T>(items: T[], max = MAX_ITEMS_PER_SECTION): {
+function truncateList<T>(items: T[], max = MAX_TABLE_ROWS): {
   shown: T[];
   remaining: number;
 } {
@@ -57,25 +59,275 @@ function truncateList<T>(items: T[], max = MAX_ITEMS_PER_SECTION): {
   return { shown: items.slice(0, max), remaining: items.length - max };
 }
 
-function formatSkuLine(row: RestockRecommendation): string {
-  const franchise = row.franchise_name ? ` (${row.franchise_name})` : "";
-  const stockout =
-    row.projected_stockout_date != null
-      ? `stockout ${row.projected_stockout_date}`
-      : row.days_until_stockout != null
-        ? `${row.days_until_stockout}d left`
-        : "stockout unknown";
-  const restock =
-    row.recommended_restock_qty > 0
-      ? `, restock ${formatNumber(row.recommended_restock_qty)}`
-      : "";
-  const gap = row.has_stockout_gap ? ", gap before PO arrives" : "";
-  return `- **${row.sku_code}**${franchise}: ${formatNumber(row.current_stock)} on hand, ${stockout}${restock}${gap}`;
+function stockoutLabel(row: RestockRecommendation): string {
+  if (row.projected_stockout_date) {
+    return row.has_stockout_gap
+      ? `${row.projected_stockout_date} · gap`
+      : row.projected_stockout_date;
+  }
+  if (row.days_until_stockout != null) {
+    const days = `${row.days_until_stockout}d`;
+    return row.has_stockout_gap ? `${days} · gap` : days;
+  }
+  return "—";
 }
 
-function formatShipmentLine(shipment: UpcomingShipmentAlert): string {
-  const supplier = shipment.supplier_name ? ` · ${shipment.supplier_name}` : "";
-  return `- **${shipment.po_number}**${supplier}: ETA ${shipment.expected_date} (${shipment.days_until_arrival}d), ${formatNumber(shipment.open_units)} units, ${shipment.line_count} line(s), ${shipment.status.replace("_", " ")}`;
+function appDashboardUrl(): string | null {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (configured) return `${configured}/dashboard/inventory`;
+  const vercel = process.env.VERCEL_URL?.replace(/\/$/, "");
+  if (vercel) return `https://${vercel}/dashboard/inventory`;
+  return null;
+}
+
+function markdownElement(
+  content: string,
+  textSize = "normal_v2",
+  margin = "0px 0px 8px 0px",
+): LarkElement {
+  return {
+    tag: "markdown",
+    content,
+    text_align: "left",
+    text_size: textSize,
+    margin,
+  };
+}
+
+function hrElement(): LarkElement {
+  return { tag: "hr", margin: "12px 0px" };
+}
+
+function summaryColumnSet(
+  report: StockAlertReport,
+  stockoutSoonDays: number,
+): LarkElement {
+  return {
+    tag: "column_set",
+    flex_mode: "bisect",
+    background_style: "grey",
+    horizontal_spacing: "8px",
+    columns: [
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        vertical_align: "center",
+        elements: [
+          markdownElement(
+            `**${report.low_stock.length}**\nReorder now`,
+            "normal_v2",
+            "8px 8px 8px 8px",
+          ),
+        ],
+      },
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        vertical_align: "center",
+        elements: [
+          markdownElement(
+            `**${report.stockout_soon.length}**\nStockout ≤${stockoutSoonDays}d`,
+            "normal_v2",
+            "8px 8px 8px 8px",
+          ),
+        ],
+      },
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        vertical_align: "center",
+        elements: [
+          markdownElement(
+            `**${report.upcoming_shipments.length}**\nShipments`,
+            "normal_v2",
+            "8px 8px 8px 8px",
+          ),
+        ],
+      },
+    ],
+  };
+}
+
+function stockTable(
+  elementId: string,
+  rows: RestockRecommendation[],
+): LarkElement {
+  return {
+    tag: "table",
+    element_id: elementId,
+    page_size: Math.min(MAX_TABLE_ROWS, Math.max(rows.length, 1)),
+    row_height: "auto",
+    row_max_height: "96px",
+    header_style: {
+      text_align: "left",
+      text_size: "normal",
+      background_style: "grey",
+      bold: true,
+    },
+    columns: [
+      {
+        name: "sku",
+        display_name: "SKU",
+        data_type: "text",
+        width: "32%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "franchise",
+        display_name: "Franchise",
+        data_type: "text",
+        width: "24%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "on_hand",
+        display_name: "Hand",
+        data_type: "number",
+        width: "14%",
+        vertical_align: "top",
+        horizontal_align: "right",
+        format: { separator: true, precision: 0 },
+      },
+      {
+        name: "stockout",
+        display_name: "Stockout",
+        data_type: "text",
+        width: "18%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "restock",
+        display_name: "Restock",
+        data_type: "number",
+        width: "12%",
+        vertical_align: "top",
+        horizontal_align: "right",
+        format: { separator: true, precision: 0 },
+      },
+    ],
+    rows: rows.map((row) => ({
+      sku: row.sku_code,
+      franchise: row.franchise_name ?? "—",
+      on_hand: row.current_stock,
+      stockout: stockoutLabel(row),
+      restock: row.recommended_restock_qty > 0 ? row.recommended_restock_qty : 0,
+    })),
+  };
+}
+
+function shipmentTable(
+  elementId: string,
+  rows: UpcomingShipmentAlert[],
+): LarkElement {
+  return {
+    tag: "table",
+    element_id: elementId,
+    page_size: Math.min(MAX_TABLE_ROWS, Math.max(rows.length, 1)),
+    row_height: "auto",
+    row_max_height: "72px",
+    header_style: {
+      text_align: "left",
+      text_size: "normal",
+      background_style: "grey",
+      bold: true,
+    },
+    columns: [
+      {
+        name: "po",
+        display_name: "PO",
+        data_type: "text",
+        width: "24%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "supplier",
+        display_name: "Supplier",
+        data_type: "text",
+        width: "26%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "eta",
+        display_name: "ETA",
+        data_type: "text",
+        width: "18%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+      {
+        name: "days",
+        display_name: "Days",
+        data_type: "number",
+        width: "10%",
+        vertical_align: "top",
+        horizontal_align: "right",
+        format: { precision: 0 },
+      },
+      {
+        name: "units",
+        display_name: "Units",
+        data_type: "number",
+        width: "12%",
+        vertical_align: "top",
+        horizontal_align: "right",
+        format: { separator: true, precision: 0 },
+      },
+      {
+        name: "status",
+        display_name: "Status",
+        data_type: "text",
+        width: "10%",
+        vertical_align: "top",
+        horizontal_align: "left",
+      },
+    ],
+    rows: rows.map((row) => ({
+      po: row.po_number,
+      supplier: row.supplier_name ?? "—",
+      eta: row.expected_date,
+      days: row.days_until_arrival,
+      units: row.open_units,
+      status: row.status.replace("_", " "),
+    })),
+  };
+}
+
+function sectionElements(
+  title: string,
+  totalCount: number,
+  table: LarkElement | null,
+  remaining: number,
+): LarkElement[] {
+  const elements: LarkElement[] = [
+    markdownElement(`**${title}** · ${totalCount}`),
+  ];
+
+  if (table) {
+    elements.push(table);
+    if (remaining > 0) {
+      elements.push(
+        markdownElement(
+          `_Showing top ${MAX_TABLE_ROWS}. ${remaining} more on the dashboard._`,
+          "notation",
+          "4px 0px 8px 0px",
+        ),
+      );
+    }
+  } else {
+    elements.push(
+      markdownElement("None in this category.", "notation", "0px 0px 8px 0px"),
+    );
+  }
+
+  return elements;
 }
 
 export async function buildStockAlertReport(
@@ -151,25 +403,6 @@ export function reportHasAlerts(report: StockAlertReport): boolean {
   );
 }
 
-function sectionMarkdown(
-  title: string,
-  lines: string[],
-  remaining: number,
-): string {
-  if (lines.length === 0) return `**${title}:** none\n`;
-  const tail =
-    remaining > 0 ? `\n_…and ${remaining} more. See dashboard for full list._` : "";
-  return `**${title} (${lines.length + remaining})**\n${lines.join("\n")}${tail}\n`;
-}
-
-function appDashboardUrl(): string | null {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (configured) return `${configured}/dashboard/inventory`;
-  const vercel = process.env.VERCEL_URL?.replace(/\/$/, "");
-  if (vercel) return `https://${vercel}/dashboard/inventory`;
-  return null;
-}
-
 export function buildStockAlertCard(
   report: StockAlertReport,
   stockoutSoonDays = readIntEnv(
@@ -181,60 +414,105 @@ export function buildStockAlertCard(
   const stockoutSoon = truncateList(report.stockout_soon);
   const shipments = truncateList(report.upcoming_shipments);
 
-  const sections = [
-    sectionMarkdown(
-      "Low stock — reorder now",
-      lowStock.shown.map(formatSkuLine),
-      lowStock.remaining,
-    ),
-    sectionMarkdown(
-      `Nearing stockout (≤${stockoutSoonDays} days)`,
-      stockoutSoon.shown.map(formatSkuLine),
-      stockoutSoon.remaining,
-    ),
-    sectionMarkdown(
-      "Upcoming shipments",
-      shipments.shown.map(formatShipmentLine),
-      shipments.remaining,
-    ),
-  ].join("\n");
-
-  const dashboardUrl = appDashboardUrl();
-  const footer = dashboardUrl
-    ? `\n[Open inventory dashboard](${dashboardUrl})`
-    : "";
-
   const hasUrgent =
     report.low_stock.length > 0 || report.stockout_soon.length > 0;
+
+  const elements: LarkElement[] = [
+    summaryColumnSet(report, stockoutSoonDays),
+    hrElement(),
+    ...sectionElements(
+      "Low stock — reorder now",
+      report.low_stock.length,
+      lowStock.shown.length > 0
+        ? stockTable("low_stock_table", lowStock.shown)
+        : null,
+      lowStock.remaining,
+    ),
+    hrElement(),
+    ...sectionElements(
+      `Nearing stockout (≤${stockoutSoonDays} days)`,
+      report.stockout_soon.length,
+      stockoutSoon.shown.length > 0
+        ? stockTable("stockout_table", stockoutSoon.shown)
+        : null,
+      stockoutSoon.remaining,
+    ),
+    hrElement(),
+    ...sectionElements(
+      "Upcoming shipments",
+      report.upcoming_shipments.length,
+      shipments.shown.length > 0
+        ? shipmentTable("shipments_table", shipments.shown)
+        : null,
+      shipments.remaining,
+    ),
+  ];
+
+  const dashboardUrl = appDashboardUrl();
+  if (dashboardUrl) {
+    elements.push({
+      tag: "button",
+      text: {
+        tag: "plain_text",
+        content: "Open inventory dashboard",
+      },
+      type: "primary",
+      width: "fill",
+      size: "medium",
+      behaviors: [
+        {
+          type: "open_url",
+          default_url: dashboardUrl,
+          pc_url: dashboardUrl,
+          ios_url: dashboardUrl,
+          android_url: dashboardUrl,
+        },
+      ],
+      margin: "12px 0px 0px 0px",
+    });
+  }
+
+  elements.push(
+    markdownElement(
+      `Generated ${format(parseISO(report.generated_at), "yyyy-MM-dd HH:mm")} UTC`,
+      "notation",
+      "8px 0px 0px 0px",
+    ),
+  );
 
   return {
     msg_type: "interactive",
     card: {
+      schema: "2.0",
+      config: {
+        update_multi: true,
+        style: {
+          text_size: {
+            normal_v2: {
+              default: "normal",
+              pc: "normal",
+              mobile: "normal",
+            },
+          },
+        },
+      },
       header: {
         title: {
           tag: "plain_text",
           content: "FTI supply chain alerts",
         },
+        subtitle: {
+          tag: "plain_text",
+          content: `${format(parseISO(report.generated_at), "yyyy-MM-dd")} · ${report.low_stock.length + report.stockout_soon.length + report.upcoming_shipments.length} items`,
+        },
         template: hasUrgent ? "red" : "blue",
+        padding: "12px 12px 12px 12px",
       },
-      elements: [
-        {
-          tag: "div",
-          text: {
-            tag: "lark_md",
-            content: `${sections}${footer}`,
-          },
-        },
-        {
-          tag: "note",
-          elements: [
-            {
-              tag: "plain_text",
-              content: `Generated ${format(parseISO(report.generated_at), "yyyy-MM-dd HH:mm")} UTC`,
-            },
-          ],
-        },
-      ],
+      body: {
+        direction: "vertical",
+        padding: "12px 12px 12px 12px",
+        elements,
+      },
     },
   };
 }
