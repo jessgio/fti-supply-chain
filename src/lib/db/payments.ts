@@ -291,6 +291,18 @@ function purposeIssue(
   };
 }
 
+/** Down + balance paid may be reallocated between purposes; skip flags when combined total matches. */
+function downBalancePaymentsNetToZero(
+  poCurrency: string,
+  expectedDown: number,
+  expectedBalance: number,
+  paidDown: number,
+  paidBalance: number,
+): boolean {
+  const variance = paidDown + paidBalance - (expectedDown + expectedBalance);
+  return Math.abs(variance) <= poCurrencyTolerance(poCurrency);
+}
+
 export async function computePaymentDashboardSummary(
   supabase: SupabaseClient,
 ): Promise<PaymentDashboardSummary> {
@@ -401,23 +413,33 @@ export async function computePaymentDashboardSummary(
       isBalancePaymentPurpose,
     );
 
-    const downIssue = purposeIssue(
-      po,
+    const downBalanceBalanced = downBalancePaymentsNetToZero(
       poCurrency,
       totals.downPayment,
-      paidDownPoCurrency,
-      downIdrRate,
-    );
-    if (downIssue) downPaymentIssues.push(downIssue);
-
-    const balanceIssue = purposeIssue(
-      po,
-      poCurrency,
       totals.finalPayment,
+      paidDownPoCurrency,
       paidBalancePoCurrency,
-      balanceIdrRate,
     );
-    if (balanceIssue) balancePaymentIssues.push(balanceIssue);
+
+    if (!downBalanceBalanced) {
+      const downIssue = purposeIssue(
+        po,
+        poCurrency,
+        totals.downPayment,
+        paidDownPoCurrency,
+        downIdrRate,
+      );
+      if (downIssue) downPaymentIssues.push(downIssue);
+
+      const balanceIssue = purposeIssue(
+        po,
+        poCurrency,
+        totals.finalPayment,
+        paidBalancePoCurrency,
+        balanceIdrRate,
+      );
+      if (balanceIssue) balancePaymentIssues.push(balanceIssue);
+    }
   }
 
   return {
