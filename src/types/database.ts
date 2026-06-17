@@ -327,6 +327,125 @@ export interface PoPayment {
   updated_at?: string;
 }
 
+export type ExtractCategory =
+  | "quality_control"
+  | "rnd"
+  | "production"
+  | "inbound_supplier"
+  | "destroy_defect"
+  | "waste"
+  | "uncategorized";
+
+/** Whether a category's movement is an inbound (received) or outbound (issued). */
+export type ExtractFlow = "in" | "out" | "neutral";
+
+export interface ExtractCategoryRule {
+  id: string;
+  pattern: string;
+  category: ExtractCategory;
+  priority: number;
+}
+
+/** A single ledger row parsed from a manufacturer screenshot. */
+export interface ExtractTransaction {
+  id: string;
+  extract_id: string;
+  txn_date: string;
+  seq: number;
+  order_no: string | null;
+  tran_code: string | null;
+  from_to: string | null;
+  category: ExtractCategory;
+  lot_no: string | null;
+  entered_qty: number | null;
+  received: number;
+  issued: number;
+  balance: number | null;
+  status: string | null;
+  remark: string | null;
+  source_filename: string | null;
+}
+
+/** Per-category in/out totals over a window. */
+export interface ExtractCategoryTotal {
+  category: ExtractCategory;
+  received: number;
+  issued: number;
+  txn_count: number;
+}
+
+/** Aggregate roll-up for one extract (optionally within a date range). */
+export interface ExtractSummary {
+  id: string;
+  item_no: string;
+  description: string | null;
+  unit: string;
+  txn_count: number;
+  first_date: string | null;
+  last_date: string | null;
+  /** Running balance just before the window (or opening balance all-time). */
+  starting_balance: number;
+  /** Running balance at the end of the window (latest recorded balance). */
+  ending_balance: number;
+  total_received: number;
+  total_issued: number;
+  waste_issued: number;
+  /** waste_issued / (starting_balance + total_received), as a percentage. */
+  waste_pct: number | null;
+}
+
+/** Extract detail payload: summary + filtered ledger + category breakdown. */
+export interface ExtractDetail extends ExtractSummary {
+  transactions: ExtractTransaction[];
+  category_totals: ExtractCategoryTotal[];
+}
+
+/** A row coming back from the OCR parser, before it is committed. */
+export interface ParsedExtractRow {
+  txn_date: string;
+  order_no: string | null;
+  tran_code: string | null;
+  from_to: string | null;
+  lot_no: string | null;
+  entered_qty: number | null;
+  received: number;
+  issued: number;
+  balance: number | null;
+  status: string | null;
+  remark: string | null;
+  /** Server-assigned: resolved category and checksum status for review. */
+  category?: ExtractCategory;
+  checksum_ok?: boolean;
+}
+
+export interface ParsedExtract {
+  item_no: string;
+  description: string | null;
+  unit: string;
+  rows: ParsedExtractRow[];
+  source_path: string | null;
+  source_filename: string | null;
+}
+
+export type ExtractSortKey =
+  | "item_no"
+  | "description"
+  | "ending_balance"
+  | "total_received"
+  | "total_issued"
+  | "waste_pct"
+  | "txn_count"
+  | "last_date";
+
+export type ExtractTxnSortKey =
+  | "txn_date"
+  | "order_no"
+  | "from_to"
+  | "category"
+  | "received"
+  | "issued"
+  | "balance";
+
 export type UserRole = "admin" | "supply_chain" | "sales_marketing" | "viewer";
 
 export interface Profile {

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   Boxes,
+  FlaskConical,
   LayoutDashboard,
   Layers,
   Lightbulb,
@@ -55,6 +56,12 @@ const links: NavLink[] = [
     href: "/dashboard/payments",
     label: "PO Payments",
     icon: Banknote,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/extracts",
+    label: "Extracts",
+    icon: FlaskConical,
     roles: ["admin", "supply_chain"],
   },
   {
