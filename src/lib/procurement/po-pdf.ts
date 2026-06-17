@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import type PDFDocumentType from "pdfkit";
 import type { CompanySettings, PurchaseOrder, Supplier } from "@/types/database";
-import { computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
+import { billableLineQty, computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
 import { composePoPdfNotes } from "@/lib/procurement/supplier-po-notes";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { resolveVendorLineLabel } from "@/lib/procurement/vendor-line-label";
@@ -204,7 +204,8 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     doc.font("Helvetica").fontSize(9).fillColor("#111111");
 
     for (const line of po.lines ?? []) {
-      const total = lineTotal(line.qty_ordered, line.unit_cost);
+      const billedQty = billableLineQty(line, po);
+      const total = lineTotal(billedQty, line.unit_cost);
       const productLabel = resolveVendorLineLabel(line, vendorNames);
       const showInternalSku =
         vendorNames.has(line.sku_id) && line.sku_code && line.sku_code !== productLabel;
@@ -256,7 +257,7 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
         doc.fontSize(9).fillColor("#111111");
       }
 
-      doc.text(formatNumber(line.qty_ordered), left + colSku, rowY + paddingTop, {
+      doc.text(formatNumber(billedQty), left + colSku, rowY + paddingTop, {
         width: colQty,
         align: "right",
       });

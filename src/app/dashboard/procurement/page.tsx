@@ -39,8 +39,11 @@ import {
   PO_CURRENCIES,
 } from "@/lib/procurement/currencies";
 import {
+  billableLineQty,
   computePoInvoiceTotals,
   DEFAULT_PO_TAX_PCT,
+  poLineIsComplete,
+  poLineOpenQty,
   pphLabel,
   taxLabel,
   type PoInvoiceTotals,
@@ -91,15 +94,13 @@ function StatusBadge({ status }: { status: PoStatus }) {
   return <Badge className={STATUS_STYLES[status]}>{STATUS_LABELS[status]}</Badge>;
 }
 
-function lineTotal(line: PurchaseOrderLine): number {
-  return (line.unit_cost ?? 0) * line.qty_ordered;
+function lineTotal(line: PurchaseOrderLine, po?: PurchaseOrder): number {
+  const qty = po ? billableLineQty(line, po) : line.qty_ordered;
+  return (line.unit_cost ?? 0) * qty;
 }
 
 function poOpenQty(po: PurchaseOrder): number {
-  return (po.lines ?? []).reduce(
-    (sum, l) => sum + Math.max(0, l.qty_ordered - l.qty_received),
-    0,
-  );
+  return (po.lines ?? []).reduce((sum, l) => sum + poLineOpenQty(l), 0);
 }
 
 function poInvoiceTotal(po: PurchaseOrder): number {
@@ -538,10 +539,7 @@ function ProcurementInner() {
                                 </thead>
                                 <tbody>
                                   {lines.map((line) => {
-                                    const open = Math.max(
-                                      0,
-                                      line.qty_ordered - line.qty_received,
-                                    );
+                                    const open = poLineOpenQty(line);
                                     const matched = lineMatchesSku(line);
                                     return (
                                       <tr
@@ -582,7 +580,7 @@ function ProcurementInner() {
                                         </td>
                                         <td className="py-1 text-right">
                                           {formatPoMoney(
-                                            lineTotal(line),
+                                            lineTotal(line, po),
                                             po.currency,
                                           )}
                                         </td>
@@ -677,6 +675,7 @@ interface DraftLine {
   qty_ordered: string;
   unit_cost: string;
   qty_received?: number;
+  is_closed?: boolean;
 }
 
 function CreatePoDialog({
@@ -732,6 +731,7 @@ function CreatePoDialog({
         sku_id: l.sku_id,
         qty_ordered: Number(l.qty_ordered),
         qty_received: 0,
+        is_closed: false,
         unit_cost: l.unit_cost ? Number(l.unit_cost) : null,
       }));
     return computePoInvoiceTotals({
@@ -1126,6 +1126,7 @@ function EditPoDialog({
       qty_ordered: String(l.qty_ordered),
       unit_cost: l.unit_cost != null ? String(l.unit_cost) : "",
       qty_received: l.qty_received,
+      is_closed: l.is_closed,
     })),
   );
   const [saving, setSaving] = useState(false);
@@ -1413,7 +1414,7 @@ function EditPoDialog({
               </div>
               {lines.map((line, idx) => {
                 const received = line.qty_received ?? 0;
-                const lockedLine = received > 0;
+                const lockedLine = received > 0 || Boolean(line.is_closed);
                 return (
                   <div key={line.id ?? `new-${idx}`} className="flex gap-2">
                     {lockedLine ? (
@@ -2031,9 +2032,14 @@ function PoDetailDialog({
     }
   }
 
-  async function receive(lineId: string) {
+  async function receive(lineId: string, closeLine = false) {
     const qty = Number(receiveQty[lineId]);
     if (!Number.isFinite(qty) || qty <= 0) return;
+    const line = (po?.lines ?? []).find((l) => l.id === lineId);
+    if (!line) return;
+    const open = poLineOpenQty(line);
+    if (qty > open) return;
+
     setBusy(true);
     setError(null);
     try {
@@ -2047,6 +2053,7 @@ function PoDetailDialog({
           qty,
           batch_code: batchCode || undefined,
           expiry_date: expiryDate || undefined,
+          close_line: closeLine || qty < open,
         }),
       });
       const data = await res.json();
@@ -2058,6 +2065,36 @@ function PoDetailDialog({
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeRemaining(lineId: string) {
+    const line = (po?.lines ?? []).find((l) => l.id === lineId);
+    if (!line || poLineOpenQty(line) <= 0) return;
+    if (
+      !window.confirm(
+        `Close ${line.sku_code ?? "this line"} without receiving the remaining ${formatNumber(poLineOpenQty(line))} units? The PO invoice will be based on ${formatNumber(line.qty_received)} received.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/pos/${poId}/close-line`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_line_id: lineId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to close line");
+      setPo(data.purchaseOrder);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to close line");
     } finally {
       setBusy(false);
     }
@@ -2234,9 +2271,14 @@ function PoDetailDialog({
               </thead>
               <tbody>
                 {(po.lines ?? []).map((line) => {
-                  const open = line.qty_ordered - line.qty_received;
-                  const fully = open <= 0;
+                  const open = poLineOpenQty(line);
+                  const lineComplete = poLineIsComplete(line);
+                  const closedShort =
+                    line.is_closed && line.qty_received < line.qty_ordered;
                   const lineCoverage = coverageByLine.get(line.id);
+                  const receiveAmount = Number(receiveQty[line.id]);
+                  const canReceive =
+                    Number.isFinite(receiveAmount) && receiveAmount > 0;
                   return (
                     <tr key={line.id} className="border-b border-stone-100">
                       <td className="py-2 pr-4">
@@ -2248,6 +2290,11 @@ function PoDetailDialog({
                             {line.sku_name}
                           </span>
                         )}
+                        {closedShort && (
+                          <span className="mt-0.5 block text-xs text-amber-800">
+                            Closed short
+                          </span>
+                        )}
                         {lineCoverage?.is_latest_batch && (
                           <span className="mt-0.5 block text-xs text-sky-700">
                             Latest incoming batch
@@ -2255,7 +2302,18 @@ function PoDetailDialog({
                         )}
                       </td>
                       <td className="py-2 pr-4">
-                        {formatNumber(line.qty_ordered)}
+                        {closedShort ? (
+                          <span>
+                            <span className="text-stone-400 line-through">
+                              {formatNumber(line.qty_ordered)}
+                            </span>
+                            <span className="ml-1 font-medium text-stone-900">
+                              {formatNumber(line.qty_received)}
+                            </span>
+                          </span>
+                        ) : (
+                          formatNumber(line.qty_ordered)
+                        )}
                       </td>
                       <td className="py-2 pr-4">
                         {formatNumber(line.qty_received)}
@@ -2263,22 +2321,22 @@ function PoDetailDialog({
                       {po.expected_date && (
                         <>
                           <td className="py-2 pr-4 text-stone-700">
-                            {fully
+                            {lineComplete
                               ? "—"
                               : lineCoverage?.batch_depletion_date ?? "—"}
                           </td>
                           <td className="py-2 pr-4 font-medium text-stone-900">
-                            {fully
+                            {lineComplete
                               ? "—"
                               : (lineCoverage?.next_reorder_date ?? "—")}
                           </td>
                         </>
                       )}
                       <td className="py-2 pr-4">
-                        {fully ? (
+                        {lineComplete ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700">
                             <PackageCheck className="h-4 w-4" />
-                            Complete
+                            {closedShort ? "Closed" : "Complete"}
                           </span>
                         ) : (
                           <div className="flex flex-col gap-2">
@@ -2323,16 +2381,38 @@ function PoDetailDialog({
                         )}
                       </td>
                       <td className="py-2 text-right">
-                        {!fully && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => receive(line.id)}
-                            disabled={busy || !receiveQty[line.id]}
-                          >
-                            Receive
-                          </Button>
-                        )}
+                        {!lineComplete ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => receive(line.id)}
+                              disabled={busy || !canReceive}
+                            >
+                              Receive
+                            </Button>
+                            {canReceive && receiveAmount < open && (
+                              <Button
+                                size="sm"
+                                onClick={() => receive(line.id, true)}
+                                disabled={busy}
+                              >
+                                Receive & close
+                              </Button>
+                            )}
+                            {line.qty_received > 0 && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => closeRemaining(line.id)}
+                                disabled={busy}
+                                className="text-amber-800 hover:text-amber-900"
+                              >
+                                Close remaining
+                              </Button>
+                            )}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -2381,6 +2461,12 @@ function PoDetailDialog({
             const fmt = (value: number) => formatPoMoney(value, po.currency);
             return (
               <div className="rounded-lg bg-stone-50 p-4">
+                {totals.isShortReceived && (
+                  <p className="mb-3 text-sm text-amber-800">
+                    Invoice based on received quantities (short-closed). Original
+                    order value was {fmt(totals.orderedSubtotal)}.
+                  </p>
+                )}
                 <div className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-500">
                   {po.currency ?? DEFAULT_PO_CURRENCY}
                 </div>

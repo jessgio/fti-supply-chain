@@ -265,6 +265,7 @@ export interface PurchaseOrderLine {
   sku_name?: string | null;
   qty_ordered: number;
   qty_received: number;
+  is_closed: boolean;
   unit_cost: number | null;
   receipts?: PoReceipt[];
 }

@@ -261,6 +261,7 @@ type PoRow = {
     sku_id: string;
     qty_ordered: number;
     qty_received: number;
+    is_closed: boolean;
     unit_cost: number | null;
     skus: { sku_code: string; name: string | null } | null;
     po_receipts?: {
@@ -311,6 +312,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
       sku_name: l.skus?.name ?? null,
       qty_ordered: Number(l.qty_ordered),
       qty_received: Number(l.qty_received),
+      is_closed: Boolean(l.is_closed),
       unit_cost: l.unit_cost === null ? null : Number(l.unit_cost),
       receipts: (l.po_receipts ?? []).map((r) => ({
         id: r.id,
@@ -352,12 +354,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 const PO_SELECT =
   "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name))";
+  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name))";
 
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name), " +
+  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
@@ -520,7 +522,7 @@ export async function updatePurchaseOrder(
     );
 
     for (const line of existingLines) {
-      if (line.qty_received > 0) {
+      if (line.qty_received > 0 || line.is_closed) {
         if (!incomingIds.has(line.id)) {
           throw new Error(
             `Cannot remove line ${line.sku_code ?? line.id} with received quantity.`,
@@ -541,7 +543,12 @@ export async function updatePurchaseOrder(
     }
 
     const toDelete = existingLines
-      .filter((l) => l.qty_received === 0 && !incomingIds.has(l.id))
+      .filter(
+        (l) =>
+          l.qty_received === 0 &&
+          !l.is_closed &&
+          !incomingIds.has(l.id),
+      )
       .map((l) => l.id);
     if (toDelete.length > 0) {
       const { error } = await supabase
@@ -611,6 +618,7 @@ type OpenPoLineRow = {
   sku_id: string;
   qty_ordered: number;
   qty_received: number;
+  is_closed: boolean;
   skus: { sku_code: string } | null;
   purchase_orders: {
     id: string;
@@ -628,7 +636,7 @@ export async function listOpenPoBatchesBySkus(
   const { data, error } = await supabase
     .from("purchase_order_lines")
     .select(
-      "id, sku_id, qty_ordered, qty_received, skus(sku_code), purchase_orders!inner(id, expected_date, status)",
+      "id, sku_id, qty_ordered, qty_received, is_closed, skus(sku_code), purchase_orders!inner(id, expected_date, status)",
     )
     .in("sku_id", skuIds)
     .in("purchase_orders.status", ["planned", "ordered", "in_transit"]);
@@ -638,6 +646,7 @@ export async function listOpenPoBatchesBySkus(
   for (const line of (data ?? []) as unknown as OpenPoLineRow[]) {
     const po = line.purchase_orders;
     if (!po) continue;
+    if (line.is_closed) continue;
     const openQty = Number(line.qty_ordered) - Number(line.qty_received);
     if (openQty <= 0) continue;
     batches.push({
@@ -661,6 +670,7 @@ export async function receivePoLine(
   location?: string,
   batchCode?: string | null,
   expiryDate?: string | null,
+  closeLine?: boolean,
 ): Promise<void> {
   const trimmedBatch =
     batchCode === undefined || batchCode === null
@@ -673,6 +683,17 @@ export async function receivePoLine(
     p_location: location ?? "Gudang Finished Goods",
     p_batch_code: trimmedBatch,
     p_expiry_date: expiryDate ?? null,
+    p_close_line: closeLine ?? false,
+  });
+  if (error) throw error;
+}
+
+export async function closePoLine(
+  supabase: SupabaseClient,
+  lineId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("close_po_line", {
+    p_po_line_id: lineId,
   });
   if (error) throw error;
 }
