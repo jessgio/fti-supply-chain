@@ -115,10 +115,14 @@ export async function parseExtractScreenshot(
   }
 
   const { generateObject } = await import("ai");
-  const { openai } = await import("@ai-sdk/openai");
+  const { getOpenAIProvider, resolveModelId } = await import(
+    "@/lib/ai/provider"
+  );
+  const openai = getOpenAIProvider();
+  const modelId = resolveModelId(process.env.OPENAI_VISION_MODEL || "gpt-4o");
 
   const { object } = await generateObject({
-    model: openai("gpt-4o"),
+    model: openai(modelId),
     schema: extractSchema,
     maxRetries: 2,
     messages: [

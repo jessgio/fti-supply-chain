@@ -436,7 +436,10 @@ export async function buildAiInsight(
 
   try {
     const { generateText } = await import("ai");
-    const { openai } = await import("@ai-sdk/openai");
+    const { getOpenAIProvider, resolveModelId } = await import(
+      "@/lib/ai/provider"
+    );
+    const openai = getOpenAIProvider();
 
     const payload = recommendations.slice(0, 25).map((r) => ({
       sku: r.sku_code,
@@ -448,7 +451,7 @@ export async function buildAiInsight(
     }));
 
     const result = await generateText({
-      model: openai("gpt-4o-mini"),
+      model: openai(resolveModelId("gpt-4o-mini")),
       system:
         "You are a supply chain analyst for From This Island, a consumer brand. Return concise JSON with keys summary (string), highlights (string[]), risks (string[]). Focus on restocking priorities and demand risks.",
       prompt: `Analyze these SKU restock recommendations and return JSON only:\n${JSON.stringify(payload)}`,
