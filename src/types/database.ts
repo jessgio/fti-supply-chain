@@ -395,6 +395,8 @@ export interface ExtractSummary {
   id: string;
   item_no: string;
   description: string | null;
+  /** Manufacturer item name(s) from extract_item_name_mappings. */
+  manufacturer_name: string | null;
   unit: string;
   txn_count: number;
   first_date: string | null;
@@ -447,7 +449,7 @@ export interface ParsedExtract {
 
 export type ExtractSortKey =
   | "item_no"
-  | "description"
+  | "manufacturer_name"
   | "ending_balance"
   | "total_received"
   | "total_issued"

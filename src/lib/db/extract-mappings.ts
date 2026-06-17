@@ -5,6 +5,32 @@ import type {
   ExtractItemNameMapping,
 } from "@/types/database";
 
+/** Manufacturer item names keyed by extract id (multiple names joined with ", "). */
+export async function loadManufacturerNamesByExtractId(
+  supabase: SupabaseClient,
+): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from("extract_item_name_mappings")
+    .select("extract_id, manufacturer_name")
+    .order("manufacturer_name");
+  if (error) throw error;
+
+  const byExtract = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    const extractId = row.extract_id as string;
+    const name = row.manufacturer_name as string;
+    const list = byExtract.get(extractId) ?? [];
+    list.push(name);
+    byExtract.set(extractId, list);
+  }
+
+  const result = new Map<string, string>();
+  for (const [extractId, names] of byExtract) {
+    result.set(extractId, names.join(", "));
+  }
+  return result;
+}
+
 export async function loadActionCodeMappings(
   supabase: SupabaseClient,
 ): Promise<ExtractActionCodeMapping[]> {

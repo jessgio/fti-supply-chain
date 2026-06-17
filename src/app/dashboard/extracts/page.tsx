@@ -121,7 +121,7 @@ export default function ExtractsPage() {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir(key === "item_no" || key === "description" ? "asc" : "desc");
+      setSortDir(key === "item_no" || key === "manufacturer_name" ? "asc" : "desc");
     }
   }
 
@@ -171,8 +171,8 @@ export default function ExtractsPage() {
         <CardHeader>
           <CardTitle className="text-lg">Extract ledger summary</CardTitle>
           <CardDescription>
-            Search by item number or description. Click an extract for the full
-            ledger, date-range balances, and category breakdown.
+            Search by item number or manufacturer name. Click an extract for the
+            full ledger, date-range balances, and category breakdown.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -180,7 +180,7 @@ export default function ExtractsPage() {
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-stone-400" />
             <Input
               className="pl-9"
-              placeholder="Search item no or description…"
+              placeholder="Search item no or manufacturer name…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -207,8 +207,8 @@ export default function ExtractsPage() {
                       onSort={handleSort}
                     />
                     <SortableHeader
-                      label="Description"
-                      columnKey="description"
+                      label="Manufacturer name"
+                      columnKey="manufacturer_name"
                       activeKey={sortKey}
                       sortDir={sortDir}
                       onSort={handleSort}
@@ -272,7 +272,7 @@ export default function ExtractsPage() {
                         </Link>
                       </td>
                       <td className="max-w-xs truncate py-2 pr-4 text-stone-700">
-                        {ex.description ?? "—"}
+                        {ex.manufacturer_name ?? "—"}
                       </td>
                       <td className="py-2 pr-4 text-stone-800">
                         {formatNumber(ex.ending_balance, 3)}

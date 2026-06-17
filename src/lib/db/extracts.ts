@@ -8,7 +8,10 @@ import { resolveActionCodeCategory } from "@/lib/extracts/mappings";
 import { computeLedgerStats, orderTransactions } from "@/lib/extracts/ledger";
 import { transactionSignature } from "@/lib/extracts/signature";
 import { normalizeExtractDate } from "@/lib/extracts/parse";
-import { loadActionCodeMappings } from "@/lib/db/extract-mappings";
+import {
+  loadActionCodeMappings,
+  loadManufacturerNamesByExtractId,
+} from "@/lib/db/extract-mappings";
 import type {
   ExtractCategory,
   ExtractCategoryRule,
@@ -96,9 +99,10 @@ export async function listExtracts(
   supabase: SupabaseClient,
   params: ListExtractsParams = {},
 ): Promise<ExtractSummary[]> {
-  const { data: extracts, error } = await supabase
-    .from("extracts")
-    .select("id, item_no, description, unit");
+  const [{ data: extracts, error }, manufacturerNames] = await Promise.all([
+    supabase.from("extracts").select("id, item_no, description, unit"),
+    loadManufacturerNamesByExtractId(supabase),
+  ]);
   if (error) throw error;
 
   const txns = await fetchAllRows<TxnRow>(() =>
@@ -123,6 +127,7 @@ export async function listExtracts(
       id: ex.id,
       item_no: ex.item_no,
       description: ex.description,
+      manufacturer_name: manufacturerNames.get(ex.id) ?? null,
       unit: ex.unit,
       txn_count: stats.txn_count,
       first_date: stats.first_date,
@@ -141,7 +146,7 @@ export async function listExtracts(
     summaries = summaries.filter(
       (s) =>
         s.item_no.toLowerCase().includes(q) ||
-        (s.description?.toLowerCase().includes(q) ?? false),
+        (s.manufacturer_name?.toLowerCase().includes(q) ?? false),
     );
   }
 
@@ -161,8 +166,8 @@ function compareSummaries(
   switch (key) {
     case "item_no":
       return a.item_no.localeCompare(b.item_no);
-    case "description":
-      return (a.description ?? "").localeCompare(b.description ?? "");
+    case "manufacturer_name":
+      return (a.manufacturer_name ?? "").localeCompare(b.manufacturer_name ?? "");
     case "ending_balance":
       return a.ending_balance - b.ending_balance;
     case "total_received":
@@ -201,6 +206,8 @@ export async function getExtractDetail(
     .maybeSingle();
   if (error) throw error;
   if (!extract) return null;
+
+  const manufacturerNames = await loadManufacturerNamesByExtractId(supabase);
 
   const rows = await fetchAllRows<TxnRow>(() =>
     supabase
@@ -241,6 +248,7 @@ export async function getExtractDetail(
     id: extract.id,
     item_no: extract.item_no,
     description: extract.description,
+    manufacturer_name: manufacturerNames.get(extract.id) ?? null,
     unit: extract.unit,
     txn_count: stats.txn_count,
     first_date: stats.first_date,

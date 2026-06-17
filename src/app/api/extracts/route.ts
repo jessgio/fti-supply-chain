@@ -7,7 +7,7 @@ import type { ExtractSortKey } from "@/types/database";
 
 const SORT_KEYS: ExtractSortKey[] = [
   "item_no",
-  "description",
+  "manufacturer_name",
   "ending_balance",
   "total_received",
   "total_issued",

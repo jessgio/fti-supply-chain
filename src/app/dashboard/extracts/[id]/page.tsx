@@ -171,8 +171,10 @@ export default function ExtractDetailPage() {
           <h1 className="mt-2 text-2xl font-semibold text-stone-900">
             {detail?.item_no ?? "Extract"}
           </h1>
-          {detail?.description && (
-            <p className="mt-1 text-sm text-stone-600">{detail.description}</p>
+          {detail?.manufacturer_name && (
+            <p className="mt-1 text-sm text-stone-600">
+              {detail.manufacturer_name}
+            </p>
           )}
         </div>
         <Button
