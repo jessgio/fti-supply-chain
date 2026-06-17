@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   PoStatus,
+  PoPayment,
   PurchaseOrder,
   PurchaseOrderLine,
   Supplier,
@@ -47,6 +48,24 @@ export interface UpdatePoInput {
   currency?: string;
   notes?: string | null;
   lines?: UpdatePoLineInput[];
+}
+
+export interface NewPoPaymentInput {
+  payment_date?: string;
+  amount: number;
+  payment_request_number: string;
+  currency?: string;
+  exchange_rate?: number | null;
+  purpose: string;
+}
+
+export interface UpdatePoPaymentInput {
+  payment_date?: string;
+  amount?: number;
+  payment_request_number?: string;
+  currency?: string;
+  exchange_rate?: number | null;
+  purpose?: string;
 }
 
 export interface NewSupplierInput {
@@ -246,9 +265,38 @@ type PoRow = {
       qty_received: number;
       received_date: string;
       location: string;
+      batch_code: string | null;
+      expiry_date: string | null;
     }[];
   }[];
+  po_payments?: {
+    id: string;
+    payment_date: string;
+    amount: number;
+    payment_request_number: string;
+    currency: string;
+    exchange_rate: number | null;
+    purpose: string;
+    created_at: string;
+    updated_at: string;
+  }[];
 };
+
+function mapPoPayment(row: NonNullable<PoRow["po_payments"]>[number]): PoPayment {
+  return {
+    id: row.id,
+    po_id: "",
+    payment_date: row.payment_date,
+    amount: Number(row.amount),
+    payment_request_number: row.payment_request_number,
+    currency: row.currency ?? "IDR",
+    exchange_rate:
+      row.exchange_rate === null ? null : Number(row.exchange_rate),
+    purpose: row.purpose,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
 
 function mapPoRow(row: PoRow): PurchaseOrder {
   const lines: PurchaseOrderLine[] = (row.purchase_order_lines ?? []).map(
@@ -267,9 +315,15 @@ function mapPoRow(row: PoRow): PurchaseOrder {
         qty_received: Number(r.qty_received),
         received_date: r.received_date,
         location: r.location,
+        batch_code: r.batch_code ?? null,
+        expiry_date: r.expiry_date ?? null,
       })),
     }),
   );
+  const payments = (row.po_payments ?? []).map((p) => ({
+    ...mapPoPayment(p),
+    po_id: row.id,
+  }));
   return {
     id: row.id,
     po_number: row.po_number,
@@ -287,6 +341,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     created_at: row.created_at,
     updated_at: row.updated_at,
     lines,
+    payments,
   };
 }
 
@@ -299,7 +354,8 @@ const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name), " +
-  "po_receipts(id, qty_received, received_date, location))";
+  "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
+  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
 export async function listPurchaseOrders(
   supabase: SupabaseClient,
@@ -596,12 +652,158 @@ export async function receivePoLine(
   qty: number,
   receivedDate?: string,
   location?: string,
+  batchCode?: string | null,
+  expiryDate?: string | null,
 ): Promise<void> {
+  const trimmedBatch =
+    batchCode === undefined || batchCode === null
+      ? null
+      : batchCode.trim() || null;
   const { error } = await supabase.rpc("receive_po_line", {
     p_po_line_id: lineId,
     p_qty: qty,
     p_received_date: receivedDate ?? new Date().toISOString().slice(0, 10),
     p_location: location ?? "Gudang Finished Goods",
+    p_batch_code: trimmedBatch,
+    p_expiry_date: expiryDate ?? null,
   });
   if (error) throw error;
+}
+
+function validatePaymentInput(input: {
+  amount?: number;
+  payment_request_number?: string;
+  currency?: string;
+  exchange_rate?: number | null;
+  purpose?: string;
+}) {
+  if (input.amount !== undefined && (!Number.isFinite(input.amount) || input.amount <= 0)) {
+    throw new Error("Payment amount must be a positive number.");
+  }
+  if (input.payment_request_number !== undefined) {
+    const trimmed = input.payment_request_number.trim();
+    if (!trimmed) {
+      throw new Error("Payment request number is required.");
+    }
+  }
+  if (input.purpose !== undefined && !input.purpose.trim()) {
+    throw new Error("Payment purpose is required.");
+  }
+  if (
+    input.exchange_rate !== undefined &&
+    input.exchange_rate !== null &&
+    (!Number.isFinite(input.exchange_rate) || input.exchange_rate <= 0)
+  ) {
+    throw new Error("Exchange rate must be a positive number.");
+  }
+}
+
+export async function createPoPayment(
+  supabase: SupabaseClient,
+  poId: string,
+  input: NewPoPaymentInput,
+): Promise<PurchaseOrder> {
+  const po = await getPurchaseOrder(supabase, poId);
+  if (!po) throw new Error("Purchase order not found.");
+
+  validatePaymentInput(input);
+
+  const requestNumber = input.payment_request_number.trim();
+  if (!requestNumber) {
+    throw new Error("Payment request number is required.");
+  }
+  if (!input.purpose.trim()) {
+    throw new Error("Payment purpose is required.");
+  }
+
+  const currency = input.currency ?? po.currency ?? "IDR";
+  const exchangeRate =
+    currency === "IDR" ? null : (input.exchange_rate ?? null);
+
+  const { error } = await supabase.from("po_payments").insert({
+    po_id: poId,
+    payment_date: input.payment_date ?? new Date().toISOString().slice(0, 10),
+    amount: input.amount,
+    payment_request_number: requestNumber,
+    currency,
+    exchange_rate: exchangeRate,
+    purpose: input.purpose.trim(),
+  });
+  if (error) throw error;
+
+  const updated = await getPurchaseOrder(supabase, poId);
+  if (!updated) throw new Error("Purchase order not found.");
+  return updated;
+}
+
+export async function updatePoPayment(
+  supabase: SupabaseClient,
+  poId: string,
+  paymentId: string,
+  input: UpdatePoPaymentInput,
+): Promise<PurchaseOrder> {
+  const po = await getPurchaseOrder(supabase, poId);
+  if (!po) throw new Error("Purchase order not found.");
+
+  const existing = (po.payments ?? []).find((p) => p.id === paymentId);
+  if (!existing) throw new Error("Payment not found.");
+
+  validatePaymentInput(input);
+
+  const patch: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (input.payment_date !== undefined) patch.payment_date = input.payment_date;
+  if (input.amount !== undefined) patch.amount = input.amount;
+  if (input.payment_request_number !== undefined) {
+    const trimmed = input.payment_request_number.trim();
+    if (!trimmed) throw new Error("Payment request number is required.");
+    patch.payment_request_number = trimmed;
+  }
+  if (input.purpose !== undefined) {
+    const trimmed = input.purpose.trim();
+    if (!trimmed) throw new Error("Payment purpose is required.");
+    patch.purpose = trimmed;
+  }
+
+  const currency = input.currency ?? existing.currency;
+  if (input.currency !== undefined) patch.currency = currency;
+  if (input.currency !== undefined || input.exchange_rate !== undefined) {
+    patch.exchange_rate =
+      currency === "IDR" ? null : (input.exchange_rate ?? existing.exchange_rate);
+  }
+
+  const { error } = await supabase
+    .from("po_payments")
+    .update(patch)
+    .eq("id", paymentId)
+    .eq("po_id", poId);
+  if (error) throw error;
+
+  const updated = await getPurchaseOrder(supabase, poId);
+  if (!updated) throw new Error("Purchase order not found.");
+  return updated;
+}
+
+export async function deletePoPayment(
+  supabase: SupabaseClient,
+  poId: string,
+  paymentId: string,
+): Promise<PurchaseOrder> {
+  const po = await getPurchaseOrder(supabase, poId);
+  if (!po) throw new Error("Purchase order not found.");
+
+  const existing = (po.payments ?? []).find((p) => p.id === paymentId);
+  if (!existing) throw new Error("Payment not found.");
+
+  const { error } = await supabase
+    .from("po_payments")
+    .delete()
+    .eq("id", paymentId)
+    .eq("po_id", poId);
+  if (error) throw error;
+
+  const updated = await getPurchaseOrder(supabase, poId);
+  if (!updated) throw new Error("Purchase order not found.");
+  return updated;
 }

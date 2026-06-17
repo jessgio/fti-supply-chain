@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Layers,
   Lightbulb,
+  CalendarClock,
   Link2,
   LogOut,
   Package,
@@ -41,6 +42,12 @@ const links: NavLink[] = [
     href: "/dashboard/procurement",
     label: "Procurement",
     icon: ShoppingCart,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/batches",
+    label: "Stock Batches",
+    icon: CalendarClock,
     roles: ["admin", "supply_chain"],
   },
   {

@@ -32,6 +32,8 @@ export async function POST(
       qty,
       body?.received_date ?? undefined,
       body?.location ?? undefined,
+      body?.batch_code ?? undefined,
+      body?.expiry_date ?? undefined,
     );
 
     invalidateForecastCache();

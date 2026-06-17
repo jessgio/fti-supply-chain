@@ -286,6 +286,7 @@ export interface PurchaseOrder {
   created_at?: string;
   updated_at?: string;
   lines?: PurchaseOrderLine[];
+  payments?: PoPayment[];
 }
 
 export interface PoReceipt {
@@ -294,6 +295,34 @@ export interface PoReceipt {
   qty_received: number;
   received_date: string;
   location: string;
+  batch_code?: string | null;
+  expiry_date?: string | null;
+}
+
+export interface StockBatch {
+  id: string;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  batch_code: string | null;
+  expiry_date: string | null;
+  qty_received: number;
+  location: string;
+  received_date: string;
+  po_number: string | null;
+}
+
+export interface PoPayment {
+  id: string;
+  po_id: string;
+  payment_date: string;
+  amount: number;
+  payment_request_number: string;
+  currency: string;
+  exchange_rate: number | null;
+  purpose: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type UserRole = "admin" | "supply_chain" | "sales_marketing" | "viewer";

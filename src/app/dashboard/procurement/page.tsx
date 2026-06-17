@@ -16,6 +16,7 @@ import {
   Settings,
   Building2,
   Tags,
+  Banknote,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -42,9 +43,11 @@ import {
   DEFAULT_PO_TAX_PCT,
   taxLabel,
 } from "@/lib/procurement/po-totals";
+import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import { formatSupplierPoNotes } from "@/lib/procurement/supplier-po-notes";
 import type {
   CompanySettings,
+  PoPayment,
   PoStatus,
   PurchaseOrder,
   PurchaseOrderLine,
@@ -1432,6 +1435,419 @@ function EditPoDialog({
   );
 }
 
+function emptyPaymentForm(poCurrency: string): PaymentFormState {
+  return {
+    paymentDate: new Date().toISOString().slice(0, 10),
+    amount: "",
+    paymentRequestNumber: "",
+    currency: poCurrency,
+    exchangeRate: "",
+    purpose: PO_PAYMENT_PURPOSES[0],
+    customPurpose: "",
+  };
+}
+
+interface PaymentFormState {
+  paymentDate: string;
+  amount: string;
+  paymentRequestNumber: string;
+  currency: string;
+  exchangeRate: string;
+  purpose: string;
+  customPurpose: string;
+}
+
+function paymentFormFromRecord(payment: PoPayment): PaymentFormState {
+  const isPreset = (PO_PAYMENT_PURPOSES as readonly string[]).includes(
+    payment.purpose,
+  );
+  return {
+    paymentDate: payment.payment_date,
+    amount: String(payment.amount),
+    paymentRequestNumber: payment.payment_request_number,
+    currency: payment.currency,
+    exchangeRate:
+      payment.exchange_rate != null ? String(payment.exchange_rate) : "",
+    purpose: isPreset ? payment.purpose : "Other",
+    customPurpose: isPreset ? "" : payment.purpose,
+  };
+}
+
+function resolvePurpose(purpose: string, customPurpose: string): string {
+  if (purpose === "Other") {
+    return customPurpose.trim();
+  }
+  return purpose;
+}
+
+function PoPaymentsSection({
+  po,
+  busy,
+  setBusy,
+  setError,
+  onUpdated,
+}: {
+  po: PurchaseOrder;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
+  setError: (error: string | null) => void;
+  onUpdated: (po: PurchaseOrder) => void;
+}) {
+  const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(() => emptyPaymentForm(poCurrency));
+
+  const payments = useMemo(
+    () =>
+      [...(po.payments ?? [])].sort((a, b) =>
+        b.payment_date.localeCompare(a.payment_date),
+      ),
+    [po.payments],
+  );
+
+  const invoiceTotal = computePoInvoiceTotals(po).invoiceTotal;
+  const paidInPoCurrency = payments
+    .filter((p) => p.currency === poCurrency)
+    .reduce((sum, p) => sum + p.amount, 0);
+  const balanceDue = invoiceTotal - paidInPoCurrency;
+  const fmt = (value: number, currency = poCurrency) =>
+    formatPoMoney(value, currency);
+
+  function openAddForm() {
+    setEditingId(null);
+    setForm(emptyPaymentForm(poCurrency));
+    setFormOpen(true);
+  }
+
+  function openEditForm(payment: PoPayment) {
+    setEditingId(payment.id);
+    setForm(paymentFormFromRecord(payment));
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm(emptyPaymentForm(poCurrency));
+  }
+
+  async function savePayment() {
+    const amount = Number(form.amount);
+    const purpose = resolvePurpose(form.purpose, form.customPurpose);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Enter a positive payment amount.");
+      return;
+    }
+    if (!form.paymentRequestNumber.trim()) {
+      setError("Payment request number is required.");
+      return;
+    }
+    if (!purpose) {
+      setError("Payment purpose is required.");
+      return;
+    }
+    if (form.currency !== "IDR" && form.exchangeRate) {
+      const rate = Number(form.exchangeRate);
+      if (!Number.isFinite(rate) || rate <= 0) {
+        setError("Exchange rate must be a positive number.");
+        return;
+      }
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = {
+        payment_date: form.paymentDate,
+        amount,
+        payment_request_number: form.paymentRequestNumber.trim(),
+        currency: form.currency,
+        exchange_rate:
+          form.currency === "IDR"
+            ? null
+            : form.exchangeRate
+              ? Number(form.exchangeRate)
+              : null,
+        purpose,
+      };
+
+      const url = editingId
+        ? `/api/procurement/pos/${po.id}/payments/${editingId}`
+        : `/api/procurement/pos/${po.id}/payments`;
+      const res = await fetch(url, {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save payment");
+      onUpdated(data.purchaseOrder);
+      closeForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save payment");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePayment(payment: PoPayment) {
+    if (
+      !window.confirm(
+        `Delete payment ${payment.payment_request_number} (${fmt(payment.amount, payment.currency)})?`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/procurement/pos/${po.id}/payments/${payment.id}`,
+        { method: "DELETE" },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete payment");
+      onUpdated(data.purchaseOrder);
+      if (editingId === payment.id) closeForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete payment");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Banknote className="h-4 w-4 text-stone-500" />
+          <p className="text-sm font-medium text-stone-700">Payments</p>
+        </div>
+        {!formOpen && (
+          <Button size="sm" variant="outline" onClick={openAddForm} disabled={busy}>
+            <Plus className="h-3.5 w-3.5" />
+            Log payment
+          </Button>
+        )}
+      </div>
+
+      {payments.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-stone-200">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
+                <th className="px-3 py-2">Date</th>
+                <th className="px-3 py-2">Request #</th>
+                <th className="px-3 py-2">Purpose</th>
+                <th className="px-3 py-2 text-right">Amount</th>
+                <th className="px-3 py-2">Rate</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {payments.map((payment) => (
+                <tr key={payment.id} className="border-b border-stone-100">
+                  <td className="px-3 py-2 text-stone-700">
+                    {payment.payment_date}
+                  </td>
+                  <td className="px-3 py-2 font-medium text-stone-900">
+                    {payment.payment_request_number}
+                  </td>
+                  <td className="px-3 py-2 text-stone-700">{payment.purpose}</td>
+                  <td className="px-3 py-2 text-right font-medium text-stone-900">
+                    {fmt(payment.amount, payment.currency)}
+                    {payment.currency !== poCurrency && (
+                      <span className="ml-1 text-xs text-stone-500">
+                        {payment.currency}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-stone-600">
+                    {payment.currency !== "IDR" && payment.exchange_rate != null
+                      ? `${formatNumber(payment.exchange_rate)} IDR/${payment.currency}`
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEditForm(payment)}
+                        disabled={busy}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => removePayment(payment)}
+                        disabled={busy}
+                        className="text-rose-700 hover:text-rose-800"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-sm text-stone-500">No payments logged yet.</p>
+      )}
+
+      <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm">
+        <div className="flex flex-wrap justify-between gap-2">
+          <span className="text-stone-600">Paid ({poCurrency})</span>
+          <span className="font-medium text-stone-900">
+            {fmt(paidInPoCurrency)}
+          </span>
+        </div>
+        <div className="mt-1 flex flex-wrap justify-between gap-2 border-t border-stone-200 pt-1">
+          <span className="font-medium text-stone-700">Balance due</span>
+          <span
+            className={`font-semibold ${balanceDue > 0 ? "text-amber-800" : "text-emerald-800"}`}
+          >
+            {fmt(balanceDue)}
+          </span>
+        </div>
+      </div>
+
+      {formOpen && (
+        <div className="rounded-lg border border-stone-200 bg-white p-4">
+          <p className="mb-3 text-sm font-medium text-stone-800">
+            {editingId ? "Edit payment" : "Log payment"}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-600">Payment date</span>
+              <Input
+                type="date"
+                value={form.paymentDate}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, paymentDate: e.target.value }))
+                }
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-600">Amount</span>
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={form.amount}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, amount: e.target.value }))
+                }
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-600">
+                Payment request #
+              </span>
+              <Input
+                value={form.paymentRequestNumber}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    paymentRequestNumber: e.target.value,
+                  }))
+                }
+                placeholder="e.g. PR-2026-0042"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-600">Currency</span>
+              <Select
+                value={form.currency}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    currency: e.target.value,
+                    exchangeRate:
+                      e.target.value === "IDR" ? "" : prev.exchangeRate,
+                  }))
+                }
+              >
+                {PO_CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            {form.currency !== "IDR" && (
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1 block text-stone-600">
+                  Exchange rate (IDR per 1 {form.currency})
+                </span>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={form.exchangeRate}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      exchangeRate: e.target.value,
+                    }))
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+            )}
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-600">Purpose</span>
+              <Select
+                value={form.purpose}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, purpose: e.target.value }))
+                }
+              >
+                {PO_PAYMENT_PURPOSES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            {form.purpose === "Other" && (
+              <label className="block text-sm">
+                <span className="mb-1 block text-stone-600">Custom purpose</span>
+                <Input
+                  value={form.customPurpose}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      customPurpose: e.target.value,
+                    }))
+                  }
+                  placeholder="Describe the payment"
+                />
+              </label>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button size="sm" onClick={savePayment} disabled={busy}>
+              {editingId ? "Save changes" : "Add payment"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={closeForm}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PoDetailDialog({
   poId,
   onClose,
@@ -1448,6 +1864,12 @@ function PoDetailDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [receiveBatchCode, setReceiveBatchCode] = useState<
+    Record<string, string>
+  >({});
+  const [receiveExpiryDate, setReceiveExpiryDate] = useState<
+    Record<string, string>
+  >({});
   const [editOpen, setEditOpen] = useState(false);
   const [coverage, setCoverage] = useState<PoLineCoverage[]>([]);
   const [coverageLoading, setCoverageLoading] = useState(false);
@@ -1554,15 +1976,24 @@ function PoDetailDialog({
     setBusy(true);
     setError(null);
     try {
+      const batchCode = receiveBatchCode[lineId]?.trim();
+      const expiryDate = receiveExpiryDate[lineId]?.trim();
       const res = await fetch(`/api/procurement/pos/${poId}/receive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ po_line_id: lineId, qty }),
+        body: JSON.stringify({
+          po_line_id: lineId,
+          qty,
+          batch_code: batchCode || undefined,
+          expiry_date: expiryDate || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
       setPo(data.purchaseOrder);
       setReceiveQty((prev) => ({ ...prev, [lineId]: "" }));
+      setReceiveBatchCode((prev) => ({ ...prev, [lineId]: "" }));
+      setReceiveExpiryDate((prev) => ({ ...prev, [lineId]: "" }));
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -1789,20 +2220,45 @@ function PoDetailDialog({
                             Complete
                           </span>
                         ) : (
-                          <Input
-                            className="w-24"
-                            type="number"
-                            min="0"
-                            max={open}
-                            placeholder={String(open)}
-                            value={receiveQty[line.id] ?? ""}
-                            onChange={(e) =>
-                              setReceiveQty((prev) => ({
-                                ...prev,
-                                [line.id]: e.target.value,
-                              }))
-                            }
-                          />
+                          <div className="flex flex-col gap-2">
+                            <Input
+                              className="w-24"
+                              type="number"
+                              min="0"
+                              max={open}
+                              placeholder={String(open)}
+                              value={receiveQty[line.id] ?? ""}
+                              onChange={(e) =>
+                                setReceiveQty((prev) => ({
+                                  ...prev,
+                                  [line.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <Input
+                              className="w-36"
+                              placeholder="Batch code (optional)"
+                              value={receiveBatchCode[line.id] ?? ""}
+                              onChange={(e) =>
+                                setReceiveBatchCode((prev) => ({
+                                  ...prev,
+                                  [line.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <Input
+                              className="w-36"
+                              type="date"
+                              placeholder="Expiry"
+                              value={receiveExpiryDate[line.id] ?? ""}
+                              onChange={(e) =>
+                                setReceiveExpiryDate((prev) => ({
+                                  ...prev,
+                                  [line.id]: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
                         )}
                       </td>
                       <td className="py-2 text-right">
@@ -1832,12 +2288,26 @@ function PoDetailDialog({
               <ul className="space-y-1 text-sm text-stone-600">
                 {(po.lines ?? []).flatMap((line) =>
                   (line.receipts ?? []).map((r) => (
-                    <li key={r.id} className="flex justify-between">
+                    <li key={r.id} className="flex justify-between gap-4">
                       <span>
                         {line.sku_code} · {formatNumber(r.qty_received)} units
                         into {r.location}
+                        {r.batch_code && (
+                          <span className="text-stone-500">
+                            {" "}
+                            · batch {r.batch_code}
+                          </span>
+                        )}
+                        {r.expiry_date && (
+                          <span className="text-stone-500">
+                            {" "}
+                            · exp {r.expiry_date}
+                          </span>
+                        )}
                       </span>
-                      <span className="text-stone-400">{r.received_date}</span>
+                      <span className="shrink-0 text-stone-400">
+                        {r.received_date}
+                      </span>
                     </li>
                   )),
                 )}
@@ -1904,6 +2374,17 @@ function PoDetailDialog({
               </div>
             );
           })()}
+
+          <PoPaymentsSection
+            po={po}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onUpdated={(updated) => {
+              setPo(updated);
+              onChanged();
+            }}
+          />
 
           {po.notes && (
             <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">

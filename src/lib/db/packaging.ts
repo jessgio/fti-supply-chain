@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PACKAGING_STOCK_LOCATION } from "@/lib/stock/locations";
+import { PACKAGING_STOCK_LOCATIONS } from "@/lib/stock/locations";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { listProductPackagingLinks } from "@/lib/db/product-packaging";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
@@ -27,7 +27,7 @@ async function latestStockDate(
   const { data, error } = await supabase
     .from("stock_levels")
     .select("as_of_date")
-    .eq("location", PACKAGING_STOCK_LOCATION)
+    .in("location", [...PACKAGING_STOCK_LOCATIONS])
     .order("as_of_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -76,7 +76,7 @@ export async function listPackagingOverview(
             .select("sku_id, qty_on_hand")
             .in("sku_id", skuIds)
             .eq("as_of_date", stockAsOf)
-            .eq("location", PACKAGING_STOCK_LOCATION),
+            .in("location", [...PACKAGING_STOCK_LOCATIONS]),
         )
       : Promise.resolve([]),
     supabase.rpc("get_on_order_qty_by_sku"),

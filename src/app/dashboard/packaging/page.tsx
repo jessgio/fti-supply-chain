@@ -17,7 +17,10 @@ import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { matchesSkuSearchOption } from "@/components/packaging/sku-search-input";
 import { formatNumber } from "@/lib/utils";
-import { PACKAGING_STOCK_LOCATION, STOCK_QTY_COLUMN } from "@/lib/stock/locations";
+import {
+  packagingStockLocationsLabel,
+  STOCK_QTY_COLUMN,
+} from "@/lib/stock/locations";
 import type {
   PackagingPoLine,
   PackagingSkuRow,
@@ -225,7 +228,7 @@ export default function PackagingPage() {
           <p className="mt-1 max-w-3xl text-stone-600">
             Track primary packaging inventory (UB, EFLUTE, JAR, PUMP, etc.) and
             purchase orders before components go to the manufacturer. On-hand stock
-            comes from {PACKAGING_STOCK_LOCATION} ({STOCK_QTY_COLUMN} column in the
+            comes from {packagingStockLocationsLabel()} ({STOCK_QTY_COLUMN} column in the
             WMS upload); POs are managed in Procurement.
           </p>
         </div>
@@ -258,8 +261,8 @@ export default function PackagingPage() {
           value={formatNumber(summary.totalOnHand)}
           hint={
             stockAsOf
-              ? `${PACKAGING_STOCK_LOCATION} · ${stockAsOf}`
-              : `Upload WMS stock for ${PACKAGING_STOCK_LOCATION}`
+              ? `${packagingStockLocationsLabel()} · ${stockAsOf}`
+              : `Upload WMS stock for ${packagingStockLocationsLabel()}`
           }
         />
         <StatCard
@@ -283,7 +286,7 @@ export default function PackagingPage() {
           <div>
             <CardTitle>Packaging inventory</CardTitle>
             <CardDescription>
-              On-hand from {PACKAGING_STOCK_LOCATION} (WMS {STOCK_QTY_COLUMN})
+              On-hand from {packagingStockLocationsLabel()} (WMS {STOCK_QTY_COLUMN})
               plus units on open POs. Suggested PO qty uses links from{" "}
               <Link
                 href="/dashboard/packaging/links"
