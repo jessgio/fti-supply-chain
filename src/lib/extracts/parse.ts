@@ -85,18 +85,28 @@ Below is a transaction table. For EVERY data row, read these columns precisely:
 - FROM/TO (the category text — copy it verbatim, including punctuation and truncation like "...")
 - LOT-NO
 - Entered Qty
-- Received (inbound; left this 0 if blank)
-- Issued (outbound; leave this 0 if blank)
+- Received (inbound; 0 if blank)
+- Issued (outbound; 0 if blank)
 - Balance (the running balance after the row)
 - Status
 - REMARK
+
+COLUMN ALIGNMENT (most important — read this first):
+The "Transaction Detail" block has FOUR numeric columns in this fixed left-to-right order:
+  [Entered Qty]  [Received]  [Issued]  [Balance]
+- Balance is the RIGHTMOST numeric column and is filled on EVERY data row. Always capture it.
+- Map each number to a column by its horizontal position under its header. NEVER shift a value into a neighboring column.
+- Many cells are blank. A blank cell is 0 (for Received/Issued) — do NOT pull the next column's number left to fill it.
+- On a normal row, AT MOST ONE of Received or Issued has a value; the other is blank (0). They are almost never both filled.
+- Sanity rule: if you are about to output Balance = 0 (or leave it blank) while Received or Issued has a value, you have misaligned the columns. Re-read the row from the RIGHTMOST column leftward and try again. The big number on such a row is almost always the Balance.
+- Flow direction by FROM/TO: inbound from the supplier (e.g. "PT Inovasi Alam...") goes in Received; every other category (QAC, RNI, "SC/HC Mixing", "Logistic", "WH. RM. Not Match", "SCM") is outbound and goes in Issued. Use this to decide which of Received/Issued a movement belongs to.
 
 Rules:
 - Numbers may have 5 decimal places. Read every digit carefully. Do NOT round.
 - Read the image at full zoom. Characters in this system are frequently confused — disambiguate carefully:
   - Digits: 7 vs 2, 1 vs 7, 4 vs 9, 5 vs 6 vs 8, 0 vs 6 vs 8, 3 vs 8.
   - Letters: H vs M vs N, B vs 8, O vs 0, S vs 5, I vs 1 vs L, C vs G.
-- CRITICAL self-check for numbers: the running Balance must satisfy previous Balance + Received - Issued = current Balance for every row. Compute this for each row. If a digit in Received, Issued, or Balance is ambiguous, choose the reading that makes this equation hold exactly. Re-read the row before deciding.
+- CRITICAL self-check for numbers: the running Balance must satisfy previous Balance + Received - Issued = current Balance for every row. Compute this for each row. If a digit or a column placement is ambiguous, choose the reading that makes this equation hold exactly. Re-read the row before deciding.
 - For the FROM/TO and LOT-NO text, transcribe exactly what is printed including slashes and parentheses (e.g. "SC/HC Mixing", not "SC/MC Mixing"; "WH. RM. Not Match").
 - A value that is blank/empty should be 0 for Received/Issued and null for other optional fields.
 - Return the rows in the exact top-to-bottom order they appear.
