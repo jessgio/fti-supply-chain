@@ -33,8 +33,10 @@ export interface PaymentLedgerRow {
 export interface PaymentPurposeIssue {
   po_id: string;
   po_number: string;
-  expected_idr: number;
-  paid_idr: number;
+  po_currency: string;
+  expected_amount: number;
+  paid_amount: number;
+  variance_amount: number;
   variance_idr: number;
   status: "underpaid" | "overpaid";
 }
@@ -206,19 +208,85 @@ export async function listPaymentLedger(
 
 const PAYMENT_VARIANCE_TOLERANCE_IDR = 1000;
 
+type RawPayment = {
+  amount: number;
+  currency: string;
+  exchange_rate: number | null;
+  purpose: string;
+  payment_date: string;
+};
+
+function poCurrencyTolerance(currency: string): number {
+  if (currency === "IDR" || currency === "JPY" || currency === "KRW") return 1;
+  return 0.01;
+}
+
+function sumPurposePaymentsInPoCurrency(
+  payments: RawPayment[],
+  poCurrency: string,
+  purposeMatcher: (purpose: string) => boolean,
+): number {
+  return payments
+    .filter(
+      (payment) =>
+        purposeMatcher(payment.purpose) &&
+        (payment.currency ?? DEFAULT_PO_CURRENCY) === poCurrency,
+    )
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+}
+
+/** Prefer logged exchange rates from matching payments; fall back to PO order-date FX. */
+function idrRateForVariance(
+  payments: RawPayment[],
+  poCurrency: string,
+  poFxRate: number,
+  purposeMatcher: (purpose: string) => boolean,
+): number {
+  if (poCurrency === "IDR") return 1;
+
+  const relevant = payments.filter(
+    (payment) =>
+      purposeMatcher(payment.purpose) &&
+      payment.currency === poCurrency &&
+      payment.exchange_rate != null &&
+      payment.exchange_rate > 0,
+  );
+
+  if (relevant.length === 0) return poFxRate;
+
+  let totalAmount = 0;
+  let weightedRate = 0;
+  for (const payment of relevant) {
+    const amount = Number(payment.amount);
+    totalAmount += amount;
+    weightedRate += amount * Number(payment.exchange_rate);
+  }
+  return totalAmount > 0 ? weightedRate / totalAmount : poFxRate;
+}
+
 function purposeIssue(
   po: PurchaseOrder,
-  expectedIdr: number,
-  paidIdr: number,
+  poCurrency: string,
+  expectedAmount: number,
+  paidAmount: number,
+  idrRate: number,
 ): PaymentPurposeIssue | null {
-  const variance = paidIdr - expectedIdr;
-  if (Math.abs(variance) <= PAYMENT_VARIANCE_TOLERANCE_IDR) return null;
+  const variance = paidAmount - expectedAmount;
+  if (Math.abs(variance) <= poCurrencyTolerance(poCurrency)) return null;
+
+  const varianceIdr =
+    poCurrency === "IDR"
+      ? Math.round(variance)
+      : Math.round(variance * idrRate);
+
   return {
     po_id: po.id,
     po_number: po.po_number,
-    expected_idr: expectedIdr,
-    paid_idr: paidIdr,
-    variance_idr: variance,
+    po_currency: poCurrency,
+    expected_amount: expectedAmount,
+    paid_amount: paidAmount,
+    variance_amount: variance,
+    variance_idr: varianceIdr,
     status: variance < 0 ? "underpaid" : "overpaid",
   };
 }
@@ -277,33 +345,42 @@ export async function computePaymentDashboardSummary(
   for (const po of purchaseOrders) {
     if (po.status === "cancelled") continue;
 
+    const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
     const totals = computePoInvoiceTotals(po);
     const rate = await poRate(po);
     const invoiceIdr = Math.round(totals.invoiceTotal * rate);
-    const expectedDownIdr = Math.round(totals.downPayment * rate);
-    const expectedBalanceIdr = Math.round(totals.finalPayment * rate);
 
-    const poPayments = paymentsByPo.get(po.id) ?? [];
+    const poPayments = (paymentsByPo.get(po.id) ?? []).map((payment) => ({
+      amount: Number(payment.amount),
+      currency: payment.currency ?? DEFAULT_PO_CURRENCY,
+      exchange_rate:
+        payment.exchange_rate === null
+          ? null
+          : Number(payment.exchange_rate),
+      purpose: payment.purpose,
+      payment_date: payment.payment_date,
+    }));
+
     let paidTotalIdr = 0;
-    let paidDownIdr = 0;
-    let paidBalanceIdr = 0;
-
     for (const payment of poPayments) {
-      const amountIdr = await paymentAmountIdr({
-        amount: Number(payment.amount),
-        currency: payment.currency ?? "IDR",
-        exchange_rate:
-          payment.exchange_rate === null
-            ? null
-            : Number(payment.exchange_rate),
+      paidTotalIdr += await paymentAmountIdr({
+        amount: payment.amount,
+        currency: payment.currency,
+        exchange_rate: payment.exchange_rate,
         payment_date: payment.payment_date,
       });
-      paidTotalIdr += amountIdr;
-      if (isDownPaymentPurpose(payment.purpose)) paidDownIdr += amountIdr;
-      if (isBalancePaymentPurpose(payment.purpose)) {
-        paidBalanceIdr += amountIdr;
-      }
     }
+
+    const paidDownPoCurrency = sumPurposePaymentsInPoCurrency(
+      poPayments,
+      poCurrency,
+      isDownPaymentPurpose,
+    );
+    const paidBalancePoCurrency = sumPurposePaymentsInPoCurrency(
+      poPayments,
+      poCurrency,
+      isBalancePaymentPurpose,
+    );
 
     const remaining = Math.max(0, invoiceIdr - paidTotalIdr);
     if (remaining > PAYMENT_VARIANCE_TOLERANCE_IDR) {
@@ -311,10 +388,35 @@ export async function computePaymentDashboardSummary(
       unpaidPoCount += 1;
     }
 
-    const downIssue = purposeIssue(po, expectedDownIdr, paidDownIdr);
+    const downIdrRate = idrRateForVariance(
+      poPayments,
+      poCurrency,
+      rate,
+      isDownPaymentPurpose,
+    );
+    const balanceIdrRate = idrRateForVariance(
+      poPayments,
+      poCurrency,
+      rate,
+      isBalancePaymentPurpose,
+    );
+
+    const downIssue = purposeIssue(
+      po,
+      poCurrency,
+      totals.downPayment,
+      paidDownPoCurrency,
+      downIdrRate,
+    );
     if (downIssue) downPaymentIssues.push(downIssue);
 
-    const balanceIssue = purposeIssue(po, expectedBalanceIdr, paidBalanceIdr);
+    const balanceIssue = purposeIssue(
+      po,
+      poCurrency,
+      totals.finalPayment,
+      paidBalancePoCurrency,
+      balanceIdrRate,
+    );
     if (balanceIssue) balancePaymentIssues.push(balanceIssue);
   }
 

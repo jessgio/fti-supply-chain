@@ -205,8 +205,8 @@ export default function PaymentsPage() {
               Down / balance payment flags
             </CardTitle>
             <CardDescription>
-              Compared against each PO&apos;s expected down payment and balance
-              amounts (converted to IDR).
+              Compared in each PO&apos;s invoice currency; IDR shown only when
+              there is a real gap.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
@@ -227,11 +227,18 @@ export default function PaymentsPage() {
                         }
                       >
                         {issue.status === "underpaid" ? "Underpaid" : "Overpaid"}{" "}
-                        by {fmtIdr(Math.abs(issue.variance_idr))}
+                        by {formatPoMoney(Math.abs(issue.variance_amount), issue.po_currency)}
+                        {issue.po_currency !== "IDR" && (
+                          <span className="text-stone-500">
+                            {" "}
+                            ({fmtIdr(Math.abs(issue.variance_idr))})
+                          </span>
+                        )}
                       </span>
                       <span className="text-stone-400">
-                        (paid {fmtIdr(issue.paid_idr)} vs expected{" "}
-                        {fmtIdr(issue.expected_idr)})
+                        (paid {formatPoMoney(issue.paid_amount, issue.po_currency)}{" "}
+                        vs expected{" "}
+                        {formatPoMoney(issue.expected_amount, issue.po_currency)})
                       </span>
                     </li>
                   ))}
@@ -258,11 +265,18 @@ export default function PaymentsPage() {
                         }
                       >
                         {issue.status === "underpaid" ? "Underpaid" : "Overpaid"}{" "}
-                        by {fmtIdr(Math.abs(issue.variance_idr))}
+                        by {formatPoMoney(Math.abs(issue.variance_amount), issue.po_currency)}
+                        {issue.po_currency !== "IDR" && (
+                          <span className="text-stone-500">
+                            {" "}
+                            ({fmtIdr(Math.abs(issue.variance_idr))})
+                          </span>
+                        )}
                       </span>
                       <span className="text-stone-400">
-                        (paid {fmtIdr(issue.paid_idr)} vs expected{" "}
-                        {fmtIdr(issue.expected_idr)})
+                        (paid {formatPoMoney(issue.paid_amount, issue.po_currency)}{" "}
+                        vs expected{" "}
+                        {formatPoMoney(issue.expected_amount, issue.po_currency)})
                       </span>
                     </li>
                   ))}
