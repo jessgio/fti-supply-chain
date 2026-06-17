@@ -69,10 +69,14 @@ export async function POST(request: Request) {
           ? null
           : Number(row.balance);
 
+      const expectedBalance =
+        prevBalance === null
+          ? null
+          : Number((prevBalance + received - issued).toFixed(5));
+
       let checksumOk = true;
-      if (prevBalance !== null && balance !== null) {
-        checksumOk =
-          Math.abs(prevBalance + received - issued - balance) < EPSILON;
+      if (expectedBalance !== null && balance !== null) {
+        checksumOk = Math.abs(expectedBalance - balance) < EPSILON;
       }
       if (balance !== null) prevBalance = balance;
 
@@ -95,6 +99,7 @@ export async function POST(request: Request) {
         remark: row.remark,
         category: categorize(row.from_to, rules),
         checksum_ok: checksumOk && Boolean(normalizedDate),
+        expected_balance: expectedBalance,
       } satisfies ParsedExtractRow;
     });
 

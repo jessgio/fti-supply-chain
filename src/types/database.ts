@@ -416,6 +416,8 @@ export interface ParsedExtractRow {
   /** Server-assigned: resolved category and checksum status for review. */
   category?: ExtractCategory;
   checksum_ok?: boolean;
+  /** Balance implied by the running chain (prev + received - issued), if known. */
+  expected_balance?: number | null;
 }
 
 export interface ParsedExtract {

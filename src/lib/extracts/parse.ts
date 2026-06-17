@@ -93,7 +93,11 @@ Below is a transaction table. For EVERY data row, read these columns precisely:
 
 Rules:
 - Numbers may have 5 decimal places. Read every digit carefully. Do NOT round.
-- The running Balance must satisfy: previous Balance + Received - Issued = current Balance. Use this relationship to self-correct any misread digit.
+- Read the image at full zoom. Characters in this system are frequently confused — disambiguate carefully:
+  - Digits: 7 vs 2, 1 vs 7, 4 vs 9, 5 vs 6 vs 8, 0 vs 6 vs 8, 3 vs 8.
+  - Letters: H vs M vs N, B vs 8, O vs 0, S vs 5, I vs 1 vs L, C vs G.
+- CRITICAL self-check for numbers: the running Balance must satisfy previous Balance + Received - Issued = current Balance for every row. Compute this for each row. If a digit in Received, Issued, or Balance is ambiguous, choose the reading that makes this equation hold exactly. Re-read the row before deciding.
+- For the FROM/TO and LOT-NO text, transcribe exactly what is printed including slashes and parentheses (e.g. "SC/HC Mixing", not "SC/MC Mixing"; "WH. RM. Not Match").
 - A value that is blank/empty should be 0 for Received/Issued and null for other optional fields.
 - Return the rows in the exact top-to-bottom order they appear.
 - Do not invent rows. Do not merge rows.`;
@@ -125,12 +129,21 @@ export async function parseExtractScreenshot(
     model: openai(modelId),
     schema: extractSchema,
     maxRetries: 2,
+    // Deterministic, careful reading of dense numeric tables.
+    temperature: 0,
     messages: [
       {
         role: "user",
         content: [
           { type: "text", text: PROMPT },
-          { type: "image", image: image.data, mimeType: image.mimeType },
+          {
+            type: "image",
+            image: image.data,
+            mimeType: image.mimeType,
+            // Full-resolution tiling instead of a downscaled thumbnail — the
+            // single biggest accuracy lever for small digits and letters.
+            providerOptions: { openai: { imageDetail: "high" } },
+          },
         ],
       },
     ],

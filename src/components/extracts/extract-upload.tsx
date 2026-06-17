@@ -36,9 +36,30 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedExtract | null>(null);
 
+  // Recompute the running-balance check live so it updates as rows are edited.
+  const rowChecks = useMemo(() => {
+    const checks: { ok: boolean; expected: number | null }[] = [];
+    let prev: number | null = null;
+    for (const r of parsed?.rows ?? []) {
+      const received = Number(r.received) || 0;
+      const issued = Number(r.issued) || 0;
+      const balance =
+        r.balance === null || r.balance === undefined ? null : Number(r.balance);
+      const expected =
+        prev === null ? null : Number((prev + received - issued).toFixed(5));
+      let ok = true;
+      if (expected !== null && balance !== null) {
+        ok = Math.abs(expected - balance) < 0.001;
+      }
+      checks.push({ ok, expected });
+      if (balance !== null) prev = balance;
+    }
+    return checks;
+  }, [parsed]);
+
   const warnings = useMemo(
-    () => parsed?.rows.filter((r) => r.checksum_ok === false).length ?? 0,
-    [parsed],
+    () => rowChecks.filter((c) => !c.ok).length,
+    [rowChecks],
   );
 
   async function handleParse() {
@@ -202,7 +223,17 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
             </div>
 
             <div className="max-h-[28rem] overflow-auto rounded-lg border border-stone-200">
-              <table className="w-full text-left text-xs">
+              <table className="w-full table-fixed text-left text-xs">
+                <colgroup>
+                  <col className="w-28" />
+                  <col className="w-44" />
+                  <col className="w-44" />
+                  <col className="w-24" />
+                  <col className="w-24" />
+                  <col className="w-24" />
+                  <col className="w-24" />
+                  <col className="w-10" />
+                </colgroup>
                 <thead className="sticky top-0 bg-stone-50">
                   <tr className="border-b border-stone-200 text-stone-500">
                     <th className="px-2 py-2 font-medium">Date</th>
@@ -217,7 +248,8 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                 </thead>
                 <tbody>
                   {parsed.rows.map((row, index) => {
-                    const bad = row.checksum_ok === false;
+                    const check = rowChecks[index];
+                    const bad = check ? !check.ok : false;
                     return (
                       <tr
                         key={index}
@@ -225,7 +257,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                       >
                         <td className="px-2 py-1">
                           <Input
-                            className="h-8 w-28 px-2 text-xs"
+                            className="h-8 w-full px-2 text-xs"
                             value={row.txn_date}
                             onChange={(e) =>
                               updateRow(index, { txn_date: e.target.value })
@@ -234,7 +266,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                         </td>
                         <td className="px-2 py-1">
                           <Input
-                            className="h-8 w-40 px-2 text-xs"
+                            className="h-8 w-full px-2 text-xs"
                             value={row.from_to ?? ""}
                             onChange={(e) =>
                               updateRow(index, { from_to: e.target.value })
@@ -243,7 +275,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                         </td>
                         <td className="px-2 py-1">
                           <Select
-                            className="h-8 w-40 px-2 text-xs"
+                            className="h-8 w-full px-2 text-xs"
                             value={row.category ?? "uncategorized"}
                             onChange={(e) =>
                               updateRow(index, {
@@ -291,7 +323,9 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                           <Input
                             type="number"
                             step="any"
-                            className="h-8 w-24 px-2 text-right text-xs"
+                            className={`h-8 w-24 px-2 text-right text-xs ${
+                              bad ? "border-amber-400" : ""
+                            }`}
                             value={row.balance ?? ""}
                             onChange={(e) =>
                               updateRow(index, {
@@ -302,6 +336,18 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                               })
                             }
                           />
+                          {bad && check?.expected != null && (
+                            <button
+                              type="button"
+                              title="Set balance to the value implied by the running total"
+                              onClick={() =>
+                                updateRow(index, { balance: check.expected })
+                              }
+                              className="mt-0.5 block w-24 truncate text-right text-[10px] text-amber-700 hover:underline"
+                            >
+                              ≠ expected {formatNumber(check.expected, 3)}
+                            </button>
+                          )}
                         </td>
                         <td className="px-2 py-1">
                           <button
