@@ -65,6 +65,12 @@ const links: NavLink[] = [
     roles: ["admin", "supply_chain"],
   },
   {
+    href: "/dashboard/extracts/mappings",
+    label: "Extract Mappings",
+    icon: Link2,
+    roles: ["admin", "supply_chain"],
+  },
+  {
     href: "/dashboard/packaging",
     label: "Packaging",
     icon: Layers,

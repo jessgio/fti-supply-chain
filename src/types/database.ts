@@ -346,6 +346,22 @@ export interface ExtractCategoryRule {
   priority: number;
 }
 
+/** Manufacturer action code mapped to an internal category. */
+export interface ExtractActionCodeMapping {
+  id: string;
+  action_code: string;
+  category: ExtractCategory;
+  created_at: string;
+}
+
+/** Manufacturer item name mapped to an FTI extract record. */
+export interface ExtractItemNameMapping {
+  id: string;
+  manufacturer_name: string;
+  extract_id: string;
+  created_at: string;
+}
+
 /** A single ledger row parsed from a manufacturer screenshot. */
 export interface ExtractTransaction {
   id: string;

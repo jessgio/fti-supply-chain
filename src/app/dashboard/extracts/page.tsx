@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { ExtractUpload } from "@/components/extracts/extract-upload";
+import { ExtractEntryForm } from "@/components/extracts/extract-entry-form";
 import { formatNumber } from "@/lib/utils";
 import type { ExtractSortKey, ExtractSummary } from "@/types/database";
 
@@ -133,9 +133,8 @@ export default function ExtractsPage() {
           Extracts
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-stone-600">
-          Track extract usage from manufacturer screenshots. Inbound and outbound
-          movements are sorted into categories so you can monitor waste per
-          extract.
+          Track extract usage from manufacturer ledgers. Record inbound and
+          outbound movements by category so you can monitor waste per extract.
         </p>
       </div>
 
@@ -166,7 +165,7 @@ export default function ExtractsPage() {
         />
       </div>
 
-      <ExtractUpload onCommitted={loadExtracts} />
+      <ExtractEntryForm onCommitted={loadExtracts} />
 
       <Card>
         <CardHeader>
@@ -193,7 +192,7 @@ export default function ExtractsPage() {
             <p className="text-sm text-stone-500">Loading extracts…</p>
           ) : extracts.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No extracts yet. Upload a screenshot above to get started.
+              No extracts yet. Add an item name mapping, then enter movements above.
             </p>
           ) : (
             <div className="overflow-x-auto">

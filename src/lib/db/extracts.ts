@@ -4,9 +4,11 @@ import {
   categorize,
   DEFAULT_CATEGORY_RULES,
 } from "@/lib/extracts/categories";
+import { resolveActionCodeCategory } from "@/lib/extracts/mappings";
 import { computeLedgerStats, orderTransactions } from "@/lib/extracts/ledger";
 import { transactionSignature } from "@/lib/extracts/signature";
 import { normalizeExtractDate } from "@/lib/extracts/parse";
+import { loadActionCodeMappings } from "@/lib/db/extract-mappings";
 import type {
   ExtractCategory,
   ExtractCategoryRule,
@@ -311,6 +313,14 @@ export async function commitExtract(
   if (!itemNo) throw new Error("Missing extract Item No");
 
   const rules = await loadCategoryRules(supabase);
+  const actionMappings = await loadActionCodeMappings(supabase);
+
+  function resolveCategory(row: ParsedExtract["rows"][number]): ExtractCategory {
+    if (row.category) return row.category;
+    const fromCode = resolveActionCodeCategory(row.tran_code, actionMappings);
+    if (fromCode !== "uncategorized") return fromCode;
+    return categorize(row.from_to, rules);
+  }
 
   const { data: extract, error: upsertError } = await supabase
     .from("extracts")
@@ -364,8 +374,8 @@ export async function commitExtract(
         seq: index,
         order_no: row.order_no?.trim() || null,
         tran_code: row.tran_code?.trim() || null,
-        from_to: row.from_to?.trim() || null,
-        category: categorize(row.from_to, rules),
+        from_to: row.from_to?.trim() || row.tran_code?.trim() || null,
+        category: resolveCategory(row),
         lot_no: row.lot_no?.trim() || null,
         entered_qty:
           row.entered_qty === null || row.entered_qty === undefined
