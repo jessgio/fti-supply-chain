@@ -280,6 +280,7 @@ export interface PurchaseOrder {
   down_payment_pct: number;
   discount_amount: number;
   tax_pct: number;
+  pph_pct: number;
   other_charges: number;
   currency: string;
   notes: string | null;

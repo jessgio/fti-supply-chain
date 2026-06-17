@@ -85,6 +85,7 @@ export async function PATCH(
       down_payment_pct?: number;
       discount_amount?: number;
       tax_pct?: number;
+      pph_pct?: number;
       other_charges?: number;
       currency?: string;
       notes?: string | null;
@@ -128,6 +129,9 @@ export async function PATCH(
     }
     if (body?.tax_pct !== undefined) {
       input.tax_pct = Number(body.tax_pct);
+    }
+    if (body?.pph_pct !== undefined) {
+      input.pph_pct = Number(body.pph_pct);
     }
     if (body?.other_charges !== undefined) {
       input.other_charges = Number(body.other_charges);

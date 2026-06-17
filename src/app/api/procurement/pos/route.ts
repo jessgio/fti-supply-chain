@@ -71,6 +71,7 @@ export async function POST(request: Request) {
       discount_amount:
         body.discount_amount != null ? Number(body.discount_amount) : undefined,
       tax_pct: body.tax_pct != null ? Number(body.tax_pct) : undefined,
+      pph_pct: body.pph_pct != null ? Number(body.pph_pct) : undefined,
       other_charges:
         body.other_charges != null ? Number(body.other_charges) : undefined,
       currency: body.currency ?? undefined,

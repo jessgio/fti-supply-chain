@@ -22,6 +22,7 @@ export interface NewPoInput {
   down_payment_pct?: number;
   discount_amount?: number;
   tax_pct?: number;
+  pph_pct?: number;
   other_charges?: number;
   currency?: string;
   notes?: string | null;
@@ -44,6 +45,7 @@ export interface UpdatePoInput {
   down_payment_pct?: number;
   discount_amount?: number;
   tax_pct?: number;
+  pph_pct?: number;
   other_charges?: number;
   currency?: string;
   notes?: string | null;
@@ -247,6 +249,7 @@ type PoRow = {
   down_payment_pct: number;
   discount_amount: number;
   tax_pct: number;
+  pph_pct: number;
   other_charges: number;
   currency: string;
   notes: string | null;
@@ -335,6 +338,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     down_payment_pct: Number(row.down_payment_pct ?? 30),
     discount_amount: Number(row.discount_amount ?? 0),
     tax_pct: Number(row.tax_pct ?? 11),
+    pph_pct: Number(row.pph_pct ?? 0),
     other_charges: Number(row.other_charges ?? 0),
     currency: row.currency ?? "IDR",
     notes: row.notes,
@@ -346,12 +350,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 }
 
 const PO_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name))";
 
 const PO_DETAIL_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, unit_cost, skus(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
@@ -405,6 +409,7 @@ export async function createPurchaseOrder(
       down_payment_pct: input.down_payment_pct ?? 30,
       discount_amount: input.discount_amount ?? 0,
       tax_pct: input.tax_pct ?? 11,
+      pph_pct: input.pph_pct ?? 0,
       other_charges: input.other_charges ?? 0,
       currency: input.currency ?? "IDR",
       notes: input.notes ?? null,
@@ -459,6 +464,7 @@ export async function updatePurchaseOrder(
       input.down_payment_pct === undefined &&
       input.discount_amount === undefined &&
       input.tax_pct === undefined &&
+      input.pph_pct === undefined &&
       input.other_charges === undefined &&
       input.currency === undefined &&
       input.lines === undefined;
@@ -489,6 +495,7 @@ export async function updatePurchaseOrder(
   if (input.discount_amount !== undefined)
     headerPatch.discount_amount = input.discount_amount;
   if (input.tax_pct !== undefined) headerPatch.tax_pct = input.tax_pct;
+  if (input.pph_pct !== undefined) headerPatch.pph_pct = input.pph_pct;
   if (input.other_charges !== undefined)
     headerPatch.other_charges = input.other_charges;
   if (input.currency !== undefined) headerPatch.currency = input.currency;

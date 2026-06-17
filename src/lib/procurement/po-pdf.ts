@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import type PDFDocumentType from "pdfkit";
 import type { CompanySettings, PurchaseOrder, Supplier } from "@/types/database";
-import { computePoInvoiceTotals, taxLabel } from "@/lib/procurement/po-totals";
+import { computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
 import { composePoPdfNotes } from "@/lib/procurement/supplier-po-notes";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { resolveVendorLineLabel } from "@/lib/procurement/vendor-line-label";
@@ -301,6 +301,9 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
       totalRow("Discount", `-${formatCurrency(totals.discount, currency)}`);
     }
     totalRow(taxLabel(totals.taxPct), formatCurrency(totals.tax, currency));
+    if (totals.pph > 0) {
+      totalRow(pphLabel(totals.pphPct), `-${formatCurrency(totals.pph, currency)}`);
+    }
     if (totals.otherCharges > 0) {
       totalRow("Other", formatCurrency(totals.otherCharges, currency));
     }

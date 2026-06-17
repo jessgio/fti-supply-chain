@@ -1,6 +1,7 @@
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
 
 export const DEFAULT_PO_TAX_PCT = 11;
+export const DEFAULT_PO_PPH_PCT = 2;
 
 function lineTotal(line: PurchaseOrderLine): number {
   return (line.unit_cost ?? 0) * line.qty_ordered;
@@ -16,6 +17,8 @@ export interface PoInvoiceTotals {
   netBeforeTax: number;
   taxPct: number;
   tax: number;
+  pphPct: number;
+  pph: number;
   otherCharges: number;
   invoiceTotal: number;
   downPaymentPct: number;
@@ -26,7 +29,7 @@ export interface PoInvoiceTotals {
 export function computePoInvoiceTotals(
   po: Pick<
     PurchaseOrder,
-    "lines" | "discount_amount" | "tax_pct" | "other_charges"
+    "lines" | "discount_amount" | "tax_pct" | "pph_pct" | "other_charges"
   > & {
     down_payment_pct?: number;
   },
@@ -36,8 +39,11 @@ export function computePoInvoiceTotals(
   const netBeforeTax = subtotal - discount;
   const taxPct = po.tax_pct ?? DEFAULT_PO_TAX_PCT;
   const tax = Math.round(netBeforeTax * (taxPct / 100));
+  const pphPct = po.pph_pct ?? 0;
+  const pph =
+    pphPct > 0 ? Math.round(netBeforeTax * (pphPct / 100)) : 0;
   const otherCharges = Math.max(0, po.other_charges ?? 0);
-  const invoiceTotal = netBeforeTax + tax + otherCharges;
+  const invoiceTotal = netBeforeTax + tax + otherCharges - pph;
   const downPaymentPct = po.down_payment_pct ?? 30;
   const downPayment = Math.round(invoiceTotal * (downPaymentPct / 100));
   const finalPayment = invoiceTotal - downPayment;
@@ -48,6 +54,8 @@ export function computePoInvoiceTotals(
     netBeforeTax,
     taxPct,
     tax,
+    pphPct,
+    pph,
     otherCharges,
     invoiceTotal,
     downPaymentPct,
@@ -57,5 +65,9 @@ export function computePoInvoiceTotals(
 }
 
 export function taxLabel(taxPct: number): string {
-  return `Tax (${taxPct}%)`;
+  return `VAT (${taxPct}%)`;
+}
+
+export function pphLabel(pphPct: number): string {
+  return `PPh (${pphPct}%)`;
 }

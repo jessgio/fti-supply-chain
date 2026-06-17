@@ -41,7 +41,9 @@ import {
 import {
   computePoInvoiceTotals,
   DEFAULT_PO_TAX_PCT,
+  pphLabel,
   taxLabel,
+  type PoInvoiceTotals,
 } from "@/lib/procurement/po-totals";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import { formatSupplierPoNotes } from "@/lib/procurement/supplier-po-notes";
@@ -102,6 +104,57 @@ function poOpenQty(po: PurchaseOrder): number {
 
 function poInvoiceTotal(po: PurchaseOrder): number {
   return computePoInvoiceTotals(po).invoiceTotal;
+}
+
+function PoInvoiceTotalsView({
+  totals,
+  fmt,
+  className = "text-sm text-stone-600",
+  rowClassName = "flex justify-between",
+  totalRowClassName = "mt-1 flex justify-between font-medium text-stone-900",
+}: {
+  totals: PoInvoiceTotals;
+  fmt: (value: number) => string;
+  className?: string;
+  rowClassName?: string;
+  totalRowClassName?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className={rowClassName}>
+        <span>Subtotal</span>
+        <span>{fmt(totals.subtotal)}</span>
+      </div>
+      {totals.discount > 0 && (
+        <div className={`${rowClassName} mt-1`}>
+          <span>Discount</span>
+          <span>-{fmt(totals.discount)}</span>
+        </div>
+      )}
+      {totals.tax > 0 && (
+        <div className={`${rowClassName} mt-1`}>
+          <span>{taxLabel(totals.taxPct)}</span>
+          <span>{fmt(totals.tax)}</span>
+        </div>
+      )}
+      {totals.pph > 0 && (
+        <div className={`${rowClassName} mt-1`}>
+          <span>{pphLabel(totals.pphPct)}</span>
+          <span>-{fmt(totals.pph)}</span>
+        </div>
+      )}
+      {totals.otherCharges > 0 && (
+        <div className={`${rowClassName} mt-1`}>
+          <span>Other</span>
+          <span>{fmt(totals.otherCharges)}</span>
+        </div>
+      )}
+      <div className={totalRowClassName}>
+        <span>Invoice total</span>
+        <span>{fmt(totals.invoiceTotal)}</span>
+      </div>
+    </div>
+  );
 }
 
 async function downloadPoPdf(poId: string, poNumber: string) {
@@ -654,6 +707,7 @@ function CreatePoDialog({
   const [downPaymentPct, setDownPaymentPct] = useState("30");
   const [discountAmount, setDiscountAmount] = useState("");
   const [taxPct, setTaxPct] = useState(String(DEFAULT_PO_TAX_PCT));
+  const [pphPct, setPphPct] = useState("0");
   const [otherCharges, setOtherCharges] = useState("");
   const [currency, setCurrency] = useState<string>(DEFAULT_PO_CURRENCY);
   const [notes, setNotes] = useState("");
@@ -684,10 +738,11 @@ function CreatePoDialog({
       lines: cleanLines,
       discount_amount: discountAmount ? Number(discountAmount) : 0,
       tax_pct: taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT,
+      pph_pct: pphPct !== "" ? Number(pphPct) : 0,
       other_charges: otherCharges ? Number(otherCharges) : 0,
       down_payment_pct: downPaymentPct ? Number(downPaymentPct) : 30,
     });
-  }, [lines, discountAmount, taxPct, otherCharges, downPaymentPct]);
+  }, [lines, discountAmount, taxPct, pphPct, otherCharges, downPaymentPct]);
 
   const previewFmt = (value: number) => formatPoMoney(value, currency);
 
@@ -758,6 +813,7 @@ function CreatePoDialog({
           down_payment_pct: downPaymentPct ? Number(downPaymentPct) : 30,
           discount_amount: discountAmount ? Number(discountAmount) : 0,
           tax_pct: taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT,
+          pph_pct: pphPct !== "" ? Number(pphPct) : 0,
           other_charges: otherCharges ? Number(otherCharges) : 0,
           currency,
           notes: notes || null,
@@ -903,7 +959,7 @@ function CreatePoDialog({
             />
           </label>
           <label className="space-y-1">
-            <span className="text-sm font-medium text-stone-700">Tax %</span>
+            <span className="text-sm font-medium text-stone-700">VAT %</span>
             <Input
               type="number"
               min="0"
@@ -913,7 +969,22 @@ function CreatePoDialog({
               placeholder={String(DEFAULT_PO_TAX_PCT)}
             />
             <span className="text-xs text-stone-500">
-              Set to 0 if the vendor does not charge tax.
+              Added on top of line totals. Set to 0 if the vendor does not charge VAT.
+            </span>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-medium text-stone-700">PPh %</span>
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              value={pphPct}
+              onChange={(e) => setPphPct(e.target.value)}
+              placeholder="0"
+            />
+            <span className="text-xs text-stone-500">
+              Withholding tax on pre-VAT amount, deducted from the invoice. Use 2
+              for standard vendor PPh.
             </span>
           </label>
           <label className="space-y-1">
@@ -984,31 +1055,8 @@ function CreatePoDialog({
         </div>
 
         {previewTotals.subtotal > 0 && (
-          <div className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span>{previewFmt(previewTotals.subtotal)}</span>
-            </div>
-            {previewTotals.discount > 0 && (
-              <div className="mt-1 flex justify-between">
-                <span>Discount</span>
-                <span>-{previewFmt(previewTotals.discount)}</span>
-              </div>
-            )}
-            <div className="mt-1 flex justify-between">
-              <span>{taxLabel(previewTotals.taxPct)}</span>
-              <span>{previewFmt(previewTotals.tax)}</span>
-            </div>
-            {previewTotals.otherCharges > 0 && (
-              <div className="mt-1 flex justify-between">
-                <span>Other</span>
-                <span>{previewFmt(previewTotals.otherCharges)}</span>
-              </div>
-            )}
-            <div className="mt-1 flex justify-between font-medium text-stone-900">
-              <span>Invoice total</span>
-              <span>{previewFmt(previewTotals.invoiceTotal)}</span>
-            </div>
+          <div className="rounded-lg bg-stone-50 p-3">
+            <PoInvoiceTotalsView totals={previewTotals} fmt={previewFmt} />
           </div>
         )}
 
@@ -1065,6 +1113,7 @@ function EditPoDialog({
     po.discount_amount ? String(po.discount_amount) : "",
   );
   const [taxPct, setTaxPct] = useState(String(po.tax_pct ?? DEFAULT_PO_TAX_PCT));
+  const [pphPct, setPphPct] = useState(String(po.pph_pct ?? 0));
   const [otherCharges, setOtherCharges] = useState(
     po.other_charges ? String(po.other_charges) : "",
   );
@@ -1162,6 +1211,7 @@ function EditPoDialog({
           : 30;
         payload.discount_amount = discountAmount ? Number(discountAmount) : 0;
         payload.tax_pct = taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT;
+        payload.pph_pct = pphPct !== "" ? Number(pphPct) : 0;
         payload.other_charges = otherCharges ? Number(otherCharges) : 0;
         payload.currency = currency;
         payload.notes = notes || null;
@@ -1319,13 +1369,24 @@ function EditPoDialog({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-stone-700">Tax %</span>
+                <span className="text-sm font-medium text-stone-700">VAT %</span>
                 <Input
                   type="number"
                   min="0"
                   max="100"
                   value={taxPct}
                   onChange={(e) => setTaxPct(e.target.value)}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-stone-700">PPh %</span>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={pphPct}
+                  onChange={(e) => setPphPct(e.target.value)}
+                  placeholder="0"
                 />
               </label>
               <label className="space-y-1">
@@ -2337,12 +2398,22 @@ function PoDetailDialog({
                     </span>
                   </div>
                 )}
-                <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm">
-                  <span className="text-stone-600">{taxLabel(totals.taxPct)}</span>
-                  <span className="font-medium text-stone-900">
-                    {fmt(totals.tax)}
-                  </span>
-                </div>
+                {totals.tax > 0 && (
+                  <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm">
+                    <span className="text-stone-600">{taxLabel(totals.taxPct)}</span>
+                    <span className="font-medium text-stone-900">
+                      {fmt(totals.tax)}
+                    </span>
+                  </div>
+                )}
+                {totals.pph > 0 && (
+                  <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm">
+                    <span className="text-stone-600">{pphLabel(totals.pphPct)}</span>
+                    <span className="font-medium text-stone-900">
+                      -{fmt(totals.pph)}
+                    </span>
+                  </div>
+                )}
                 {totals.otherCharges > 0 && (
                   <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm">
                     <span className="text-stone-600">Other</span>
