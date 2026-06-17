@@ -11,6 +11,7 @@ import {
   CalendarClock,
   Link2,
   LogOut,
+  Banknote,
   Package,
   PanelLeft,
   PanelLeftClose,
@@ -48,6 +49,12 @@ const links: NavLink[] = [
     href: "/dashboard/batches",
     label: "Stock Batches",
     icon: CalendarClock,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/payments",
+    label: "PO Payments",
+    icon: Banknote,
     roles: ["admin", "supply_chain"],
   },
   {
