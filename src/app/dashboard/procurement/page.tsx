@@ -311,9 +311,14 @@ function ProcurementInner() {
     ((line.sku_code ?? "").toLowerCase().includes(skuQ) ||
       (line.sku_name ?? "").toLowerCase().includes(skuQ));
 
+  const poMatchesQuery = (po: PurchaseOrder): boolean =>
+    skuQ.length > 0 &&
+    (po.po_number.toLowerCase().includes(skuQ) ||
+      (po.lines ?? []).some(lineMatchesSku));
+
   const filteredPos = useMemo(() => {
     if (!skuQ) return pos;
-    return pos.filter((po) => (po.lines ?? []).some(lineMatchesSku));
+    return pos.filter(poMatchesQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos, skuQ]);
 
@@ -412,7 +417,7 @@ function ProcurementInner() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
               <Input
                 className="pl-8 pr-8"
-                placeholder="Find POs by SKU or name…"
+                placeholder="Find POs by number, SKU, or name…"
                 value={skuQuery}
                 onChange={(e) => setSkuQuery(e.target.value)}
               />
@@ -421,7 +426,7 @@ function ProcurementInner() {
                   type="button"
                   onClick={() => setSkuQuery("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
-                  aria-label="Clear SKU search"
+                  aria-label="Clear search"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -441,7 +446,7 @@ function ProcurementInner() {
             </p>
           ) : filteredPos.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No purchase orders contain a SKU matching “{skuQuery.trim()}”.
+              No purchase orders match “{skuQuery.trim()}”.
             </p>
           ) : (
             <table className="w-full text-left text-sm">

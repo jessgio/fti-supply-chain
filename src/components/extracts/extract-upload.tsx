@@ -290,14 +290,14 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                             ))}
                           </Select>
                         </td>
-                        <td className="px-2 py-1 text-stone-600">
+                        <td className="truncate px-2 py-1 text-stone-600">
                           {row.lot_no ?? "—"}
                         </td>
                         <td className="px-2 py-1">
                           <Input
                             type="number"
                             step="any"
-                            className="h-8 w-24 px-2 text-right text-xs"
+                            className="h-8 w-full px-2 text-right text-xs"
                             value={row.received}
                             onChange={(e) =>
                               updateRow(index, {
@@ -310,7 +310,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                           <Input
                             type="number"
                             step="any"
-                            className="h-8 w-24 px-2 text-right text-xs"
+                            className="h-8 w-full px-2 text-right text-xs"
                             value={row.issued}
                             onChange={(e) =>
                               updateRow(index, {
@@ -323,7 +323,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                           <Input
                             type="number"
                             step="any"
-                            className={`h-8 w-24 px-2 text-right text-xs ${
+                            className={`h-8 w-full px-2 text-right text-xs ${
                               bad ? "border-amber-400" : ""
                             }`}
                             value={row.balance ?? ""}
@@ -343,7 +343,7 @@ export function ExtractUpload({ onCommitted }: ExtractUploadProps) {
                               onClick={() =>
                                 updateRow(index, { balance: check.expected })
                               }
-                              className="mt-0.5 block w-24 truncate text-right text-[10px] text-amber-700 hover:underline"
+                              className="mt-0.5 block w-full truncate text-right text-[10px] text-amber-700 hover:underline"
                             >
                               ≠ expected {formatNumber(check.expected, 3)}
                             </button>
