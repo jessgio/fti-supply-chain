@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -19,6 +19,7 @@ import {
   type MasterGanttPoInput,
 } from "@/lib/procurement/po-timeline-gantt";
 import { GanttAxis, GanttLegend, GanttRow } from "@/components/procurement/gantt-chart-parts";
+import { PoTimelinePoLink } from "@/components/procurement/po-timeline-po-link";
 import type { PoTimelineEntry } from "@/types/database";
 
 interface MasterPoTimelineGanttProps {
@@ -62,6 +63,10 @@ export function MasterPoTimelineGantt({
   const chart = buildMasterGanttChart(purchaseOrders.map(toMasterInput));
   const skippedCount =
     purchaseOrders.length - (chart?.groups.length ?? 0);
+  const poById = useMemo(
+    () => new Map(purchaseOrders.map((po) => [po.id, po])),
+    [purchaseOrders],
+  );
 
   if (!chart) {
     return (
@@ -115,12 +120,11 @@ export function MasterPoTimelineGantt({
               className="space-y-3 border-t border-stone-200 pt-5 first:border-t-0 first:pt-0"
             >
               <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                <Link
-                  href={`/dashboard/procurement?po=${group.po_id}`}
-                  className="font-semibold text-rose-700 hover:underline"
-                >
-                  {group.po_number}
-                </Link>
+                <PoTimelinePoLink
+                  poId={group.po_id}
+                  poNumber={group.po_number}
+                  lineItems={poById.get(group.po_id)?.line_items ?? []}
+                />
                 <span
                   className="min-w-0 truncate text-sm uppercase text-stone-500"
                   title={group.supplier_name}
