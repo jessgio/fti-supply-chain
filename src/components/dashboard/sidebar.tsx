@@ -6,6 +6,7 @@ import {
   BarChart3,
   Boxes,
   FlaskConical,
+  GanttChart,
   LayoutDashboard,
   Layers,
   Lightbulb,
@@ -14,10 +15,12 @@ import {
   LogOut,
   Banknote,
   Package,
+  PackageCheck,
   PanelLeft,
   PanelLeftClose,
   ShoppingCart,
   TrendingUp,
+  Truck,
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,6 +47,24 @@ const links: NavLink[] = [
     href: "/dashboard/procurement",
     label: "Procurement",
     icon: ShoppingCart,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/po-timeline",
+    label: "PO Timeline",
+    icon: GanttChart,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/shipments",
+    label: "Shipments",
+    icon: Truck,
+    roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/inbound",
+    label: "Inbound Receives",
+    icon: PackageCheck,
     roles: ["admin", "supply_chain"],
   },
   {

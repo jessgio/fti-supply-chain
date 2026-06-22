@@ -466,6 +466,114 @@ export type ExtractTxnSortKey =
   | "issued"
   | "balance";
 
+export type ShipmentType = "sea" | "air" | "local";
+
+export type ShipmentStatus = "planned" | "in_transit" | "delivered" | "closed";
+
+export type InboundReceiveStatus = "pending" | "partial" | "complete";
+
+export interface ShipmentItemRef {
+  id: string;
+  po_line_id: string;
+  po_id: string;
+  po_number: string;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  quantity: number;
+  qty_ordered: number;
+}
+
+export interface ShipmentPoRef {
+  id: string;
+  po_number: string;
+  supplier_name: string | null;
+  items: ShipmentItemRef[];
+}
+
+export interface Shipment {
+  id: string;
+  shipment_number: string;
+  shipment_type: ShipmentType;
+  status: ShipmentStatus;
+  estimated_departure_date: string;
+  transit_days: number;
+  delay_days: number;
+  expected_delivery_date: string;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+  purchase_orders?: ShipmentPoRef[];
+}
+
+export interface ShipmentLineAllocation {
+  po_line_id: string;
+  po_id: string;
+  po_number: string;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  qty_ordered: number;
+  qty_allocated: number;
+  qty_available: number;
+}
+
+export interface InboundReceiveItem {
+  id: string;
+  po_line_id: string | null;
+  sku_id: string | null;
+  sku_code?: string;
+  sku_name?: string | null;
+  ordered_qty: number;
+  received_qty: number;
+  discrepancy: number;
+}
+
+export interface InboundReceive {
+  id: string;
+  receive_number: string | null;
+  po_id: string | null;
+  po_number?: string | null;
+  supplier_name?: string | null;
+  shipment_id: string | null;
+  shipment_number?: string | null;
+  receive_date: string;
+  status: InboundReceiveStatus;
+  received_by: string | null;
+  notes: string | null;
+  created_at?: string;
+  items?: InboundReceiveItem[];
+}
+
+export interface PoTimelineEntry {
+  id: string;
+  po_number: string;
+  supplier_name: string | null;
+  status: PoStatus;
+  display_status: string;
+  created_at: string;
+  expected_date: string | null;
+  payments: Array<{ payment_date: string; purpose: string }>;
+  shipments: Array<{
+    id: string;
+    shipment_number: string;
+    estimated_departure_date: string;
+    expected_delivery_date: string;
+    delay_days: number;
+    line_items: Array<{
+      sku_code: string;
+      sku_name: string | null;
+      quantity: number;
+    }>;
+  }>;
+  line_items: Array<{
+    sku_code: string;
+    sku_name: string | null;
+    qty_ordered: number;
+    qty_received: number;
+  }>;
+}
+
 export type UserRole = "admin" | "supply_chain" | "sales_marketing" | "viewer";
 
 export interface Profile {
