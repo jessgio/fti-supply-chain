@@ -310,6 +310,7 @@ export async function listOngoingPosForTimeline(
       po_number,
       status,
       expected_date,
+      order_date,
       created_at,
       suppliers ( name ),
       purchase_order_lines (
@@ -402,6 +403,7 @@ export async function listOngoingPosForTimeline(
       status: po.status as PoTimelineEntry["status"],
       display_status: displayStatus,
       created_at: po.created_at as string,
+      order_date: (po.order_date as string | null) ?? null,
       expected_date: po.expected_date as string | null,
       payments: ((po.po_payments ?? []) as Array<{ payment_date: string; purpose: string }>).map(
         (p) => ({

@@ -34,6 +34,7 @@ function toMasterInput(po: PoTimelineEntry): MasterGanttPoInput {
     status: po.status,
     display_status: po.display_status,
     created_at: po.created_at,
+    order_date: po.order_date,
     expected_date: po.expected_date,
     payments: po.payments,
     shipments: po.shipments.map((s) => ({
@@ -61,8 +62,9 @@ export function MasterPoTimelineGantt({
   purchaseOrders,
 }: MasterPoTimelineGanttProps) {
   const chart = buildMasterGanttChart(purchaseOrders.map(toMasterInput));
-  const skippedCount =
-    purchaseOrders.length - (chart?.groups.length ?? 0);
+  const scheduledCount =
+    chart?.groups.filter((group) => group.bars.length > 0).length ?? 0;
+  const unscheduledCount = purchaseOrders.length - scheduledCount;
   const poById = useMemo(
     () => new Map(purchaseOrders.map((po) => [po.id, po])),
     [purchaseOrders],
@@ -72,8 +74,8 @@ export function MasterPoTimelineGantt({
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-stone-500">
-          No timeline data yet. Ongoing POs need an expected finished date and/or
-          linked shipments with departure and delivery dates.
+          No ongoing purchase orders to show. POs marked received or cancelled
+          are excluded from this view.
         </CardContent>
       </Card>
     );
@@ -92,10 +94,13 @@ export function MasterPoTimelineGantt({
           <div>
             <CardTitle className="text-base">Master timeline</CardTitle>
             <p className="mt-1 text-sm text-stone-500">
-              {chart.groups.length} PO{chart.groups.length === 1 ? "" : "s"} with
-              production and shipping schedules
-              {skippedCount > 0
-                ? ` · ${skippedCount} ongoing PO${skippedCount === 1 ? "" : "s"} hidden (missing dates)`
+              {purchaseOrders.length} ongoing PO
+              {purchaseOrders.length === 1 ? "" : "s"}
+              {scheduledCount > 0
+                ? ` · ${scheduledCount} with production or shipping schedules`
+                : ""}
+              {unscheduledCount > 0
+                ? ` · ${unscheduledCount} awaiting dates`
                 : ""}
             </p>
           </div>
@@ -139,22 +144,30 @@ export function MasterPoTimelineGantt({
               </div>
 
               <div className="space-y-2">
-                {group.bars.map((bar) => (
-                  <GanttRow
-                    key={`${group.po_id}-${bar.phase}-${bar.id}`}
-                    bar={bar}
-                    rangeStart={chart.rangeStart}
-                    rangeEnd={chart.rangeEnd}
-                    todayPosition={todayPosition}
-                    labelWidth="10rem"
-                    dateWidth="11rem"
-                    shipmentHref={
-                      bar.phase === "shipping"
-                        ? `/dashboard/shipments?highlight=${bar.id}`
-                        : undefined
-                    }
-                  />
-                ))}
+                {group.bars.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-500">
+                    No schedule bars yet. Set an expected finish date on the PO,
+                    log a down payment, or create a shipment with departure and
+                    delivery dates.
+                  </p>
+                ) : (
+                  group.bars.map((bar) => (
+                    <GanttRow
+                      key={`${group.po_id}-${bar.phase}-${bar.id}`}
+                      bar={bar}
+                      rangeStart={chart.rangeStart}
+                      rangeEnd={chart.rangeEnd}
+                      todayPosition={todayPosition}
+                      labelWidth="10rem"
+                      dateWidth="11rem"
+                      shipmentHref={
+                        bar.phase === "shipping"
+                          ? `/dashboard/shipments?highlight=${bar.id}`
+                          : undefined
+                      }
+                    />
+                  ))
+                )}
               </div>
             </section>
           ))}

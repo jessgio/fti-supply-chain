@@ -27,6 +27,7 @@ export interface PoGanttPaymentRef {
 
 export interface PoGanttInput {
   created_at: string;
+  order_date?: string | null;
   expected_date: string | null;
   payments?: PoGanttPaymentRef[];
   shipments: Array<{
@@ -46,7 +47,15 @@ function startOfDay(value: Date): Date {
 
 function parseDate(value: string | null | undefined): Date | null {
   if (!value) return null;
-  const date = startOfDay(new Date(`${value}T00:00:00`));
+
+  // Postgres `date` columns return YYYY-MM-DD; timestamptz returns ISO strings.
+  const datePart = value.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const date = startOfDay(new Date(`${datePart}T00:00:00`));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = startOfDay(new Date(value));
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -90,9 +99,12 @@ export function buildPoGanttBars(
 
   const productionEnd = parseDate(input.expected_date);
   const paymentStart = resolveEarliestDownPaymentDate(input.payments ?? []);
+  const orderStart = parseDate(input.order_date);
   const createdStart = parseDate(input.created_at);
-  const productionStart = paymentStart ?? createdStart;
+  const productionStart = paymentStart ?? orderStart ?? createdStart;
   const productionUsesPayment = paymentStart != null;
+  const productionUsesOrder =
+    paymentStart == null && orderStart != null && productionStart === orderStart;
 
   if (productionStart && productionEnd && productionEnd >= productionStart) {
     bars.push({
@@ -101,8 +113,14 @@ export function buildPoGanttBars(
       label: "Production",
       detail: productionUsesPayment
         ? "First payment → finished"
-        : "Created → finished",
-      startMarkerLabel: productionUsesPayment ? "First payment" : "Created",
+        : productionUsesOrder
+          ? "Ordered → finished"
+          : "Created → finished",
+      startMarkerLabel: productionUsesPayment
+        ? "First payment"
+        : productionUsesOrder
+          ? "Ordered"
+          : "Created",
       endMarkerLabel: "Finished date",
       start: productionStart,
       end: productionEnd,
@@ -198,6 +216,8 @@ export interface MasterGanttPoInput extends PoGanttInput {
 export function buildMasterGanttChart(
   pos: MasterGanttPoInput[],
 ): MasterGanttChart | null {
+  if (pos.length === 0) return null;
+
   const groups: MasterGanttPoGroup[] = [];
   const allBars: PoGanttBar[] = [];
 
@@ -205,13 +225,13 @@ export function buildMasterGanttChart(
     const bars = buildPoGanttBars(
       {
         created_at: po.created_at,
+        order_date: po.order_date,
         expected_date: po.expected_date,
         payments: po.payments,
         shipments: po.shipments,
       },
       po.po_id,
     );
-    if (bars.length === 0) continue;
 
     groups.push({
       po_id: po.po_id,
@@ -224,8 +244,21 @@ export function buildMasterGanttChart(
     allBars.push(...bars);
   }
 
-  const range = computeGanttRange(allBars);
-  if (!range || groups.length === 0) return null;
+  const range =
+    computeGanttRange(allBars) ??
+    (() => {
+      const today = startOfDay(new Date());
+      const rangeStart = new Date(today);
+      rangeStart.setDate(rangeStart.getDate() - 30);
+      const rangeEnd = new Date(today);
+      rangeEnd.setDate(rangeEnd.getDate() + 90);
+      return {
+        rangeStart,
+        rangeEnd,
+        today,
+        ticks: buildTicks(rangeStart, rangeEnd),
+      };
+    })();
 
   return { groups, ...range };
 }

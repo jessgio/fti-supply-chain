@@ -552,6 +552,7 @@ export interface PoTimelineEntry {
   status: PoStatus;
   display_status: string;
   created_at: string;
+  order_date: string | null;
   expected_date: string | null;
   payments: Array<{ payment_date: string; purpose: string }>;
   shipments: Array<{
