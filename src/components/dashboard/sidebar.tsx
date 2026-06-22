@@ -37,80 +37,107 @@ interface NavLink {
   exact?: boolean;
 }
 
-const links: NavLink[] = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/sales", label: "Sales Growth", icon: BarChart3 },
-  { href: "/dashboard/commercial", label: "Sales & Marketing", icon: TrendingUp },
-  { href: "/dashboard/inventory", label: "Inventory & Forecast", icon: Package },
+interface NavItem extends NavLink {
+  children?: NavLink[];
+}
+
+const links: NavItem[] = [
+  {
+    href: "/dashboard",
+    label: "Overview",
+    icon: LayoutDashboard,
+    children: [
+      { href: "/dashboard/sales", label: "Sales Growth", icon: BarChart3 },
+      {
+        href: "/dashboard/commercial",
+        label: "Sales & Marketing",
+        icon: TrendingUp,
+      },
+    ],
+  },
+  {
+    href: "/dashboard/inventory",
+    label: "Inventory & Forecast",
+    icon: Package,
+    children: [
+      {
+        href: "/dashboard/procurement",
+        label: "Procurement",
+        icon: ShoppingCart,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/po-timeline",
+        label: "PO Timeline",
+        icon: GanttChart,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/payments",
+        label: "PO Payments",
+        icon: Banknote,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/shipments",
+        label: "Shipments",
+        icon: Truck,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/inbound",
+        label: "Inbound Receives",
+        icon: PackageCheck,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/batches",
+        label: "Stock Batches",
+        icon: CalendarClock,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/extracts",
+        label: "Extracts",
+        icon: FlaskConical,
+        roles: ["admin", "supply_chain"],
+        exact: true,
+      },
+      {
+        href: "/dashboard/packaging",
+        label: "Packaging",
+        icon: Layers,
+        roles: ["admin", "supply_chain"],
+        exact: true,
+      },
+    ],
+  },
   { href: "/dashboard/insights", label: "Supply Chain Insights", icon: Lightbulb },
-  {
-    href: "/dashboard/procurement",
-    label: "Procurement",
-    icon: ShoppingCart,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/po-timeline",
-    label: "PO Timeline",
-    icon: GanttChart,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/shipments",
-    label: "Shipments",
-    icon: Truck,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/inbound",
-    label: "Inbound Receives",
-    icon: PackageCheck,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/batches",
-    label: "Stock Batches",
-    icon: CalendarClock,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/payments",
-    label: "PO Payments",
-    icon: Banknote,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/extracts",
-    label: "Extracts",
-    icon: FlaskConical,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/extracts/mappings",
-    label: "Extract Mappings",
-    icon: Link2,
-    roles: ["admin", "supply_chain"],
-  },
-  {
-    href: "/dashboard/packaging",
-    label: "Packaging",
-    icon: Layers,
-    roles: ["admin", "supply_chain"],
-    exact: true,
-  },
-  {
-    href: "/dashboard/packaging/links",
-    label: "Packaging BOM",
-    icon: Link2,
-    roles: ["admin", "supply_chain"],
-  },
   {
     href: "/dashboard/uploads",
     label: "Data Uploads",
     icon: Upload,
     roles: ["admin", "supply_chain"],
   },
-  { href: "/dashboard/mappings", label: "SKU Mappings", icon: Boxes },
+  {
+    href: "/dashboard/mappings",
+    label: "SKU Mappings",
+    icon: Boxes,
+    children: [
+      {
+        href: "/dashboard/extracts/mappings",
+        label: "Extract Mappings",
+        icon: Link2,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/packaging/links",
+        label: "Packaging BOM",
+        icon: Link2,
+        roles: ["admin", "supply_chain"],
+      },
+    ],
+  },
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -119,6 +146,57 @@ const ROLE_LABELS: Record<UserRole, string> = {
   sales_marketing: "Sales & Marketing",
   viewer: "Viewer",
 };
+
+function isLinkActive(
+  pathname: string,
+  href: string,
+  exact?: boolean,
+): boolean {
+  if (pathname === href) return true;
+  if (exact || href === "/dashboard") return false;
+  return pathname.startsWith(`${href}/`);
+}
+
+function isChildActive(
+  pathname: string,
+  children: NavLink[] | undefined,
+): boolean {
+  return (
+    children?.some((child) =>
+      isLinkActive(pathname, child.href, child.exact),
+    ) ?? false
+  );
+}
+
+function filterNavItems(
+  items: NavItem[],
+  role: UserRole | null | undefined,
+): NavItem[] {
+  const result: NavItem[] = [];
+
+  for (const item of items) {
+    const visibleChildren = item.children?.filter(
+      (child) => !child.roles || !role || child.roles.includes(role),
+    );
+    const parentVisible =
+      !item.roles || !role || item.roles.includes(role);
+    if (
+      !parentVisible &&
+      (!visibleChildren || visibleChildren.length === 0)
+    ) {
+      continue;
+    }
+    result.push({
+      ...item,
+      children:
+        visibleChildren && visibleChildren.length > 0
+          ? visibleChildren
+          : undefined,
+    });
+  }
+
+  return result;
+}
 
 interface SidebarProps {
   role?: UserRole | null;
@@ -131,9 +209,7 @@ export function Sidebar({ role, displayName, email }: SidebarProps) {
   const router = useRouter();
   const { collapsed, toggleCollapsed } = useSidebar();
 
-  const visibleLinks = links.filter(
-    (link) => !link.roles || !role || link.roles.includes(role),
-  );
+  const visibleLinks = filterNavItems(links, role);
 
   async function signOut() {
     const supabase = createClient();
@@ -198,31 +274,56 @@ export function Sidebar({ role, displayName, email }: SidebarProps) {
           </button>
         </div>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 p-2">
-        {visibleLinks.map(({ href, label, icon: Icon, exact }) => {
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {visibleLinks.map((item) => {
+          const { href, label, icon: Icon, exact, children } = item;
+          const childActive = isChildActive(pathname, children);
           const active =
-            pathname === href ||
-            (!exact &&
-              href !== "/dashboard" &&
-              pathname.startsWith(`${href}/`));
+            isLinkActive(pathname, href, exact) || childActive;
+
           return (
-            <Link
-              key={href}
-              href={href}
-              title={collapsed ? label : undefined}
-              className={cn(
-                "flex items-center rounded-lg text-sm font-medium transition-colors",
-                collapsed
-                  ? "justify-center px-2 py-2.5"
-                  : "gap-3 px-3 py-2.5",
-                active
-                  ? "bg-emerald-700 text-white"
-                  : "text-stone-700 hover:bg-stone-100",
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span className="truncate">{label}</span>}
-            </Link>
+            <div key={href} className="flex flex-col gap-0.5">
+              <Link
+                href={href}
+                title={collapsed ? label : undefined}
+                className={cn(
+                  "flex items-center rounded-lg text-sm font-medium transition-colors",
+                  collapsed
+                    ? "justify-center px-2 py-2.5"
+                    : "gap-3 px-3 py-2.5",
+                  active
+                    ? "bg-emerald-700 text-white"
+                    : "text-stone-700 hover:bg-stone-100",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span className="truncate">{label}</span>}
+              </Link>
+              {!collapsed &&
+                children?.map(
+                  ({ href: childHref, label: childLabel, exact: childExact }) => {
+                    const childIsActive = isLinkActive(
+                      pathname,
+                      childHref,
+                      childExact,
+                    );
+                    return (
+                      <Link
+                        key={childHref}
+                        href={childHref}
+                        className={cn(
+                          "flex items-center rounded-lg py-2 pl-9 pr-3 text-sm transition-colors",
+                          childIsActive
+                            ? "bg-emerald-100 font-medium text-emerald-900"
+                            : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
+                        )}
+                      >
+                        <span className="truncate">{childLabel}</span>
+                      </Link>
+                    );
+                  },
+                )}
+            </div>
           );
         })}
       </nav>

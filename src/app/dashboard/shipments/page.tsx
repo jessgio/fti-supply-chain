@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
+  ChevronRight,
   Plane,
   Plus,
   Search,
@@ -23,6 +26,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { PoHoverLink } from "@/components/procurement/po-hover-link";
+import { ShipmentHoverLink } from "@/components/procurement/shipment-hover-link";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
   DEFAULT_TRANSIT_DAYS,
@@ -42,11 +48,25 @@ const TYPE_ICONS = {
 } as const;
 
 export default function ShipmentsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-stone-500">Loading…</div>}>
+      <ShipmentsInner />
+    </Suspense>
+  );
+}
+
+function ShipmentsInner() {
+  const searchParams = useSearchParams();
+  const highlightShipmentId = searchParams.get("shipment");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [openPos, setOpenPos] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    highlightShipmentId ? new Set() : new Set(),
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -68,7 +88,7 @@ export default function ShipmentsPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       const res = await fetch(`/api/shipments?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load shipments");
@@ -78,7 +98,7 @@ export default function ShipmentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     loadShipments();
@@ -137,6 +157,68 @@ export default function ShipmentsPage() {
     setTransitDays(DEFAULT_TRANSIT_DAYS[shipmentType]);
   }, [shipmentType]);
 
+  const groupedByPo = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        po_id: string;
+        po_number: string;
+        supplier_name: string | null;
+        shipments: Shipment[];
+      }
+    >();
+
+    for (const shipment of shipments) {
+      for (const po of shipment.purchase_orders ?? []) {
+        const existing = map.get(po.id);
+        if (existing) {
+          if (!existing.shipments.some((s) => s.id === shipment.id)) {
+            existing.shipments.push(shipment);
+          }
+        } else {
+          map.set(po.id, {
+            po_id: po.id,
+            po_number: po.po_number,
+            supplier_name: po.supplier_name ?? null,
+            shipments: [shipment],
+          });
+        }
+      }
+    }
+
+    return Array.from(map.values())
+      .map((group) => ({
+        ...group,
+        shipments: [...group.shipments].sort((a, b) =>
+          b.estimated_departure_date.localeCompare(a.estimated_departure_date),
+        ),
+      }))
+      .sort((a, b) =>
+        (b.shipments[0]?.estimated_departure_date ?? "").localeCompare(
+          a.shipments[0]?.estimated_departure_date ?? "",
+        ),
+      );
+  }, [shipments]);
+
+  useEffect(() => {
+    if (!highlightShipmentId || groupedByPo.length === 0) return;
+    const poId = groupedByPo.find((g) =>
+      g.shipments.some((s) => s.id === highlightShipmentId),
+    )?.po_id;
+    if (poId) {
+      setExpanded((prev) => new Set(prev).add(poId));
+    }
+  }, [highlightShipmentId, groupedByPo]);
+
+  function toggleExpandedPo(poId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(poId)) next.delete(poId);
+      else next.add(poId);
+      return next;
+    });
+  }
+
   const summary = useMemo(() => {
     return {
       total: shipments.length,
@@ -194,7 +276,7 @@ export default function ShipmentsPage() {
     await loadShipments();
   }
 
-  function togglePo(poId: string) {
+  function toggleSelectedPo(poId: string) {
     setSelectedPoIds((prev) =>
       prev.includes(poId) ? prev.filter((id) => id !== poId) : [...prev, poId],
     );
@@ -264,70 +346,105 @@ export default function ShipmentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-200 text-left">
-                    <th className="py-2 pr-4 font-medium text-stone-500">Shipment</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">PO(s)</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Type</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Departure</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Expected delivery</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Status</th>
-                    <th className="py-2 font-medium text-stone-500" />
+                    <th className="w-8 py-2" />
+                    <th className="py-2 pr-4 font-medium text-stone-500">PO</th>
+                    <th className="py-2 pr-4 font-medium text-stone-500">Supplier</th>
+                    <th className="py-2 pr-4 font-medium text-stone-500">Shipments</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shipments.map((shipment) => {
-                    const Icon = TYPE_ICONS[shipment.shipment_type];
+                  {groupedByPo.map((group) => {
+                    const isOpen = expanded.has(group.po_id);
                     return (
-                      <tr
-                        key={shipment.id}
-                        className="border-b border-stone-100 hover:bg-stone-50/50"
-                      >
-                        <td className="py-3 pr-4 font-medium text-stone-900">
-                          {shipment.shipment_number}
-                        </td>
-                        <td className="py-3 pr-4 text-stone-600">
-                          {(shipment.purchase_orders ?? [])
-                            .map((po) => po.po_number)
-                            .join(", ") || "—"}
-                        </td>
-                        <td className="py-3 pr-4">
-                          <span className="inline-flex items-center gap-1.5 text-stone-600">
-                            <Icon className="h-4 w-4" />
-                            {SHIPMENT_TYPE_LABELS[shipment.shipment_type]}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-4 tabular-nums text-stone-600">
-                          {formatDisplayDate(shipment.estimated_departure_date)}
-                        </td>
-                        <td className="py-3 pr-4 tabular-nums text-stone-600">
-                          {formatDisplayDate(shipment.expected_delivery_date)}
-                          {shipment.delay_days > 0 && (
-                            <span className="ml-1 text-xs text-rose-600">
-                              (+{shipment.delay_days}d delay)
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 pr-4">
-                          <Badge
-                            className={
-                              SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]
-                            }
-                          >
-                            {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
-                          </Badge>
-                        </td>
-                        <td className="py-3 text-right">
-                          {shipment.status !== "closed" && (
-                            <Button
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-stone-400 hover:text-rose-600"
-                              onClick={() => handleDelete(shipment.id)}
-                              aria-label="Delete shipment"
+                      <Fragment key={group.po_id}>
+                        <tr className="border-b border-stone-100 hover:bg-stone-50/50">
+                          <td className="py-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandedPo(group.po_id)}
+                              className="flex h-6 w-6 items-center justify-center rounded text-stone-400 hover:bg-stone-100"
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
+                              {isOpen ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2 pr-4">
+                            <PoHoverLink
+                              poId={group.po_id}
+                              poNumber={group.po_number}
+                            />
+                          </td>
+                          <td className="py-2 pr-4 text-stone-600">
+                            {group.supplier_name ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-stone-600">
+                            {group.shipments.length}
+                          </td>
+                        </tr>
+                        {isOpen &&
+                          group.shipments.map((shipment) => {
+                            const Icon = TYPE_ICONS[shipment.shipment_type];
+                            return (
+                              <tr
+                                key={shipment.id}
+                                className="border-b border-stone-100 bg-stone-50/60"
+                              >
+                                <td />
+                                <td className="py-2 pr-4 pl-2">
+                                  <ShipmentHoverLink
+                                    shipmentId={shipment.id}
+                                    shipmentNumber={shipment.shipment_number}
+                                  />
+                                </td>
+                                <td className="py-2 pr-4 text-stone-600">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Icon className="h-4 w-4" />
+                                    {SHIPMENT_TYPE_LABELS[shipment.shipment_type]}
+                                  </span>
+                                </td>
+                                <td className="py-2 pr-4">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-stone-600">
+                                      {formatDisplayDate(
+                                        shipment.estimated_departure_date,
+                                      )}{" "}
+                                      →{" "}
+                                      {formatDisplayDate(
+                                        shipment.expected_delivery_date,
+                                      )}
+                                    </span>
+                                    <Badge
+                                      className={
+                                        SHIPMENT_STATUS_STYLES[
+                                          shipment.status as ShipmentStatus
+                                        ]
+                                      }
+                                    >
+                                      {
+                                        SHIPMENT_STATUS_LABELS[
+                                          shipment.status as ShipmentStatus
+                                        ]
+                                      }
+                                    </Badge>
+                                    {shipment.status !== "closed" && (
+                                      <Button
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0 text-stone-400 hover:text-rose-600"
+                                        onClick={() => handleDelete(shipment.id)}
+                                        aria-label="Delete shipment"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -361,7 +478,7 @@ export default function ShipmentsPage() {
                       <input
                         type="checkbox"
                         checked={selectedPoIds.includes(po.id)}
-                        onChange={() => togglePo(po.id)}
+                        onChange={() => toggleSelectedPo(po.id)}
                       />
                       <span className="text-sm">
                         <span className="font-medium text-rose-700">{po.po_number}</span>

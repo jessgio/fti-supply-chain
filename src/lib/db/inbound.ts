@@ -7,6 +7,7 @@ import type {
 import { receivePoLine } from "@/lib/db/procurement";
 import {
   computePoDisplayStatus,
+  isTimelineActiveShipmentStatus,
   recalculatePoStatus,
 } from "@/lib/db/po-lifecycle";
 import { TIMELINE_PO_STATUSES } from "@/lib/shipments/constants";
@@ -117,6 +118,32 @@ function deriveReceiveStatus(
   return "partial";
 }
 
+async function getPriorReceivedByLine(
+  supabase: SupabaseClient,
+  shipmentId: string,
+): Promise<Map<string, number>> {
+  const { data: priorReceives, error } = await supabase
+    .from("inbound_receives")
+    .select("inbound_receive_items ( po_line_id, received_qty )")
+    .eq("shipment_id", shipmentId);
+  if (error) throw error;
+
+  const totals = new Map<string, number>();
+  for (const receive of priorReceives ?? []) {
+    const items = receive.inbound_receive_items as Array<{
+      po_line_id: string;
+      received_qty: number;
+    }> | null;
+    for (const item of items ?? []) {
+      totals.set(
+        item.po_line_id,
+        (totals.get(item.po_line_id) ?? 0) + Number(item.received_qty),
+      );
+    }
+  }
+  return totals;
+}
+
 function generateReceiveNumber(): string {
   const date = new Date();
   const stamp =
@@ -134,7 +161,8 @@ export async function listInboundReceives(
   const { data, error } = await supabase
     .from("inbound_receives")
     .select(INBOUND_SELECT)
-    .order("receive_date", { ascending: false });
+    .order("receive_date", { ascending: false })
+    .order("created_at", { ascending: false });
   if (error) throw error;
 
   let rows = ((data ?? []) as unknown as InboundRow[]).map(mapInboundRow);
@@ -189,14 +217,10 @@ export async function createInboundReceive(
     throw new Error("Cannot receive against a closed shipment.");
   }
 
-  const { data: existingReceive } = await supabase
-    .from("inbound_receives")
-    .select("id")
-    .eq("shipment_id", input.shipment_id)
-    .maybeSingle();
-  if (existingReceive) {
-    throw new Error("This shipment already has an inbound receive.");
-  }
+  const priorReceivedByLine = await getPriorReceivedByLine(
+    supabase,
+    input.shipment_id,
+  );
 
   if (!input.items.length) {
     throw new Error("Add at least one received line item.");
@@ -215,9 +239,10 @@ export async function createInboundReceive(
       throw new Error("Received quantity cannot be negative.");
     }
     const shipped = shippedByLine.get(item.po_line_id) ?? 0;
-    if (item.received_qty > shipped) {
+    const prior = priorReceivedByLine.get(item.po_line_id) ?? 0;
+    if (prior + item.received_qty > shipped) {
       throw new Error(
-        `Received quantity exceeds shipped quantity for line ${item.po_line_id}.`,
+        `Received quantity exceeds remaining shipped quantity for line ${item.po_line_id}.`,
       );
     }
   }
@@ -228,6 +253,20 @@ export async function createInboundReceive(
   const primaryPoId = poIds[0] ?? null;
 
   const status = deriveReceiveStatus(input.items);
+
+  const cumulativeItems = shipmentItems.map((item) => {
+    const prior = priorReceivedByLine.get(item.po_line_id) ?? 0;
+    const increment =
+      input.items.find((i) => i.po_line_id === item.po_line_id)?.received_qty ??
+      0;
+    return {
+      ordered_qty: Number(item.quantity),
+      received_qty: prior + increment,
+    };
+  });
+  const shipmentComplete =
+    deriveReceiveStatus(cumulativeItems) === "complete";
+
   const receiveDate = input.receive_date ?? new Date().toISOString().slice(0, 10);
 
   const { data: receive, error: recvError } = await supabase
@@ -272,7 +311,7 @@ export async function createInboundReceive(
     }
   }
 
-  const newShipmentStatus = status === "complete" ? "closed" : "delivered";
+  const newShipmentStatus = shipmentComplete ? "closed" : "delivered";
   await supabase
     .from("shipments")
     .update({
@@ -369,7 +408,10 @@ export async function listOngoingPosForTimeline(
 
     const shipments = shipmentLinks
       .map((l) => l.shipments)
-      .filter((s): s is NonNullable<typeof s> => s != null && s.status !== "closed")
+      .filter(
+        (s): s is NonNullable<typeof s> =>
+          s != null && isTimelineActiveShipmentStatus(s.status),
+      )
       .map((s) => ({
         id: s.id,
         shipment_number: s.shipment_number,
@@ -420,4 +462,133 @@ export async function listOngoingPosForTimeline(
       })),
     };
   });
+}
+
+const PO_TIMELINE_SELECT = `
+  id,
+  po_number,
+  status,
+  expected_date,
+  order_date,
+  created_at,
+  suppliers ( name ),
+  purchase_order_lines (
+    qty_ordered,
+    qty_received,
+    is_closed,
+    skus ( sku_code, name )
+  ),
+  po_payments ( payment_date, purpose ),
+  shipment_purchase_orders (
+    shipments (
+      id,
+      shipment_number,
+      estimated_departure_date,
+      expected_delivery_date,
+      delay_days,
+      status,
+      shipment_items (
+        quantity,
+        purchase_order_lines (
+          skus ( sku_code, name )
+        )
+      )
+    )
+  )
+`;
+
+function mapPoTimelineRow(po: Record<string, unknown>): PoTimelineEntry {
+  const lines = (po.purchase_order_lines ?? []) as unknown as Array<{
+    qty_ordered: number;
+    qty_received: number;
+    is_closed: boolean;
+    skus: { sku_code: string; name: string | null } | null;
+  }>;
+
+  const shipmentLinks = (po.shipment_purchase_orders ?? []) as unknown as Array<{
+    shipments: {
+      id: string;
+      shipment_number: string;
+      estimated_departure_date: string;
+      expected_delivery_date: string;
+      delay_days: number;
+      status: string;
+      shipment_items: Array<{
+        quantity: number;
+        purchase_order_lines: {
+          skus: { sku_code: string; name: string | null } | null;
+        } | null;
+      }>;
+    } | null;
+  }>;
+
+  const shipments = shipmentLinks
+    .map((l) => l.shipments)
+    .filter(
+      (s): s is NonNullable<typeof s> =>
+        s != null && isTimelineActiveShipmentStatus(s.status),
+    )
+    .map((s) => ({
+      id: s.id,
+      shipment_number: s.shipment_number,
+      estimated_departure_date: s.estimated_departure_date,
+      expected_delivery_date: s.expected_delivery_date,
+      delay_days: s.delay_days,
+      line_items: (s.shipment_items ?? []).map((item) => ({
+        sku_code: item.purchase_order_lines?.skus?.sku_code ?? "",
+        sku_name: item.purchase_order_lines?.skus?.name ?? null,
+        quantity: Number(item.quantity),
+      })),
+    }));
+
+  const supplierRaw = po.suppliers as
+    | { name: string }
+    | { name: string }[]
+    | null;
+  const supplier = Array.isArray(supplierRaw)
+    ? (supplierRaw[0] ?? null)
+    : supplierRaw;
+  const displayStatus = computePoDisplayStatus(
+    po.status as PoTimelineEntry["status"],
+    lines,
+    shipments.length > 0,
+  );
+
+  return {
+    id: po.id as string,
+    po_number: po.po_number as string,
+    supplier_name: supplier?.name ?? null,
+    status: po.status as PoTimelineEntry["status"],
+    display_status: displayStatus,
+    created_at: po.created_at as string,
+    order_date: (po.order_date as string | null) ?? null,
+    expected_date: po.expected_date as string | null,
+    payments: ((po.po_payments ?? []) as Array<{ payment_date: string; purpose: string }>).map(
+      (p) => ({
+        payment_date: p.payment_date,
+        purpose: p.purpose,
+      }),
+    ),
+    shipments,
+    line_items: lines.map((l) => ({
+      sku_code: l.skus?.sku_code ?? "",
+      sku_name: l.skus?.name ?? null,
+      qty_ordered: Number(l.qty_ordered),
+      qty_received: Number(l.qty_received),
+    })),
+  };
+}
+
+export async function getPoTimelineEntry(
+  supabase: SupabaseClient,
+  poId: string,
+): Promise<PoTimelineEntry | null> {
+  const { data: po, error } = await supabase
+    .from("purchase_orders")
+    .select(PO_TIMELINE_SELECT)
+    .eq("id", poId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!po) return null;
+  return mapPoTimelineRow(po as Record<string, unknown>);
 }

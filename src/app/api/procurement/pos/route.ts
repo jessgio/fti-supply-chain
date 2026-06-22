@@ -7,6 +7,8 @@ import {
 } from "@/lib/db/procurement";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
+import { formatPoMoney } from "@/lib/procurement/currencies";
+import { computeOpenPoValueIdr } from "@/lib/procurement/open-po-value";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -15,12 +17,25 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") as PoStatus | null;
+    const includeOpenValue = searchParams.get("include") === "open_value";
     const supabase = createAdminClient();
     const purchaseOrders = await listPurchaseOrders(
       supabase,
       status ?? undefined,
     );
-    return NextResponse.json({ purchaseOrders });
+
+    if (!includeOpenValue) {
+      return NextResponse.json({ purchaseOrders });
+    }
+
+    const totalIdr = await computeOpenPoValueIdr(purchaseOrders);
+    return NextResponse.json({
+      purchaseOrders,
+      openValue: {
+        totalIdr,
+        formatted: formatPoMoney(totalIdr, "IDR"),
+      },
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

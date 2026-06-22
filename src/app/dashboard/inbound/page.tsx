@@ -15,6 +15,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
   INBOUND_STATUS_LABELS,
@@ -30,6 +31,7 @@ export default function InboundPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export default function InboundPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       const res = await fetch(`/api/inbound?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load inbound receives");
@@ -59,7 +61,7 @@ export default function InboundPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     loadReceives();

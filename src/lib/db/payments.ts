@@ -79,16 +79,14 @@ type PaymentRow = {
   } | null;
 };
 
+import {
+  isBalancePaymentPurpose,
+  isDownPaymentPurpose,
+  poCurrencyTolerance,
+} from "@/lib/procurement/po-payment-status";
+
 function normalizePurpose(purpose: string): string {
   return purpose.trim().toLowerCase();
-}
-
-function isDownPaymentPurpose(purpose: string): boolean {
-  return normalizePurpose(purpose) === "down payment";
-}
-
-function isBalancePaymentPurpose(purpose: string): boolean {
-  return normalizePurpose(purpose) === "balance payment";
 }
 
 function matchesSearch(row: PaymentLedgerRow, search: string): boolean {
@@ -142,7 +140,8 @@ export async function listPaymentLedger(
     .select(
       "id, po_id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, " +
         "purchase_orders(po_number, currency, status, suppliers(name))",
-    );
+    )
+    .order("payment_date", { ascending: false });
 
   if (params.month) {
     const [year, month] = params.month.split("-").map(Number);
@@ -216,9 +215,8 @@ type RawPayment = {
   payment_date: string;
 };
 
-function poCurrencyTolerance(currency: string): number {
-  if (currency === "IDR" || currency === "JPY" || currency === "KRW") return 1;
-  return 0.01;
+function poCurrencyToleranceLocal(currency: string): number {
+  return poCurrencyTolerance(currency);
 }
 
 function sumPurposePaymentsInPoCurrency(
@@ -272,7 +270,7 @@ function purposeIssue(
   idrRate: number,
 ): PaymentPurposeIssue | null {
   const variance = paidAmount - expectedAmount;
-  if (Math.abs(variance) <= poCurrencyTolerance(poCurrency)) return null;
+  if (Math.abs(variance) <= poCurrencyToleranceLocal(poCurrency)) return null;
 
   const varianceIdr =
     poCurrency === "IDR"
@@ -300,7 +298,7 @@ function downBalancePaymentsNetToZero(
   paidBalance: number,
 ): boolean {
   const variance = paidDown + paidBalance - (expectedDown + expectedBalance);
-  return Math.abs(variance) <= poCurrencyTolerance(poCurrency);
+  return Math.abs(variance) <= poCurrencyToleranceLocal(poCurrency);
 }
 
 export async function computePaymentDashboardSummary(

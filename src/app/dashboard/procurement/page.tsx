@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   PackageCheck,
@@ -29,6 +29,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SkuSearchInput } from "@/components/packaging/sku-search-input";
+import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -177,7 +178,9 @@ async function downloadPoPdf(poId: string, poNumber: string) {
 
 function ProcurementInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const initialSku = searchParams.get("sku");
+  const initialPoId = searchParams.get("po");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [skus, setSkus] = useState<SkuOption[]>([]);
@@ -188,7 +191,7 @@ function ProcurementInner() {
   const [openValue, setOpenValue] = useState<string>("—");
   const [openValueLoading, setOpenValueLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(Boolean(initialSku));
-  const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
+  const poRedirected = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [suppliersOpen, setSuppliersOpen] = useState(false);
   const [skuQuery, setSkuQuery] = useState("");
@@ -208,6 +211,13 @@ function ProcurementInner() {
       : null,
   );
   const [now] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (initialPoId && !poRedirected.current) {
+      poRedirected.current = true;
+      router.replace(`/dashboard/procurement/${initialPoId}`);
+    }
+  }, [initialPoId, router]);
 
   useEffect(() => {
     let active = true;
@@ -236,49 +246,33 @@ function ProcurementInner() {
     let active = true;
     async function loadPos() {
       setLoading(true);
+      setOpenValueLoading(true);
       setError(null);
       try {
-        const qs = statusFilter ? `?status=${statusFilter}` : "";
-        const res = await fetch(`/api/procurement/pos${qs}`);
+        const qs = new URLSearchParams();
+        if (statusFilter) qs.set("status", statusFilter);
+        qs.set("include", "open_value");
+        const res = await fetch(`/api/procurement/pos?${qs.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to load");
         if (!active) return;
         setPos(data.purchaseOrders ?? []);
+        setOpenValue(
+          data.openValue?.formatted ?? formatPoMoney(0, DEFAULT_PO_CURRENCY),
+        );
       } catch (err) {
-        if (active)
+        if (active) {
           setError(err instanceof Error ? err.message : "Failed to load");
+          setOpenValue("Unavailable");
+        }
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setOpenValueLoading(false);
+        }
       }
     }
     loadPos();
-    return () => {
-      active = false;
-    };
-  }, [statusFilter, refreshKey]);
-
-  useEffect(() => {
-    setExpanded(new Set(pos.map((p) => p.id)));
-  }, [pos]);
-
-  useEffect(() => {
-    let active = true;
-    async function loadOpenValue() {
-      setOpenValueLoading(true);
-      try {
-        const qs = statusFilter ? `?status=${statusFilter}` : "";
-        const res = await fetch(`/api/procurement/open-value${qs}`);
-        const data = await res.json();
-        if (!active) return;
-        if (!res.ok) throw new Error(data.error ?? "Failed to load open value");
-        setOpenValue(data.formatted ?? formatPoMoney(0, DEFAULT_PO_CURRENCY));
-      } catch {
-        if (active) setOpenValue("Unavailable");
-      } finally {
-        if (active) setOpenValueLoading(false);
-      }
-    }
-    loadOpenValue();
     return () => {
       active = false;
     };
@@ -485,8 +479,17 @@ function ProcurementInner() {
                             )}
                           </button>
                         </td>
-                        <td className="py-2 pr-4 font-medium text-stone-900">
-                          {po.po_number}
+                        <td className="py-2 pr-4">
+                          <PoHoverLink
+                            poId={po.id}
+                            poNumber={po.po_number}
+                            lineItems={(lines ?? []).map((l) => ({
+                              sku_code: l.sku_code ?? "",
+                              sku_name: l.sku_name ?? null,
+                              qty_ordered: l.qty_ordered,
+                              qty_received: l.qty_received,
+                            }))}
+                          />
                         </td>
                         <td className="py-2 pr-4">{po.supplier_name ?? "—"}</td>
                         <td className="py-2 pr-4">
@@ -504,7 +507,9 @@ function ProcurementInner() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setDetailPo(po)}
+                            onClick={() =>
+                              router.push(`/dashboard/procurement/${po.id}`)
+                            }
                           >
                             Manage
                           </Button>
@@ -617,7 +622,7 @@ function ProcurementInner() {
           onCreated={(created) => {
             setCreateOpen(false);
             setRefreshKey((k) => k + 1);
-            setDetailPo(created);
+            router.push(`/dashboard/procurement/${created.id}`);
           }}
         />
       )}
@@ -643,13 +648,6 @@ function ProcurementInner() {
         />
       )}
 
-      {detailPo && (
-        <PoDetailDialog
-          poId={detailPo.id}
-          onClose={() => setDetailPo(null)}
-          onChanged={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
     </div>
   );
 }
@@ -1621,6 +1619,15 @@ function PoPaymentsSection({
         return;
       }
     }
+    if (form.currency !== "IDR") {
+      const rate = Number(form.exchangeRate);
+      if (!Number.isFinite(rate) || rate <= 0) {
+        setError(
+          `Enter the exchange rate from ${form.currency} to IDR (IDR per 1 ${form.currency}).`,
+        );
+        return;
+      }
+    }
 
     setBusy(true);
     setError(null);
@@ -1848,7 +1855,7 @@ function PoPaymentsSection({
             {form.currency !== "IDR" && (
               <label className="block text-sm sm:col-span-2">
                 <span className="mb-1 block text-stone-600">
-                  Exchange rate (IDR per 1 {form.currency})
+                  Exchange rate — IDR per 1 {form.currency}
                 </span>
                 <Input
                   type="number"
@@ -1861,7 +1868,7 @@ function PoPaymentsSection({
                       exchangeRate: e.target.value,
                     }))
                   }
-                  placeholder="Optional"
+                  placeholder="Required"
                 />
               </label>
             )}

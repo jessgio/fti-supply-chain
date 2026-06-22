@@ -325,10 +325,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
       })),
     }),
   );
-  const payments = (row.po_payments ?? []).map((p) => ({
-    ...mapPoPayment(p),
-    po_id: row.id,
-  }));
+  const payments = (row.po_payments ?? [])
+    .map((p) => ({
+      ...mapPoPayment(p),
+      po_id: row.id,
+    }))
+    .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
   return {
     id: row.id,
     po_number: row.po_number,
@@ -370,6 +372,7 @@ export async function listPurchaseOrders(
   let query = supabase
     .from("purchase_orders")
     .select(PO_SELECT)
+    .order("order_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
 
@@ -698,13 +701,16 @@ export async function closePoLine(
   if (error) throw error;
 }
 
-function validatePaymentInput(input: {
-  amount?: number;
-  payment_request_number?: string;
-  currency?: string;
-  exchange_rate?: number | null;
-  purpose?: string;
-}) {
+function validatePaymentInput(
+  input: {
+    amount?: number;
+    payment_request_number?: string;
+    currency?: string;
+    exchange_rate?: number | null;
+    purpose?: string;
+  },
+  resolvedCurrency?: string,
+) {
   if (input.amount !== undefined && (!Number.isFinite(input.amount) || input.amount <= 0)) {
     throw new Error("Payment amount must be a positive number.");
   }
@@ -724,6 +730,16 @@ function validatePaymentInput(input: {
   ) {
     throw new Error("Exchange rate must be a positive number.");
   }
+
+  const currency = input.currency ?? resolvedCurrency ?? "IDR";
+  if (currency !== "IDR") {
+    const rate = input.exchange_rate;
+    if (rate === undefined || rate === null || !Number.isFinite(rate) || rate <= 0) {
+      throw new Error(
+        "Exchange rate to IDR is required for non-IDR payments.",
+      );
+    }
+  }
 }
 
 export async function createPoPayment(
@@ -734,7 +750,18 @@ export async function createPoPayment(
   const po = await getPurchaseOrder(supabase, poId);
   if (!po) throw new Error("Purchase order not found.");
 
-  validatePaymentInput(input);
+  const currency = input.currency ?? po.currency ?? "IDR";
+  const exchangeRate =
+    currency === "IDR" ? null : (input.exchange_rate ?? null);
+
+  validatePaymentInput(
+    {
+      ...input,
+      currency,
+      exchange_rate: exchangeRate,
+    },
+    po.currency ?? "IDR",
+  );
 
   const requestNumber = input.payment_request_number.trim();
   if (!requestNumber) {
@@ -743,10 +770,6 @@ export async function createPoPayment(
   if (!input.purpose.trim()) {
     throw new Error("Payment purpose is required.");
   }
-
-  const currency = input.currency ?? po.currency ?? "IDR";
-  const exchangeRate =
-    currency === "IDR" ? null : (input.exchange_rate ?? null);
 
   const { error } = await supabase.from("po_payments").insert({
     po_id: poId,
@@ -776,7 +799,25 @@ export async function updatePoPayment(
   const existing = (po.payments ?? []).find((p) => p.id === paymentId);
   if (!existing) throw new Error("Payment not found.");
 
-  validatePaymentInput(input);
+  const currency = input.currency ?? existing.currency;
+  const exchangeRate =
+    currency === "IDR"
+      ? null
+      : input.exchange_rate !== undefined
+        ? input.exchange_rate
+        : existing.exchange_rate;
+
+  validatePaymentInput(
+    {
+      amount: input.amount ?? existing.amount,
+      payment_request_number:
+        input.payment_request_number ?? existing.payment_request_number,
+      currency,
+      exchange_rate: exchangeRate,
+      purpose: input.purpose ?? existing.purpose,
+    },
+    po.currency ?? "IDR",
+  );
 
   const patch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
@@ -794,11 +835,9 @@ export async function updatePoPayment(
     patch.purpose = trimmed;
   }
 
-  const currency = input.currency ?? existing.currency;
   if (input.currency !== undefined) patch.currency = currency;
   if (input.currency !== undefined || input.exchange_rate !== undefined) {
-    patch.exchange_rate =
-      currency === "IDR" ? null : (input.exchange_rate ?? existing.exchange_rate);
+    patch.exchange_rate = exchangeRate;
   }
 
   const { error } = await supabase

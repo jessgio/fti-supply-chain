@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -8,6 +8,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   Banknote,
+  ChevronDown,
+  ChevronRight,
   Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { StatCard } from "@/components/ui/stat-card";
+import { PoHoverLink } from "@/components/procurement/po-hover-link";
+import { PaymentHoverLink } from "@/components/procurement/payment-hover-link";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatNumber } from "@/lib/utils";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
@@ -80,7 +85,9 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [purpose, setPurpose] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<PaymentLedgerSortKey>("payment_date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -89,7 +96,7 @@ export default function PaymentsPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (purpose) params.set("purpose", purpose);
       params.set("sort", sortKey);
       params.set("sort_dir", sortDir);
@@ -104,7 +111,7 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, purpose, sortKey, sortDir]);
+  }, [debouncedSearch, purpose, sortKey, sortDir]);
 
   useEffect(() => {
     loadPayments();
@@ -147,6 +154,55 @@ export default function PaymentsPage() {
       setSortKey(key);
       setSortDir(key === "payment_date" ? "desc" : "desc");
     }
+  }
+
+  const groupedByPo = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        po_id: string;
+        po_number: string;
+        supplier_name: string | null;
+        payments: PaymentLedgerRow[];
+        totalIdr: number;
+      }
+    >();
+    for (const payment of payments) {
+      const existing = map.get(payment.po_id);
+      if (existing) {
+        existing.payments.push(payment);
+        existing.totalIdr += payment.amount_idr ?? 0;
+      } else {
+        map.set(payment.po_id, {
+          po_id: payment.po_id,
+          po_number: payment.po_number,
+          supplier_name: payment.supplier_name,
+          payments: [payment],
+          totalIdr: payment.amount_idr ?? 0,
+        });
+      }
+    }
+    return Array.from(map.values())
+      .map((group) => ({
+        ...group,
+        payments: [...group.payments].sort((a, b) =>
+          b.payment_date.localeCompare(a.payment_date),
+        ),
+      }))
+      .sort((a, b) =>
+        (b.payments[0]?.payment_date ?? "").localeCompare(
+          a.payments[0]?.payment_date ?? "",
+        ),
+      );
+  }, [payments]);
+
+  function togglePo(poId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(poId)) next.delete(poId);
+      else next.add(poId);
+      return next;
+    });
   }
 
   return (
@@ -205,8 +261,7 @@ export default function PaymentsPage() {
               Down / balance payment flags
             </CardTitle>
             <CardDescription>
-              Compared in each PO&apos;s invoice currency; IDR shown only when
-              there is a real gap.
+            Compared in each PO&apos;s invoice currency; IDR amounts are for internal spend tracking.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
@@ -347,89 +402,79 @@ export default function PaymentsPage() {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-stone-200 text-stone-500">
-                    <SortableHeader
-                      label="Date"
-                      columnKey="payment_date"
-                      activeKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Request #"
-                      columnKey="payment_request_number"
-                      activeKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="PO"
-                      columnKey="po_number"
-                      activeKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
+                    <th className="w-8 py-2" />
+                    <th className="py-2 pr-4">PO</th>
                     <th className="py-2 pr-4">Supplier</th>
-                    <SortableHeader
-                      label="Purpose"
-                      columnKey="purpose"
-                      activeKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                    <th className="py-2 pr-4 text-right">Amount</th>
-                    <th className="py-2 pr-4">Rate</th>
-                    <SortableHeader
-                      label="IDR"
-                      columnKey="amount_idr"
-                      activeKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
+                    <th className="py-2 pr-4">Payments</th>
+                    <th className="py-2 pr-4 text-right">Total IDR</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((payment) => (
-                    <tr
-                      key={payment.id}
-                      className="border-b border-stone-100 hover:bg-stone-50/50"
-                    >
-                      <td className="py-2 pr-4 text-stone-700">
-                        {payment.payment_date}
-                      </td>
-                      <td className="py-2 pr-4 font-medium text-stone-900">
-                        {payment.payment_request_number}
-                      </td>
-                      <td className="py-2 pr-4">
-                        <span className="font-medium text-stone-900">
-                          {payment.po_number}
-                        </span>
-                        {payment.po_currency !== "IDR" && (
-                          <span className="ml-1 text-xs text-stone-500">
-                            {payment.po_currency}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-4 text-stone-600">
-                        {payment.supplier_name ?? "—"}
-                      </td>
-                      <td className="py-2 pr-4 text-stone-700">
-                        {payment.purpose}
-                      </td>
-                      <td className="py-2 pr-4 text-right font-medium text-stone-900">
-                        {formatPoMoney(payment.amount, payment.currency)}
-                      </td>
-                      <td className="py-2 pr-4 text-stone-600">
-                        {payment.currency !== "IDR" && payment.exchange_rate
-                          ? `${formatNumber(payment.exchange_rate)} IDR/${payment.currency}`
-                          : payment.currency === "IDR"
-                            ? "—"
-                            : "FX fallback"}
-                      </td>
-                      <td className="py-2 pr-4 font-semibold text-stone-900">
-                        {fmtIdr(payment.amount_idr)}
-                      </td>
-                    </tr>
-                  ))}
+                  {groupedByPo.map((group) => {
+                    const isOpen = expanded.has(group.po_id);
+                    return (
+                      <Fragment key={group.po_id}>
+                        <tr className="border-b border-stone-100 hover:bg-stone-50/50">
+                          <td className="py-2">
+                            <button
+                              type="button"
+                              onClick={() => togglePo(group.po_id)}
+                              className="flex h-6 w-6 items-center justify-center rounded text-stone-400 hover:bg-stone-100"
+                            >
+                              {isOpen ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2 pr-4">
+                            <PoHoverLink
+                              poId={group.po_id}
+                              poNumber={group.po_number}
+                            />
+                          </td>
+                          <td className="py-2 pr-4 text-stone-600">
+                            {group.supplier_name ?? "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-stone-600">
+                            {group.payments.length}
+                          </td>
+                          <td className="py-2 pr-4 text-right font-semibold text-stone-900">
+                            {fmtIdr(group.totalIdr)}
+                          </td>
+                        </tr>
+                        {isOpen &&
+                          group.payments.map((payment) => (
+                            <tr
+                              key={payment.id}
+                              className="border-b border-stone-100 bg-stone-50/60"
+                            >
+                              <td />
+                              <td className="py-2 pr-4 pl-2 text-stone-700">
+                                {payment.payment_date}
+                              </td>
+                              <td className="py-2 pr-4">
+                                <PaymentHoverLink
+                                  paymentId={payment.id}
+                                  poId={payment.po_id}
+                                  label={payment.payment_request_number}
+                                />
+                              </td>
+                              <td className="py-2 pr-4 text-stone-700">
+                                {payment.purpose}
+                              </td>
+                              <td className="py-2 pr-4 text-right font-medium text-stone-900">
+                                {formatPoMoney(payment.amount, payment.currency)}
+                                <span className="ml-2 text-xs text-stone-500">
+                                  ({fmtIdr(payment.amount_idr)})
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

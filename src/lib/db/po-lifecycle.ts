@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PoStatus } from "@/types/database";
 
+/** Shipment statuses that keep a PO in the in-transit lifecycle. */
+const PO_ACTIVE_SHIPMENT_STATUSES = new Set(["planned", "in_transit"]);
+
 export async function syncPoStatusesAfterShipmentChange(
   supabase: SupabaseClient,
   poIds: string[],
@@ -8,6 +11,27 @@ export async function syncPoStatusesAfterShipmentChange(
   for (const poId of poIds) {
     await recalculatePoStatus(supabase, poId);
   }
+}
+
+export async function poHasOpenShipments(
+  supabase: SupabaseClient,
+  poId: string,
+): Promise<boolean> {
+  const { data: shipments, error } = await supabase
+    .from("shipment_purchase_orders")
+    .select("shipments(status)")
+    .eq("po_id", poId);
+  if (error) throw error;
+
+  return (shipments ?? []).some((link) => {
+    const raw = link.shipments as
+      | { status: string }
+      | { status: string }[]
+      | null;
+    const s = Array.isArray(raw) ? (raw[0] ?? null) : raw;
+    if (!s) return false;
+    return s.status !== "closed";
+  });
 }
 
 export async function recalculatePoStatus(
@@ -39,7 +63,10 @@ export async function recalculatePoStatus(
   if (allReceived && anyReceived) {
     await supabase
       .from("purchase_orders")
-      .update({ status: "received" satisfies PoStatus, updated_at: new Date().toISOString() })
+      .update({
+        status: "received" satisfies PoStatus,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", poId);
     return;
   }
@@ -57,7 +84,7 @@ export async function recalculatePoStatus(
       | null;
     const s = Array.isArray(raw) ? (raw[0] ?? null) : raw;
     if (!s) return false;
-    return s.status !== "closed";
+    return PO_ACTIVE_SHIPMENT_STATUSES.has(s.status);
   });
 
   if (hasActiveShipment || anyReceived) {
@@ -68,6 +95,17 @@ export async function recalculatePoStatus(
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq("id", poId);
     }
+    return;
+  }
+
+  if (po.status === "in_transit" && !anyReceived) {
+    await supabase
+      .from("purchase_orders")
+      .update({
+        status: "ordered" satisfies PoStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", poId);
   }
 }
 
@@ -87,4 +125,8 @@ export function computePoDisplayStatus(
   if (anyReceived && !allReceived) return "partially_received";
   if (hasShipments && status === "in_transit") return "shipped";
   return status;
+}
+
+export function isTimelineActiveShipmentStatus(status: string): boolean {
+  return PO_ACTIVE_SHIPMENT_STATUSES.has(status);
 }

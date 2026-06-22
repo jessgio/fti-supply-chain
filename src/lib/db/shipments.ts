@@ -210,6 +210,7 @@ export async function listShipments(
   let query = supabase
     .from("shipments")
     .select(SHIPMENT_SELECT)
+    .order("estimated_departure_date", { ascending: false })
     .order("created_at", { ascending: false });
 
   if (params.status) query = query.eq("status", params.status);
@@ -632,28 +633,49 @@ export async function deleteShipment(
 export async function listOpenShipmentsForInbound(
   supabase: SupabaseClient,
 ): Promise<Shipment[]> {
-  const { data: receivedShipmentIds, error: recvError } = await supabase
-    .from("inbound_receives")
-    .select("shipment_id")
-    .not("shipment_id", "is", null);
-  if (recvError) throw recvError;
-
-  const excludeIds = (receivedShipmentIds ?? [])
-    .map((r) => r.shipment_id as string)
-    .filter(Boolean);
-
-  let query = supabase
+  const { data, error } = await supabase
     .from("shipments")
     .select(SHIPMENT_SELECT)
     .neq("status", "closed")
     .order("expected_delivery_date", { ascending: true });
-
-  const { data, error } = await query;
   if (error) throw error;
 
-  let rows = ((data ?? []) as unknown as ShipmentRow[]).map(mapShipmentRow);
-  if (excludeIds.length) {
-    rows = rows.filter((s) => !excludeIds.includes(s.id));
+  const rows = ((data ?? []) as unknown as ShipmentRow[]).map(mapShipmentRow);
+  const eligible: Shipment[] = [];
+
+  for (const shipment of rows) {
+    const { data: priorReceives, error: priorError } = await supabase
+      .from("inbound_receives")
+      .select("inbound_receive_items ( po_line_id, received_qty )")
+      .eq("shipment_id", shipment.id);
+    if (priorError) throw priorError;
+
+    const receivedByLine = new Map<string, number>();
+    for (const receive of priorReceives ?? []) {
+      const items = receive.inbound_receive_items as Array<{
+        po_line_id: string;
+        received_qty: number;
+      }> | null;
+      for (const item of items ?? []) {
+        receivedByLine.set(
+          item.po_line_id,
+          (receivedByLine.get(item.po_line_id) ?? 0) + Number(item.received_qty),
+        );
+      }
+    }
+
+    const hasRemaining = (shipment.purchase_orders ?? []).some((po) =>
+      (po.items ?? []).some((item) => {
+        const shipped = Number(item.quantity);
+        const received = receivedByLine.get(item.po_line_id) ?? 0;
+        return received < shipped;
+      }),
+    );
+
+    if (hasRemaining) {
+      eligible.push(shipment);
+    }
   }
-  return rows;
+
+  return eligible;
 }

@@ -61,7 +61,10 @@ function formatStatusLabel(status: string): string {
 export function MasterPoTimelineGantt({
   purchaseOrders,
 }: MasterPoTimelineGanttProps) {
-  const chart = buildMasterGanttChart(purchaseOrders.map(toMasterInput));
+  const chart = useMemo(
+    () => buildMasterGanttChart(purchaseOrders.map(toMasterInput)),
+    [purchaseOrders],
+  );
   const scheduledCount =
     chart?.groups.filter((group) => group.bars.length > 0).length ?? 0;
   const unscheduledCount = purchaseOrders.length - scheduledCount;
