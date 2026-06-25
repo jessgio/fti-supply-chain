@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 const franchiseColumns = ["sku_code", "sku_name", "franchise_name"];
 
@@ -26,18 +28,32 @@ interface SkuRow {
   name: string | null;
   is_bundle: boolean;
   is_active: boolean;
+  franchise_id: string | null;
   franchise_name: string | null;
 }
 
 type StatusFilter = "all" | "active" | "inactive";
 
+interface FranchiseOption {
+  id: string;
+  name: string;
+}
+
 export default function MappingsPage() {
   const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [franchises, setFranchises] = useState<FranchiseOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [addSkuCode, setAddSkuCode] = useState("");
+  const [addSkuName, setAddSkuName] = useState("");
+  const [addFranchiseId, setAddFranchiseId] = useState("");
+  const [addFranchiseName, setAddFranchiseName] = useState("");
+  const [addIsBundle, setAddIsBundle] = useState(false);
+  const [addSaving, setAddSaving] = useState(false);
+  const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
   const loadSkus = useCallback(async () => {
     setLoading(true);
@@ -57,6 +73,15 @@ export default function MappingsPage() {
   useEffect(() => {
     loadSkus();
   }, [loadSkus]);
+
+  useEffect(() => {
+    fetch("/api/metadata")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.franchises) setFranchises(data.franchises);
+      })
+      .catch(() => {});
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -97,16 +122,183 @@ export default function MappingsPage() {
     }
   }
 
+  async function handleAddSku() {
+    const sku_code = addSkuCode.trim();
+    if (!sku_code) return;
+
+    setAddSaving(true);
+    setError(null);
+    setAddSuccess(null);
+    try {
+      const body: Record<string, string | boolean> = {
+        sku_code,
+        is_bundle: addIsBundle,
+      };
+      if (addSkuName.trim()) body.name = addSkuName.trim();
+      if (!addIsBundle) {
+        if (addFranchiseName.trim()) {
+          body.franchise_name = addFranchiseName.trim();
+        } else if (addFranchiseId) {
+          body.franchise_id = addFranchiseId;
+        }
+      }
+
+      const res = await fetch("/api/skus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add SKU");
+
+      const created = data.sku as SkuRow;
+      if (created.franchise_id || created.is_bundle) {
+        setSkus((prev) =>
+          [...prev, created].sort((a, b) =>
+            a.sku_code.localeCompare(b.sku_code),
+          ),
+        );
+      }
+
+      setAddSkuCode("");
+      setAddSkuName("");
+      setAddFranchiseId("");
+      setAddFranchiseName("");
+      setAddIsBundle(false);
+
+      if (!created.franchise_id && !created.is_bundle) {
+        setAddSuccess(
+          `${created.sku_code} added. Assign a franchise to include it in forecast and this list.`,
+        );
+      } else {
+        setAddSuccess(`${created.sku_code} added.`);
+        if (addFranchiseName.trim() && created.franchise_name) {
+          setFranchises((prev) => {
+            if (prev.some((f) => f.id === created.franchise_id)) return prev;
+            return [
+              ...prev,
+              { id: created.franchise_id!, name: created.franchise_name! },
+            ].sort((a, b) => a.name.localeCompare(b.name));
+          });
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add SKU");
+    } finally {
+      setAddSaving(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-8">
       <div>
         <h1 className="text-2xl font-semibold text-stone-900">SKU mappings</h1>
         <p className="mt-1 text-stone-600">
-          Product franchises are built from single SKUs only. Mark retired SKUs
-          as inactive to keep them in historical sales and bundle rules without
-          showing them in the inventory forecast.
+          Product franchises are built from single SKUs only. Add SKUs manually
+          for new products, or upload franchise and bundle mappings from Excel.
+          Mark retired SKUs as inactive to keep them in historical sales and
+          bundle rules without showing them in the inventory forecast.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add SKU</CardTitle>
+          <CardDescription>
+            Create a SKU without uploading sales or stock files. Single SKUs
+            need a franchise to appear in forecast; bundle parents need a
+            breakdown sheet (upload or Excel) before sales split applies.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-stone-700">
+                SKU code
+              </label>
+              <Input
+                placeholder="e.g. FTI-SKU-001"
+                value={addSkuCode}
+                onChange={(e) => setAddSkuCode(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-stone-700">
+                Product name
+              </label>
+              <Input
+                placeholder="Optional — defaults to SKU code"
+                value={addSkuName}
+                onChange={(e) => setAddSkuName(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input
+              type="checkbox"
+              className="rounded border-stone-300"
+              checked={addIsBundle}
+              onChange={(e) => {
+                setAddIsBundle(e.target.checked);
+                if (e.target.checked) {
+                  setAddFranchiseId("");
+                  setAddFranchiseName("");
+                }
+              }}
+            />
+            Bundle parent SKU (no franchise)
+          </label>
+
+          {!addIsBundle && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-stone-700">
+                  Franchise
+                </label>
+                <Select
+                  value={addFranchiseId}
+                  onChange={(e) => {
+                    setAddFranchiseId(e.target.value);
+                    if (e.target.value) setAddFranchiseName("");
+                  }}
+                >
+                  <option value="">Select existing…</option>
+                  {franchises.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-stone-700">
+                  Or new franchise
+                </label>
+                <Input
+                  placeholder="Creates franchise if needed"
+                  value={addFranchiseName}
+                  disabled={Boolean(addFranchiseId)}
+                  onChange={(e) => setAddFranchiseName(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={handleAddSku}
+              disabled={addSaving || !addSkuCode.trim()}
+            >
+              <Plus className="h-4 w-4" />
+              {addSaving ? "Adding…" : "Add SKU"}
+            </Button>
+            {addSuccess && (
+              <p className="text-sm text-emerald-700">{addSuccess}</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -161,7 +353,8 @@ export default function MappingsPage() {
             <p className="text-sm text-red-600">{error}</p>
           ) : filtered.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No SKUs found. Upload franchise and bundle mappings first.
+              No SKUs found. Add a SKU above or upload franchise and bundle
+              mappings.
             </p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-stone-200">
