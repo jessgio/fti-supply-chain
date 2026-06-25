@@ -80,6 +80,21 @@ export async function requireWriteRole(): Promise<NextResponse | null> {
   return null;
 }
 
+/**
+ * Guard for read-only API routes. Requires authentication but does not
+ * restrict by role — any signed-in user can call the route.
+ * No-ops (allows) when auth is not configured so local dev keeps working.
+ */
+export async function requireReadRole(): Promise<NextResponse | null> {
+  if (!authConfigured()) return null;
+
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  return null;
+}
+
 /** Guard for supply-chain-only modules (packaging, procurement UI). */
 export async function requireSupplyChainAccess(): Promise<NextResponse | null> {
   if (!authConfigured()) return null;

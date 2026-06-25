@@ -2,7 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { deletePdFile } from "@/lib/db/product-development";
 import {
   buildTrialTimelines,
+  computeApprovalSpan,
 } from "@/lib/product-development/formula-tracker-timeline";
+import { parseDate, daysBetween } from "@/lib/utils";
 import type {
   PdFile,
   PdFormulaTrackerEntry,
@@ -18,14 +20,20 @@ async function attachBriefFileUrls(
   supabase: SupabaseClient,
   files: PdFile[],
 ): Promise<PdFile[]> {
-  return Promise.all(
-    files.map(async (file) => {
-      const { data } = await supabase.storage
-        .from("data-uploads")
-        .createSignedUrl(file.storage_path, SIGNED_URL_TTL);
-      return { ...file, download_url: data?.signedUrl ?? null };
-    }),
+  if (files.length === 0) return [];
+  const { data } = await supabase.storage
+    .from("data-uploads")
+    .createSignedUrls(
+      files.map((f) => f.storage_path),
+      SIGNED_URL_TTL,
+    );
+  const urlByPath = new Map(
+    (data ?? []).map((r) => [r.path, r.signedUrl ?? null]),
   );
+  return files.map((file) => ({
+    ...file,
+    download_url: urlByPath.get(file.storage_path) ?? null,
+  }));
 }
 
 function entryDetail(
@@ -92,31 +100,19 @@ export async function listFormulaTrackerEntries(
   const projectName =
     projectRes.data?.product_name ?? projectRes.data?.name ?? null;
 
-  const filesByEntry = groupBriefFilesByEntry(
-    (filesRes.data ?? []) as PdFile[],
-  );
+  const allFiles = (filesRes.data ?? []) as PdFile[];
+  const filesWithUrls = await attachBriefFileUrls(supabase, allFiles);
+  const filesByEntry = groupBriefFilesByEntry(filesWithUrls);
 
-  return Promise.all(
-    (entriesRes.data ?? []).map(async (entry) => {
-      const briefFiles = await attachBriefFileUrls(
-        supabase,
-        filesByEntry.get(entry.id) ?? [],
-      );
-      return entryDetail(entry as PdFormulaTrackerEntry, briefFiles, projectName);
-    }),
+  return (entriesRes.data ?? []).map((entry) =>
+    entryDetail(
+      entry as PdFormulaTrackerEntry,
+      filesByEntry.get(entry.id) ?? [],
+      projectName,
+    ),
   );
 }
 
-function parseDate(value: string | null): Date | null {
-  if (!value) return null;
-  const d = new Date(`${value}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function daysBetween(start: Date, end: Date): number {
-  const ms = end.getTime() - start.getTime();
-  return Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)));
-}
 
 function projectTimelineFromEntries(
   project: Pick<PdProject, "id" | "name" | "product_name" | "status">,
@@ -130,6 +126,7 @@ function projectTimelineFromEntries(
   const lastDate = parseDate(last);
   const totalSpanDays =
     firstDate && lastDate ? daysBetween(firstDate, lastDate) : null;
+  const approvalSpan = computeApprovalSpan(entries);
 
   return {
     project_id: project.id,
@@ -140,6 +137,9 @@ function projectTimelineFromEntries(
     first_trial_date: first,
     last_trial_date: last,
     total_span_days: totalSpanDays,
+    days_first_sample_to_approval: approvalSpan.daysFirstSampleToApproval,
+    days_last_sample_to_approval: approvalSpan.daysLastSampleToApproval,
+    approved_confirmation_date: approvalSpan.approvedConfirmationDate,
     entries: timelines.map((t) => t.entry),
   };
 }
@@ -169,23 +169,19 @@ export async function listFormulaTrackerMasterView(
   if (entriesRes.error) throw entriesRes.error;
   if (filesRes.error) throw filesRes.error;
 
-  const filesByEntry = groupBriefFilesByEntry(
-    (filesRes.data ?? []) as PdFile[],
-  );
+  const allFiles = (filesRes.data ?? []) as PdFile[];
+
+  // Batch all signed URLs for the entire master view in one storage call.
+  const filesWithUrls = await attachBriefFileUrls(supabase, allFiles);
+  const filesByEntry = groupBriefFilesByEntry(filesWithUrls);
 
   const entriesByProject = new Map<string, PdFormulaTrackerEntryDetail[]>();
-  await Promise.all(
-    (entriesRes.data ?? []).map(async (raw) => {
-      const entry = raw as PdFormulaTrackerEntry;
-      const list = entriesByProject.get(entry.project_id) ?? [];
-      const briefFiles = await attachBriefFileUrls(
-        supabase,
-        filesByEntry.get(entry.id) ?? [],
-      );
-      list.push(entryDetail(entry, briefFiles, null));
-      entriesByProject.set(entry.project_id, list);
-    }),
-  );
+  for (const raw of entriesRes.data ?? []) {
+    const entry = raw as PdFormulaTrackerEntry;
+    const list = entriesByProject.get(entry.project_id) ?? [];
+    list.push(entryDetail(entry, filesByEntry.get(entry.id) ?? [], null));
+    entriesByProject.set(entry.project_id, list);
+  }
 
   const projects = (projectsRes.data ?? []) as Pick<
     PdProject,
@@ -249,24 +245,42 @@ export async function getFormulaTrackerEntry(
   );
 }
 
-const NPD_APPROVED_VALUES = ["Approve", "Approved"];
+export const NPD_APPROVED_VALUES = ["Approved"] as const;
 
 export async function getApprovedNpdEntryForProductProject(
   supabase: SupabaseClient,
   productProjectId: string,
 ): Promise<PdFormulaTrackerEntryDetail | null> {
-  const { data: entries, error } = await supabase
-    .from("pd_formula_tracker_entries")
-    .select("id")
-    .eq("product_project_id", productProjectId)
-    .in("npd_confirmation", NPD_APPROVED_VALUES)
-    .order("confirmation_date", { ascending: false, nullsFirst: false })
-    .order("updated_at", { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  const entryId = entries?.[0]?.id;
-  if (!entryId) return null;
-  return getFormulaTrackerEntry(supabase, entryId);
+  const [entryRes, filesRes] = await Promise.all([
+    supabase
+      .from("pd_formula_tracker_entries")
+      .select("*, pd_projects!project_id(name, product_name)")
+      .eq("product_project_id", productProjectId)
+      .in("npd_confirmation", NPD_APPROVED_VALUES)
+      .order("confirmation_date", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("pd_files")
+      .select("*")
+      .eq("file_category", "brief_file")
+      .not("formula_tracker_entry_id", "is", null),
+  ]);
+  if (entryRes.error) throw entryRes.error;
+  if (!entryRes.data) return null;
+  if (filesRes.error) throw filesRes.error;
+
+  const raw = entryRes.data as PdFormulaTrackerEntry & {
+    pd_projects?: { name: string; product_name: string | null } | null;
+  };
+  const projectName = raw.pd_projects?.product_name ?? raw.pd_projects?.name ?? null;
+  const entryFiles = ((filesRes.data ?? []) as PdFile[]).filter(
+    (f) => f.formula_tracker_entry_id === raw.id,
+  );
+  const filesWithUrls = await attachBriefFileUrls(supabase, entryFiles);
+
+  return entryDetail(raw, filesWithUrls, projectName);
 }
 
 export async function createFormulaTrackerEntry(

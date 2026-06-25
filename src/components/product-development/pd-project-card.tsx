@@ -157,11 +157,11 @@ export function PdProjectCard({
                 href={`/dashboard/product-development/projects/${project.id}`}
                 className="min-w-0 flex-1"
               >
-                <h3 className="truncate font-semibold text-stone-900 hover:text-emerald-800">
+                <h3 className="break-words font-semibold leading-snug text-stone-900 hover:text-emerald-800">
                   {project.name}
                 </h3>
                 {project.product_name && project.product_name !== project.name && (
-                  <p className="mt-0.5 truncate text-xs text-stone-500">
+                  <p className="mt-0.5 break-words text-xs leading-snug text-stone-500">
                     {project.product_name}
                   </p>
                 )}

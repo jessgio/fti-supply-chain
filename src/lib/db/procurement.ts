@@ -49,6 +49,7 @@ export interface UpdatePoInput {
   other_charges?: number;
   currency?: string;
   notes?: string | null;
+  pd_project_id?: string | null;
   lines?: UpdatePoLineInput[];
 }
 
@@ -243,6 +244,7 @@ type PoRow = {
   id: string;
   po_number: string;
   supplier_id: string | null;
+  pd_project_id: string | null;
   status: PoStatus;
   order_date: string | null;
   expected_date: string | null;
@@ -346,6 +348,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     other_charges: Number(row.other_charges ?? 0),
     currency: row.currency ?? "IDR",
     notes: row.notes,
+    pd_project_id: row.pd_project_id ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     lines,
@@ -354,12 +357,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 }
 
 const PO_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name))";
 
 const PO_DETAIL_SELECT =
-  "id, po_number, supplier_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
   "suppliers(name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
@@ -505,6 +508,7 @@ export async function updatePurchaseOrder(
     headerPatch.other_charges = input.other_charges;
   if (input.currency !== undefined) headerPatch.currency = input.currency;
   if (input.notes !== undefined) headerPatch.notes = input.notes;
+  if (input.pd_project_id !== undefined) headerPatch.pd_project_id = input.pd_project_id;
 
   if (Object.keys(headerPatch).length > 1) {
     const { error } = await supabase
@@ -561,26 +565,35 @@ export async function updatePurchaseOrder(
       if (error) throw error;
     }
 
-    for (const line of input.lines) {
-      if (line.id && existingLines.some((l) => l.id === line.id)) {
-        const { error } = await supabase
-          .from("purchase_order_lines")
-          .update({
-            sku_id: line.sku_id,
-            qty_ordered: line.qty_ordered,
-            unit_cost: line.unit_cost ?? null,
-          })
-          .eq("id", line.id);
-        if (error) throw error;
-      } else if (!line.id) {
-        const { error } = await supabase.from("purchase_order_lines").insert({
-          po_id: id,
-          sku_id: line.sku_id,
-          qty_ordered: line.qty_ordered,
-          unit_cost: line.unit_cost ?? null,
-        });
-        if (error) throw error;
-      }
+    const toUpdate = input.lines
+      .filter((l) => l.id && existingLines.some((el) => el.id === l.id))
+      .map((l) => ({
+        id: l.id!,
+        po_id: id,
+        sku_id: l.sku_id,
+        qty_ordered: l.qty_ordered,
+        unit_cost: l.unit_cost ?? null,
+      }));
+    const toInsert = input.lines
+      .filter((l) => !l.id)
+      .map((l) => ({
+        po_id: id,
+        sku_id: l.sku_id,
+        qty_ordered: l.qty_ordered,
+        unit_cost: l.unit_cost ?? null,
+      }));
+
+    if (toUpdate.length > 0) {
+      const { error } = await supabase
+        .from("purchase_order_lines")
+        .upsert(toUpdate, { onConflict: "id" });
+      if (error) throw error;
+    }
+    if (toInsert.length > 0) {
+      const { error } = await supabase
+        .from("purchase_order_lines")
+        .insert(toInsert);
+      if (error) throw error;
     }
   }
 
@@ -747,10 +760,15 @@ export async function createPoPayment(
   poId: string,
   input: NewPoPaymentInput,
 ): Promise<PurchaseOrder> {
-  const po = await getPurchaseOrder(supabase, poId);
-  if (!po) throw new Error("Purchase order not found.");
+  const { data: poMeta, error: poMetaErr } = await supabase
+    .from("purchase_orders")
+    .select("id, currency")
+    .eq("id", poId)
+    .maybeSingle();
+  if (poMetaErr) throw poMetaErr;
+  if (!poMeta) throw new Error("Purchase order not found.");
 
-  const currency = input.currency ?? po.currency ?? "IDR";
+  const currency = input.currency ?? poMeta.currency ?? "IDR";
   const exchangeRate =
     currency === "IDR" ? null : (input.exchange_rate ?? null);
 
@@ -760,7 +778,7 @@ export async function createPoPayment(
       currency,
       exchange_rate: exchangeRate,
     },
-    po.currency ?? "IDR",
+    poMeta.currency ?? "IDR",
   );
 
   const requestNumber = input.payment_request_number.trim();
@@ -793,10 +811,23 @@ export async function updatePoPayment(
   paymentId: string,
   input: UpdatePoPaymentInput,
 ): Promise<PurchaseOrder> {
-  const po = await getPurchaseOrder(supabase, poId);
-  if (!po) throw new Error("Purchase order not found.");
-
-  const existing = (po.payments ?? []).find((p) => p.id === paymentId);
+  const [poMetaRes, paymentRes] = await Promise.all([
+    supabase
+      .from("purchase_orders")
+      .select("id, currency")
+      .eq("id", poId)
+      .maybeSingle(),
+    supabase
+      .from("po_payments")
+      .select("*")
+      .eq("id", paymentId)
+      .eq("po_id", poId)
+      .maybeSingle(),
+  ]);
+  if (poMetaRes.error) throw poMetaRes.error;
+  if (!poMetaRes.data) throw new Error("Purchase order not found.");
+  if (paymentRes.error) throw paymentRes.error;
+  const existing = paymentRes.data;
   if (!existing) throw new Error("Payment not found.");
 
   const currency = input.currency ?? existing.currency;
@@ -816,7 +847,7 @@ export async function updatePoPayment(
       exchange_rate: exchangeRate,
       purpose: input.purpose ?? existing.purpose,
     },
-    po.currency ?? "IDR",
+    poMetaRes.data.currency ?? "IDR",
   );
 
   const patch: Record<string, unknown> = {
@@ -857,10 +888,13 @@ export async function deletePoPayment(
   poId: string,
   paymentId: string,
 ): Promise<PurchaseOrder> {
-  const po = await getPurchaseOrder(supabase, poId);
-  if (!po) throw new Error("Purchase order not found.");
-
-  const existing = (po.payments ?? []).find((p) => p.id === paymentId);
+  const { data: existing, error: checkErr } = await supabase
+    .from("po_payments")
+    .select("id")
+    .eq("id", paymentId)
+    .eq("po_id", poId)
+    .maybeSingle();
+  if (checkErr) throw checkErr;
   if (!existing) throw new Error("Payment not found.");
 
   const { error } = await supabase

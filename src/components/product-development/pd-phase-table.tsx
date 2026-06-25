@@ -13,6 +13,8 @@ import {
   calcStartDateFromInputs,
   inferDurationDaysFromSpan,
   parseDurationText,
+  recalculateRowScheduleDates,
+  resolveDurationDaysForRow,
 } from "@/lib/product-development/duration";
 import { applyScheduleToRows } from "@/lib/product-development/schedule-form-rows";
 import { cn } from "@/lib/utils";
@@ -478,7 +480,7 @@ export function PdPhaseTable({
               const hasIncomingDeps = row.depends_on_phase_ids.length > 0;
               const hasParallelLinks = row.parallel_with_phase_ids.length > 0;
               const hasScheduleLinks = hasIncomingDeps || hasParallelLinks;
-              const durationDays = parseDurationText(row.duration_text).days;
+              const durationDays = resolveDurationDaysForRow(row);
               const startReadOnly =
                 row.is_parent ||
                 row.date_anchor === "end" ||
@@ -519,6 +521,13 @@ export function PdPhaseTable({
                     onChange={(e) => {
                       const text = e.target.value;
                       const parsed = parseDurationText(text);
+                      const nextRow = {
+                        ...row,
+                        duration_text: text,
+                        ...(parsed.impliesEffective
+                          ? { duration_mode: "effective_days" as const }
+                          : {}),
+                      };
                       updateRow(
                         row.clientId,
                         {
@@ -526,6 +535,7 @@ export function PdPhaseTable({
                           ...(parsed.impliesEffective
                             ? { duration_mode: "effective_days" as const }
                             : {}),
+                          ...recalculateRowScheduleDates(nextRow),
                         },
                         { highlight: true },
                       );
@@ -537,13 +547,17 @@ export function PdPhaseTable({
                 <td className="px-2 py-2 align-top">
                   <DurationModePicker
                     value={row.duration_mode}
-                    onChange={(mode) =>
+                    onChange={(mode) => {
+                      const nextRow = { ...row, duration_mode: mode };
                       updateRow(
                         row.clientId,
-                        { duration_mode: mode },
+                        {
+                          duration_mode: mode,
+                          ...recalculateRowScheduleDates(nextRow),
+                        },
                         { highlight: true },
-                      )
-                    }
+                      );
+                    }}
                   />
                 </td>
                 <td className="px-3 py-1.5">

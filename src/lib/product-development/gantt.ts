@@ -3,6 +3,7 @@ import {
   calculateEndDate,
   calculateStartDate,
   formatIsoDate,
+  inferDurationDaysFromSpan,
   parseDate,
   parseDurationText,
 } from "@/lib/product-development/duration";
@@ -189,7 +190,15 @@ function resolveDurationDays(phase: PdPhaseDetail): number | null {
     return phase.duration_days;
   }
   const parsed = parseDurationText(phase.duration_text ?? "");
-  return parsed.days;
+  if (parsed.days) return parsed.days;
+  if (phase.start_date && phase.end_date) {
+    return inferDurationDaysFromSpan(
+      phase.start_date,
+      phase.end_date,
+      phase.duration_mode ?? "working_days",
+    );
+  }
+  return null;
 }
 
 /** Parent phases span their children: earliest start through latest finish. */

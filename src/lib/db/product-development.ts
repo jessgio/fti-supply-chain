@@ -153,14 +153,22 @@ export async function listPdProjects(
   }
 
   const coverUrls = new Map<string, string>();
-  await Promise.all(
-    [...coverByProject.entries()].map(async ([projectId, file]) => {
-      const { data } = await supabase.storage
-        .from("data-uploads")
-        .createSignedUrl(file.storage_path, SIGNED_URL_TTL);
-      if (data?.signedUrl) coverUrls.set(projectId, data.signedUrl);
-    }),
-  );
+  const coverEntries = [...coverByProject.entries()];
+  if (coverEntries.length > 0) {
+    const { data: signedData } = await supabase.storage
+      .from("data-uploads")
+      .createSignedUrls(
+        coverEntries.map(([, file]) => file.storage_path),
+        SIGNED_URL_TTL,
+      );
+    const urlByPath = new Map(
+      (signedData ?? []).map((r) => [r.path, r.signedUrl ?? null]),
+    );
+    for (const [projectId, file] of coverEntries) {
+      const url = urlByPath.get(file.storage_path);
+      if (url) coverUrls.set(projectId, url);
+    }
+  }
 
   return projects.map((project) => {
     const projectLinks = linksByProject.get(project.id) ?? [];
@@ -187,14 +195,20 @@ async function attachFileUrls(
   supabase: SupabaseClient,
   files: PdFile[],
 ): Promise<PdFile[]> {
-  return Promise.all(
-    files.map(async (file) => {
-      const { data } = await supabase.storage
-        .from("data-uploads")
-        .createSignedUrl(file.storage_path, SIGNED_URL_TTL);
-      return { ...file, download_url: data?.signedUrl ?? null };
-    }),
+  if (files.length === 0) return [];
+  const { data } = await supabase.storage
+    .from("data-uploads")
+    .createSignedUrls(
+      files.map((f) => f.storage_path),
+      SIGNED_URL_TTL,
+    );
+  const urlByPath = new Map(
+    (data ?? []).map((r) => [r.path, r.signedUrl ?? null]),
   );
+  return files.map((file) => ({
+    ...file,
+    download_url: urlByPath.get(file.storage_path) ?? null,
+  }));
 }
 
 export async function getPdProject(

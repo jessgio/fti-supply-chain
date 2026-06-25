@@ -1,8 +1,7 @@
 import { computePdTimeline, type PdDateAnchor } from "@/lib/product-development/gantt";
 import {
   formatIsoDate,
-  inferDurationDaysFromSpan,
-  parseDurationText,
+  resolveDurationDaysForRow,
 } from "@/lib/product-development/duration";
 import type { PdPhaseDetail, PdPhaseLink } from "@/types/database";
 import type { PhaseFormRow } from "@/components/product-development/pd-phase-table";
@@ -29,16 +28,7 @@ function rowsToScheduleModel(rows: PhaseFormRow[]): {
   const alias = buildAliasMap(rows);
 
   const phases: PdPhaseDetail[] = rows.map((row, index) => {
-    const parsed = parseDurationText(row.duration_text);
-    const inferredDays =
-      !parsed.days && row.start_date && row.end_date
-        ? inferDurationDaysFromSpan(
-            row.start_date,
-            row.end_date,
-            row.duration_mode,
-          )
-        : null;
-    const durationDays = parsed.days ?? inferredDays;
+    const durationDays = resolveDurationDaysForRow(row);
     return {
       id: rowKey(row),
       project_id: "",

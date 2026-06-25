@@ -35,6 +35,15 @@ export function normalizeWorkingStart(d: Date): Date {
   return next;
 }
 
+/** Move back to the previous weekday when end lands on a weekend (working-day schedules). */
+export function normalizeWorkingEnd(d: Date): Date {
+  const next = new Date(d);
+  while (!isWeekday(next)) {
+    next.setDate(next.getDate() - 1);
+  }
+  return next;
+}
+
 /**
  * Add N effective (calendar) days inclusively.
  * Duration 1 → end is the same day as start.
@@ -90,7 +99,7 @@ export function subtractEffectiveDays(end: Date, durationDays: number): Date {
  */
 export function subtractWorkingDays(end: Date, durationDays: number): Date {
   if (durationDays <= 0) return new Date(end);
-  let current = new Date(end);
+  let current = normalizeWorkingEnd(new Date(end));
   let remaining = durationDays - 1;
   while (remaining > 0) {
     current = subtractCalendarDays(current, 1);
@@ -174,6 +183,72 @@ export function calcStartDateFromInputs(
   if (!days || days < 1) return null;
 
   return formatIsoDate(calculateStartDate(end, days, mode));
+}
+
+/** Resolve duration days from explicit text or infer from an existing start/end span. */
+export function resolveDurationDaysForRow(input: {
+  duration_text: string;
+  duration_mode: PdDurationMode;
+  start_date: string | null;
+  end_date: string | null;
+}): number | null {
+  const parsed = parseDurationText(input.duration_text);
+  if (parsed.days) return parsed.days;
+  if (input.start_date && input.end_date) {
+    return inferDurationDaysFromSpan(
+      input.start_date,
+      input.end_date,
+      input.duration_mode,
+    );
+  }
+  return null;
+}
+
+/**
+ * Recalculate the non-anchored schedule date from duration + day type.
+ * End-anchored rows update start; all others update finish from start when possible.
+ */
+export function recalculateRowScheduleDates(row: {
+  start_date: string | null;
+  end_date: string | null;
+  duration_text: string;
+  duration_mode: PdDurationMode;
+  date_anchor?: "start" | "end" | null;
+}): Partial<{ start_date: string; end_date: string }> {
+  const days = resolveDurationDaysForRow(row);
+  if (!days || days < 1) return {};
+
+  if (row.date_anchor === "end" && row.end_date) {
+    const start = calcStartDateFromInputs(
+      row.end_date,
+      row.duration_text,
+      days,
+      row.duration_mode,
+    );
+    return start ? { start_date: start } : {};
+  }
+
+  if (row.start_date) {
+    const end = calcEndDateFromInputs(
+      row.start_date,
+      row.duration_text,
+      days,
+      row.duration_mode,
+    );
+    return end ? { end_date: end } : {};
+  }
+
+  if (row.end_date) {
+    const start = calcStartDateFromInputs(
+      row.end_date,
+      row.duration_text,
+      days,
+      row.duration_mode,
+    );
+    return start ? { start_date: start } : {};
+  }
+
+  return {};
 }
 
 /** Infer inclusive duration days from an existing start/end pair. */

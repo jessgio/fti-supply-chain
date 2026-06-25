@@ -18,10 +18,56 @@ export function pctChange(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
-export function formatCurrency(value: number): string {
+// ─── date helpers ─────────────────────────────────────────────────────────────
+
+/** Parse an ISO date string (YYYY-MM-DD or ISO timestamp) to a local Date. Returns null on invalid input. */
+export function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value.length === 10 ? `${value}T00:00:00` : value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Whole calendar days between two dates (always >= 0). */
+export function daysBetween(start: Date, end: Date): number {
+  const ms = end.getTime() - start.getTime();
+  return Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)));
+}
+
+/**
+ * Format an ISO date string as "12 Jun 2026".
+ * Returns "—" for null/undefined/invalid.
+ */
+export function formatDate(value: string | null | undefined): string {
+  const d = parseDate(value);
+  if (!d) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/**
+ * Format an ISO date string as "12/06/26" (compact, for table cells).
+ * Returns "—" for null/undefined/invalid.
+ */
+export function formatDateShort(value: string | null | undefined): string {
+  const d = parseDate(value);
+  if (!d) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
+}
+
+// ─── number / currency helpers ────────────────────────────────────────────────
+
+/** Format IDR (default) or any currency. Falls back to IDR if currency is unknown. */
+export function formatCurrency(value: number, currency = "IDR"): string {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
-    currency: "IDR",
+    currency,
     maximumFractionDigits: 0,
   }).format(value);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,9 @@ import {
   buildTrialTimelines,
   formatDateRange,
   formatDurationDays,
+  type FormulaTrackerTrialTimeline,
 } from "@/lib/product-development/formula-tracker-timeline";
+import { formatDate } from "@/lib/utils";
 import type { PdFormulaTrackerMasterProject } from "@/types/database";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -85,14 +87,24 @@ function TrialDetailPanel({
           <ul className="mt-1 space-y-1">
             {entry.brief_files.map((file) => (
               <li key={file.id}>
-                <a
-                  href={file.download_url ?? "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-700 hover:underline"
-                >
-                  {file.file_name}
-                </a>
+                {file.download_url ? (
+                  <a
+                    href={file.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={file.file_name}
+                    className="text-emerald-700 hover:underline"
+                  >
+                    {file.file_name}
+                  </a>
+                ) : (
+                  <span
+                    title={`${file.file_name} — link unavailable`}
+                    className="text-stone-400 line-through"
+                  >
+                    {file.file_name}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -129,6 +141,105 @@ function TrialDetailPanel({
     </div>
   );
 }
+
+const ProjectTrialRows = memo(function ProjectTrialRows({
+  projectId,
+  entries,
+  expandedTrials,
+  toggleTrial,
+}: {
+  projectId: string;
+  entries: PdFormulaTrackerMasterProject["entries"];
+  expandedTrials: Set<string>;
+  toggleTrial: (id: string) => void;
+}) {
+  const timelines = useMemo(() => buildTrialTimelines(entries), [entries]);
+
+  if (timelines.length === 0) {
+    return (
+      <tr className="border-b border-stone-100 bg-stone-50/20">
+        <td />
+        <td colSpan={8} className="py-4 pl-2 text-sm text-stone-500">
+          No sample trials recorded for this project yet.
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      {timelines.map((timeline: FormulaTrackerTrialTimeline) => {
+        const { entry } = timeline;
+        const trialOpen = expandedTrials.has(entry.id);
+        const isLatest =
+          timeline.daysUntilNext == null && entry.sample_date != null;
+
+        return (
+          <Fragment key={entry.id}>
+            <tr className="border-b border-stone-100 hover:bg-stone-50/60">
+              <td className="py-2.5 pl-4">
+                <ExpandButton
+                  open={trialOpen}
+                  onClick={() => toggleTrial(entry.id)}
+                  label={trialOpen ? "Collapse trial details" : "Expand trial details"}
+                />
+              </td>
+              <td className="py-2.5 pr-4">
+                <span className="font-medium text-stone-800">
+                  {entry.sample_trial_no ?? "Untitled trial"}
+                </span>
+                {entry.brief_concept && (
+                  <p
+                    className="mt-0.5 line-clamp-1 text-xs text-stone-500"
+                    title={entry.brief_concept}
+                  >
+                    {entry.brief_concept}
+                  </p>
+                )}
+              </td>
+              <td className="py-2.5 pr-4 text-stone-600">
+                {entry.product_name ?? "—"}
+              </td>
+              <td className="py-2.5 pr-4 text-stone-600">
+                {formatDate(entry.sample_date)}
+              </td>
+              <td className="py-2.5 pr-4 text-stone-600">
+                {formatDurationDays(timeline.daysSincePrevious)}
+              </td>
+              <td className="py-2.5 pr-4 text-stone-600">
+                {timeline.daysUntilNext != null
+                  ? formatDurationDays(timeline.daysUntilNext)
+                  : isLatest
+                    ? `${formatDurationDays(timeline.cycleDays)} (ongoing)`
+                    : "—"}
+              </td>
+              <td className="py-2.5 pr-4 text-stone-600">{entry.lab_no ?? "—"}</td>
+              <td className="py-2.5 pr-4 text-stone-600">
+                {entry.npd_confirmation ?? "—"}
+              </td>
+              <td className="py-2.5 text-right">
+                <Link
+                  href={`/dashboard/product-development/formula-tracker/${projectId}/${entry.id}`}
+                  className="text-xs font-medium text-emerald-700 hover:underline"
+                >
+                  Edit
+                </Link>
+              </td>
+            </tr>
+            {trialOpen && (
+              <tr className="border-b border-stone-100 bg-stone-50/30">
+                <td />
+                <td colSpan={8} className="py-3 pr-4 pl-2">
+                  <TrialDetailPanel entry={entry} projectId={projectId} />
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+});
 
 interface FormulaTrackerMasterTableProps {
   highlightProjectId?: string;
@@ -319,7 +430,6 @@ export function FormulaTrackerMasterTable({
                 <tbody>
                   {filtered.map((project) => {
                     const projectOpen = expandedProjects.has(project.project_id);
-                    const timelines = buildTrialTimelines(project.entries);
 
                     return (
                       <Fragment key={project.project_id}>
@@ -384,97 +494,14 @@ export function FormulaTrackerMasterTable({
                           </td>
                         </tr>
 
-                        {projectOpen &&
-                          (timelines.length === 0 ? (
-                            <tr className="border-b border-stone-100 bg-stone-50/20">
-                              <td />
-                              <td colSpan={8} className="py-4 pl-2 text-sm text-stone-500">
-                                No sample trials recorded for this project yet.
-                              </td>
-                            </tr>
-                          ) : (
-                            timelines.map((timeline) => {
-                              const { entry } = timeline;
-                              const trialOpen = expandedTrials.has(entry.id);
-                              const isLatest =
-                                timeline.daysUntilNext == null &&
-                                entry.sample_date != null;
-
-                              return (
-                                <Fragment key={entry.id}>
-                                  <tr className="border-b border-stone-100 hover:bg-stone-50/60">
-                                    <td className="py-2.5 pl-4">
-                                      <ExpandButton
-                                        open={trialOpen}
-                                        onClick={() => toggleTrial(entry.id)}
-                                        label={
-                                          trialOpen
-                                            ? "Collapse trial details"
-                                            : "Expand trial details"
-                                        }
-                                      />
-                                    </td>
-                                    <td className="py-2.5 pr-4">
-                                      <span className="font-medium text-stone-800">
-                                        {entry.sample_trial_no ??
-                                          "Untitled trial"}
-                                      </span>
-                                      {entry.brief_concept && (
-                                        <p className="mt-0.5 line-clamp-1 text-xs text-stone-500">
-                                          {entry.brief_concept}
-                                        </p>
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {entry.product_name ?? "—"}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {entry.sample_date ?? "—"}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {formatDurationDays(
-                                        timeline.daysSincePrevious,
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {timeline.daysUntilNext != null
-                                        ? formatDurationDays(
-                                            timeline.daysUntilNext,
-                                          )
-                                        : isLatest
-                                          ? `${formatDurationDays(timeline.cycleDays)} (ongoing)`
-                                          : "—"}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {entry.lab_no ?? "—"}
-                                    </td>
-                                    <td className="py-2.5 pr-4 text-stone-600">
-                                      {entry.npd_confirmation ?? "—"}
-                                    </td>
-                                    <td className="py-2.5 text-right">
-                                      <Link
-                                        href={`/dashboard/product-development/formula-tracker/${project.project_id}/${entry.id}`}
-                                        className="text-xs font-medium text-emerald-700 hover:underline"
-                                      >
-                                        Edit
-                                      </Link>
-                                    </td>
-                                  </tr>
-                                  {trialOpen && (
-                                    <tr className="border-b border-stone-100 bg-stone-50/30">
-                                      <td />
-                                      <td colSpan={8} className="py-3 pr-4 pl-2">
-                                        <TrialDetailPanel
-                                          entry={entry}
-                                          projectId={project.project_id}
-                                        />
-                                      </td>
-                                    </tr>
-                                  )}
-                                </Fragment>
-                              );
-                            })
-                          ))}
+                        {projectOpen && (
+                          <ProjectTrialRows
+                            projectId={project.project_id}
+                            entries={project.entries}
+                            expandedTrials={expandedTrials}
+                            toggleTrial={toggleTrial}
+                          />
+                        )}
                       </Fragment>
                     );
                   })}

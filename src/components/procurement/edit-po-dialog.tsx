@@ -12,6 +12,10 @@ import {
   PO_CURRENCIES,
 } from "@/lib/procurement/currencies";
 import { DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
+import {
+  STATUS_LABELS,
+  STATUS_FLOW,
+} from "@/lib/procurement/po-status";
 import type { PoStatus, PurchaseOrder, Supplier } from "@/types/database";
 
 export interface PoSkuOption {
@@ -31,15 +35,6 @@ interface DraftLine {
   is_closed?: boolean;
 }
 
-const STATUS_LABELS: Record<PoStatus, string> = {
-  planned: "Planned",
-  ordered: "Ordered",
-  in_transit: "In transit",
-  received: "Received",
-  cancelled: "Cancelled",
-};
-
-const STATUS_FLOW: PoStatus[] = ["planned", "ordered", "in_transit", "received"];
 
 export function EditPoDialog({
   po,

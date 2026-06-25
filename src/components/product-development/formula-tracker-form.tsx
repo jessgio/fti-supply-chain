@@ -114,7 +114,7 @@ function SingleSelect({
 const MAIN_FEEDBACK_OPTIONS = ["Approved", "Revise", "HOLD"] as const;
 const REVIEW_OPTIONS = ["Approved", "Revise"] as const;
 const BENCHMARK_CONFIRM_OPTIONS = ["Yes", "No"] as const;
-const NPD_CONFIRMATION_OPTIONS = ["Approve", "Revise", "HOLD"] as const;
+const NPD_CONFIRMATION_OPTIONS = ["Approved", "Revise", "HOLD"] as const;
 const BENCHMARK_CHANGED_FROM_PREVIOUS_OPTIONS = [
   "Yes",
   "No",
@@ -263,54 +263,61 @@ export function FormulaTrackerFormPage({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    let active = true;
     setLoading(true);
     setError(null);
-    try {
-      const [projectsRes, entryRes] = await Promise.all([
-        fetch("/api/product-development/projects"),
-        isNew
-          ? Promise.resolve(null)
-          : fetch(`/api/product-development/formula-tracker/${entryId}`),
-      ]);
 
-      const projectsData = await projectsRes.json();
-      if (!projectsRes.ok) {
-        throw new Error(projectsData.error ?? "Failed to load project");
-      }
+    async function load() {
+      try {
+        const [projectsRes, entryRes] = await Promise.all([
+          fetch("/api/product-development/projects"),
+          isNew
+            ? Promise.resolve(null)
+            : fetch(`/api/product-development/formula-tracker/${entryId}`),
+        ]);
 
-      const allProjects = (projectsData.projects as PdProjectSummary[]) ?? [];
-      const ongoing = allProjects.filter(isOngoingPdProject);
-      setOngoingProjects(ongoing);
-
-      const matched = allProjects.find((p) => p.id === projectId);
-      if (!matched) throw new Error("Project not found");
-      setProject(matched);
-
-      if (isNew) {
-        setForm({
-          ...EMPTY_FORM_STATE,
-          product_project_id: matched.id,
-        });
-      } else if (entryRes) {
-        const entryData = await entryRes.json();
-        if (!entryRes.ok) {
-          throw new Error(entryData.error ?? "Failed to load entry");
+        const projectsData = await projectsRes.json();
+        if (!projectsRes.ok) {
+          throw new Error(projectsData.error ?? "Failed to load project");
         }
-        const entry = entryData.entry as PdFormulaTrackerEntryDetail;
-        setForm(entryToFormState(entry, allProjects));
-        setBriefFiles(entry.brief_files ?? []);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, entryId, isNew]);
 
-  useEffect(() => {
+        const allProjects = (projectsData.projects as PdProjectSummary[]) ?? [];
+        const ongoing = allProjects.filter(isOngoingPdProject);
+
+        if (!active) return;
+        setOngoingProjects(ongoing);
+
+        const matched = allProjects.find((p) => p.id === projectId);
+        if (!matched) throw new Error("Project not found");
+        setProject(matched);
+
+        if (isNew) {
+          setForm({
+            ...EMPTY_FORM_STATE,
+            product_project_id: matched.id,
+          });
+        } else if (entryRes) {
+          const entryData = await entryRes.json();
+          if (!entryRes.ok) {
+            throw new Error(entryData.error ?? "Failed to load entry");
+          }
+          const entry = entryData.entry as PdFormulaTrackerEntryDetail;
+          if (!active) return;
+          setForm(entryToFormState(entry, allProjects));
+          setBriefFiles(entry.brief_files ?? []);
+        }
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
     load();
-  }, [load]);
+    return () => { active = false; };
+  }, [projectId, entryId, isNew]);
 
   function updateField<K extends keyof FormulaTrackerFormState>(
     key: K,
@@ -440,7 +447,9 @@ export function FormulaTrackerFormPage({
       setPendingBriefFiles((prev) => [...prev, ...files]);
       return;
     }
-    void uploadBriefFilesToEntry(entryId!, files);
+    uploadBriefFilesToEntry(entryId!, files).catch((err) => {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    });
   }
 
   function handleBriefFileDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -670,14 +679,24 @@ export function FormulaTrackerFormPage({
                           key={file.id}
                           className="flex items-center justify-between gap-2 text-xs"
                         >
-                          <a
-                            href={file.download_url ?? "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-w-0 truncate text-emerald-700 hover:underline"
-                          >
-                            {file.file_name}
-                          </a>
+                          {file.download_url ? (
+                            <a
+                              href={file.download_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={file.file_name}
+                              className="min-w-0 truncate text-emerald-700 hover:underline"
+                            >
+                              {file.file_name}
+                            </a>
+                          ) : (
+                            <span
+                              title={`${file.file_name} — link unavailable`}
+                              className="min-w-0 truncate text-stone-400 line-through"
+                            >
+                              {file.file_name}
+                            </span>
+                          )}
                           {!isNew && (
                             <button
                               type="button"

@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
+import { requireReadRole } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const denied = await requireReadRole();
+    if (denied) return denied;
+
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("skus")

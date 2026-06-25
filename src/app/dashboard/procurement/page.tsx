@@ -55,6 +55,13 @@ import {
 } from "@/lib/procurement/po-totals";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import { formatSupplierPoNotes } from "@/lib/procurement/supplier-po-notes";
+import {
+  STATUS_LABELS,
+  STATUS_STYLES,
+  STATUS_FLOW,
+  nextStatus,
+  downloadPoPdf,
+} from "@/lib/procurement/po-status";
 import type {
   CompanySettings,
   PoPayment,
@@ -70,24 +77,6 @@ import {
 } from "@/lib/forecast/demand";
 
 type SkuOption = PoSkuOption;
-
-const STATUS_LABELS: Record<PoStatus, string> = {
-  planned: "Planned",
-  ordered: "Ordered",
-  in_transit: "In transit",
-  received: "Received",
-  cancelled: "Cancelled",
-};
-
-const STATUS_STYLES: Record<PoStatus, string> = {
-  planned: "bg-stone-100 text-stone-700",
-  ordered: "bg-sky-100 text-sky-800",
-  in_transit: "bg-amber-100 text-amber-800",
-  received: "bg-emerald-100 text-emerald-800",
-  cancelled: "bg-rose-100 text-rose-700",
-};
-
-const STATUS_FLOW: PoStatus[] = ["planned", "ordered", "in_transit", "received"];
 
 function StatusBadge({ status }: { status: PoStatus }) {
   return <Badge className={STATUS_STYLES[status]}>{STATUS_LABELS[status]}</Badge>;
@@ -157,22 +146,6 @@ function PoInvoiceTotalsView({
   );
 }
 
-async function downloadPoPdf(poId: string, poNumber: string) {
-  const res = await fetch(`/api/procurement/pos/${poId}/pdf`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(
-      (data as { error?: string }).error ?? "Failed to generate PDF",
-    );
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${poNumber}.pdf`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 function ProcurementInner() {
   const searchParams = useSearchParams();
@@ -2167,11 +2140,6 @@ function PoDetailDialog({
   );
 }
 
-function nextStatus(status: PoStatus): PoStatus | null {
-  const idx = STATUS_FLOW.indexOf(status);
-  if (idx < 0 || idx >= STATUS_FLOW.length - 1) return null;
-  return STATUS_FLOW[idx + 1];
-}
 
 function CompanySettingsDialog({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<CompanySettings | null>(null);

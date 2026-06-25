@@ -10,11 +10,14 @@ import { isValidPoCurrency } from "@/lib/procurement/currencies";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { computeOpenPoValueIdr } from "@/lib/procurement/open-po-value";
 import { errorMessage } from "@/lib/errors";
-import { requireWriteRole } from "@/lib/auth";
+import { requireReadRole, requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
 
 export async function GET(request: Request) {
   try {
+    const denied = await requireReadRole();
+    if (denied) return denied;
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") as PoStatus | null;
     const includeOpenValue = searchParams.get("include") === "open_value";

@@ -28,7 +28,13 @@ import {
   computePoInvoiceTotals,
   poLineOpenQty,
 } from "@/lib/procurement/po-totals";
-import { formatNumber } from "@/lib/utils";
+import {
+  STATUS_LABELS,
+  STATUS_STYLES,
+  nextStatus,
+  downloadPoPdf,
+} from "@/lib/procurement/po-status";
+import { formatNumber, formatDate } from "@/lib/utils";
 import type {
   PoStatus,
   PoTimelineEntry,
@@ -36,44 +42,6 @@ import type {
   ShipmentLineAllocation,
   Supplier,
 } from "@/types/database";
-
-const STATUS_LABELS: Record<PoStatus, string> = {
-  planned: "Planned",
-  ordered: "Ordered",
-  in_transit: "In transit",
-  received: "Received",
-  cancelled: "Cancelled",
-};
-
-const STATUS_STYLES: Record<PoStatus, string> = {
-  planned: "bg-stone-100 text-stone-700",
-  ordered: "bg-sky-100 text-sky-800",
-  in_transit: "bg-amber-100 text-amber-800",
-  received: "bg-emerald-100 text-emerald-800",
-  cancelled: "bg-rose-100 text-rose-700",
-};
-
-const STATUS_FLOW: PoStatus[] = ["planned", "ordered", "in_transit", "received"];
-
-function nextStatus(status: PoStatus): PoStatus | null {
-  const idx = STATUS_FLOW.indexOf(status);
-  return idx >= 0 && idx < STATUS_FLOW.length - 1 ? STATUS_FLOW[idx + 1] : null;
-}
-
-async function downloadPoPdf(poId: string, poNumber: string) {
-  const res = await fetch(`/api/procurement/pos/${poId}/pdf`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error((data as { error?: string }).error ?? "Failed to generate PDF");
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${poNumber}.pdf`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 export default function PurchaseOrderPage() {
   const params = useParams();
@@ -90,14 +58,14 @@ export default function PurchaseOrderPage() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
-  const loadPo = useCallback(async () => {
+  const loadPo = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
       const [poRes, timelineRes, allocRes] = await Promise.all([
-        fetch(`/api/procurement/pos/${poId}`),
-        fetch(`/api/procurement/pos/${poId}/timeline`),
-        fetch(`/api/shipments/allocations?po_id=${poId}`),
+        fetch(`/api/procurement/pos/${poId}`, { signal }),
+        fetch(`/api/procurement/pos/${poId}/timeline`, { signal }),
+        fetch(`/api/shipments/allocations?po_id=${poId}`, { signal }),
       ]);
       const poData = await poRes.json();
       const timelineData = await timelineRes.json();
@@ -108,6 +76,7 @@ export default function PurchaseOrderPage() {
       setTimeline(timelineData.entry ?? null);
       setAllocations(allocData.allocations ?? []);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       setLoading(false);
@@ -115,7 +84,9 @@ export default function PurchaseOrderPage() {
   }, [poId]);
 
   useEffect(() => {
-    void loadPo();
+    const controller = new AbortController();
+    void loadPo(controller.signal);
+    return () => controller.abort();
   }, [loadPo]);
 
   useEffect(() => {
@@ -165,7 +136,6 @@ export default function PurchaseOrderPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
       setPo(data.purchaseOrder);
-      await loadPo();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -211,7 +181,7 @@ export default function PurchaseOrderPage() {
             <h1 className="text-2xl font-semibold text-stone-900">{po.po_number}</h1>
             <p className="mt-1 text-sm text-stone-600">
               {po.supplier_name ?? "No supplier"} · {po.currency ?? DEFAULT_PO_CURRENCY}
-              {po.expected_date ? ` · Expected ${po.expected_date}` : ""}
+              {po.expected_date ? ` · Expected ${formatDate(po.expected_date)}` : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

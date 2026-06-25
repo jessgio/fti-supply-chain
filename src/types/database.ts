@@ -285,6 +285,8 @@ export interface PurchaseOrder {
   other_charges: number;
   currency: string;
   notes: string | null;
+  /** Optional FK to a pd_projects row — links this PO to a product development launch. */
+  pd_project_id: string | null;
   created_at?: string;
   updated_at?: string;
   lines?: PurchaseOrderLine[];
@@ -938,5 +940,11 @@ export interface PdFormulaTrackerMasterProject {
   first_trial_date: string | null;
   last_trial_date: string | null;
   total_span_days: number | null;
+  /** Days from first sample_date to the latest approved confirmation_date, if any. */
+  days_first_sample_to_approval: number | null;
+  /** Days from last sample_date before approval to the approved confirmation_date. */
+  days_last_sample_to_approval: number | null;
+  /** The confirmation_date of the most recent approved entry, if any. */
+  approved_confirmation_date: string | null;
   entries: PdFormulaTrackerEntryDetail[];
 }
