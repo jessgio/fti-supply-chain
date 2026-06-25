@@ -147,7 +147,13 @@ function PackagingSectionEdit({
         {title}
       </h4>
       <div className="space-y-4">
-        {sectionRows.map((row) => (
+        {sectionRows.map((row) => {
+          const fileRowKey = row.fileRowKey;
+          const assetFile = fileRowKey
+            ? packagingAssetFile(files, row.section, fileRowKey)
+            : null;
+
+          return (
           <div
             key={`${row.section}-${row.rowKey}`}
             className="space-y-3 rounded-lg border border-stone-200 bg-stone-50/50 p-3"
@@ -171,7 +177,7 @@ function PackagingSectionEdit({
                   />
                 </div>
               )}
-              {row.fileRowKey && (
+              {fileRowKey && (
                 <div>
                   <PdMasterFileField
                     label={
@@ -179,21 +185,18 @@ function PackagingSectionEdit({
                         ? "Details (file)"
                         : "Details"
                     }
-                    file={packagingAssetFile(files, row.section, row.fileRowKey)}
+                    file={assetFile}
                     editable
-                    compact={!packagingAssetFile(files, row.section, row.fileRowKey)}
+                    compact={!assetFile}
                     uploading={
-                      uploadingPackagingKey === uploadKey(row.section, row.fileRowKey)
+                      uploadingPackagingKey === uploadKey(row.section, fileRowKey)
                     }
                     onUpload={(file) =>
-                      void onUploadAssetFile(row.section, row.fileRowKey!, file)
+                      void onUploadAssetFile(row.section, fileRowKey, file)
                     }
                     onDelete={
-                      packagingAssetFile(files, row.section, row.fileRowKey)
-                        ? () =>
-                            void onDeleteFile(
-                              packagingAssetFile(files, row.section, row.fileRowKey)!.id,
-                            )
+                      assetFile
+                        ? () => void onDeleteFile(assetFile.id)
                         : undefined
                     }
                   />
@@ -206,7 +209,8 @@ function PackagingSectionEdit({
               onUpdateField={onUpdateField}
             />
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
