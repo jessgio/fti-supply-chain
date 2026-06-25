@@ -99,10 +99,14 @@ export function createDefaultPhases(): PhaseFormRow[] {
   return rows;
 }
 
-export function phasesToInput(rows: PhaseFormRow[]): PdPhaseInput[] {
+export function phasesToInput(
+  rows: PhaseFormRow[],
+  options?: { scheduleOnly?: boolean },
+): PdPhaseInput[] {
+  const scheduleOnly = options?.scheduleOnly ?? false;
   return rows.map((row, index) => {
     const parsed = parseDurationText(row.duration_text);
-    return {
+    const input: PdPhaseInput = {
       id: row.id,
       client_id: row.clientId,
       name: row.name,
@@ -117,9 +121,12 @@ export function phasesToInput(rows: PhaseFormRow[]): PdPhaseInput[] {
       duration_days: parsed.days,
       duration_mode: row.duration_mode,
       status: row.status,
-      pic_profile_ids: row.pic_profile_ids,
-      components: row.components,
     };
+    if (!scheduleOnly) {
+      input.pic_profile_ids = row.pic_profile_ids;
+      input.components = row.components;
+    }
+    return input;
   });
 }
 

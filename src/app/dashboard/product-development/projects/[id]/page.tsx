@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -139,6 +139,18 @@ export default function PdProjectDetailPage() {
   const [editPhases, setEditPhases] = useState<PhaseFormRow[]>([]);
   const [masterForm, setMasterForm] = useState<MasterFormState>({});
   const [cycleDrafts, setCycleDrafts] = useState<Record<string, string>>({});
+  const editFormTopRef = useRef<HTMLDivElement>(null);
+
+  const applyProjectToState = useCallback((p: PdProjectDetail) => {
+    setProject(p);
+    setEditPhases(projectPhasesToFormRows(p.phases));
+    setMasterForm(p);
+    setCycleDrafts(
+      Object.fromEntries(
+        p.phases.map((ph) => [ph.id, ph.cycle_notes ?? ""]),
+      ),
+    );
+  }, []);
 
   const loadProject = useCallback(async () => {
     setLoading(true);
@@ -156,14 +168,7 @@ export default function PdProjectDetailPage() {
         throw new Error(projectData.error ?? "Failed to load project");
       }
       const p = projectData.project as PdProjectDetail;
-      setProject(p);
-      setEditPhases(projectPhasesToFormRows(p.phases));
-      setMasterForm(p);
-      setCycleDrafts(
-        Object.fromEntries(
-          p.phases.map((ph) => [ph.id, ph.cycle_notes ?? ""]),
-        ),
-      );
+      applyProjectToState(p);
       if (profilesRes.ok) setProfiles(profilesData.profiles ?? []);
       if (suppliersRes.ok) setSuppliers(suppliersData.suppliers ?? []);
     } catch (err) {
@@ -171,7 +176,7 @@ export default function PdProjectDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, applyProjectToState]);
 
   useEffect(() => {
     loadProject();
@@ -202,8 +207,7 @@ export default function PdProjectDetailPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      setProject(data.project);
-      await loadProject();
+      applyProjectToState(data.project as PdProjectDetail);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -212,8 +216,25 @@ export default function PdProjectDetailPage() {
   }
 
   async function savePhases() {
-    await saveProject({ phases: phasesToInput(editPhases) });
-    switchTab("lifecycle");
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/product-development/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phases: phasesToInput(editPhases, { scheduleOnly: true }),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      applyProjectToState(data.project as PdProjectDetail);
+      editFormTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveMasterView() {
@@ -1645,7 +1666,7 @@ export default function PdProjectDetailPage() {
       )}
 
       {activeTab === "edit" && (
-        <div className="space-y-4">
+        <div ref={editFormTopRef} className="space-y-4 scroll-mt-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Edit schedule</CardTitle>

@@ -586,8 +586,7 @@ async function upsertPhases(
     return null;
   }
 
-  // Pass 1: insert/update phases without dependency FKs (client ids are not in DB yet).
-  for (const [index, phase] of phases.entries()) {
+  function buildPhaseRow(phase: PdPhaseInput, index: number) {
     const parsedDuration = parseDurationText(phase.duration_text ?? "");
     const durationDays =
       phase.duration_days ?? parsedDuration.days ?? null;
@@ -595,7 +594,7 @@ async function upsertPhases(
       phase.duration_mode ??
       (parsedDuration.impliesEffective ? "effective_days" : "working_days");
 
-    const phaseRow = {
+    return {
       project_id: projectId,
       name: phase.name,
       description: phase.description ?? null,
@@ -610,66 +609,89 @@ async function upsertPhases(
       duration_mode: durationMode,
       status: phase.status ?? "not_started",
     };
+  }
 
-    let phaseId = phase.id;
-    if (phaseId && existingIds.has(phaseId)) {
-      const { error } = await supabase
-        .from("pd_phases")
-        .update({ ...phaseRow, updated_at: new Date().toISOString() })
-        .eq("id", phaseId);
-      if (error) throw error;
-    } else {
-      const { data: inserted, error } = await supabase
-        .from("pd_phases")
-        .insert(phaseRow)
-        .select("id")
-        .single();
-      if (error) throw error;
-      phaseId = inserted.id;
-    }
-
-    if (!phaseId) {
-      throw new Error("Failed to resolve phase id");
-    }
-
+  function registerPhaseId(phase: PdPhaseInput, phaseId: string) {
     if (phase.client_id) idMap.set(phase.client_id, phaseId);
     if (phase.id) idMap.set(phase.id, phaseId);
     idMap.set(phaseId, phaseId);
+  }
 
-    await supabase.from("pd_phase_pics").delete().eq("phase_id", phaseId);
-    if (phase.pic_profile_ids?.length) {
-      const { error } = await supabase.from("pd_phase_pics").insert(
-        phase.pic_profile_ids.map((profileId) => ({
-          phase_id: phaseId,
-          profile_id: profileId,
-        })),
-      );
+  const updatedAt = new Date().toISOString();
+
+  // Pass 1a: update existing phases in parallel (no dependency FKs yet).
+  await Promise.all(
+    phases.map(async (phase, index) => {
+      if (!phase.id || !existingIds.has(phase.id)) return;
+      const { error } = await supabase
+        .from("pd_phases")
+        .update({ ...buildPhaseRow(phase, index), updated_at: updatedAt })
+        .eq("id", phase.id);
       if (error) throw error;
+    }),
+  );
+
+  // Pass 1b: insert new phases sequentially so client ids map to DB ids.
+  for (const [index, phase] of phases.entries()) {
+    if (phase.id && existingIds.has(phase.id)) {
+      registerPhaseId(phase, phase.id);
+      continue;
     }
 
-    if (phase.components) {
-      await upsertComponents(supabase, phaseId, phase.components);
-    }
-  }
-
-  // Pass 2: resolve hierarchy refs to real phase ids.
-  for (const phase of phases) {
-    const phaseId = resolvePhaseRef(phase.id ?? phase.client_id);
-    if (!phaseId) continue;
-
-    const parentId = resolvePhaseRef(phase.parent_phase_id);
-    const firstDep = resolvePhaseRef(phase.depends_on_phase_ids?.[0]);
-
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from("pd_phases")
-      .update({
-        parent_phase_id: parentId,
-        depends_on_phase_id: firstDep,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", phaseId);
+      .insert(buildPhaseRow(phase, index))
+      .select("id")
+      .single();
     if (error) throw error;
+    registerPhaseId(phase, inserted.id);
   }
+
+  // Pass 1c: pics and components only when the client sends them.
+  await Promise.all(
+    phases.map(async (phase) => {
+      const phaseId = resolvePhaseRef(phase.id ?? phase.client_id);
+      if (!phaseId) return;
+
+      if (phase.pic_profile_ids !== undefined) {
+        await supabase.from("pd_phase_pics").delete().eq("phase_id", phaseId);
+        if (phase.pic_profile_ids.length > 0) {
+          const { error } = await supabase.from("pd_phase_pics").insert(
+            phase.pic_profile_ids.map((profileId) => ({
+              phase_id: phaseId,
+              profile_id: profileId,
+            })),
+          );
+          if (error) throw error;
+        }
+      }
+
+      if (phase.components !== undefined) {
+        await upsertComponents(supabase, phaseId, phase.components);
+      }
+    }),
+  );
+
+  // Pass 2: resolve hierarchy refs to real phase ids (parallel).
+  await Promise.all(
+    phases.map(async (phase) => {
+      const phaseId = resolvePhaseRef(phase.id ?? phase.client_id);
+      if (!phaseId) return;
+
+      const parentId = resolvePhaseRef(phase.parent_phase_id);
+      const firstDep = resolvePhaseRef(phase.depends_on_phase_ids?.[0]);
+
+      const { error } = await supabase
+        .from("pd_phases")
+        .update({
+          parent_phase_id: parentId,
+          depends_on_phase_id: firstDep,
+          updated_at: updatedAt,
+        })
+        .eq("id", phaseId);
+      if (error) throw error;
+    }),
+  );
 
   // Pass 3: replace many-to-many phase links.
   await supabase.from("pd_phase_links").delete().eq("project_id", projectId);
