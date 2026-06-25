@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
@@ -15,6 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PoPaymentsSection } from "@/components/procurement/po-payments-section";
 import { PoShipmentsSection } from "@/components/procurement/po-shipments-section";
+import {
+  EditPoDialog,
+  type PoSkuOption,
+} from "@/components/procurement/edit-po-dialog";
 import { SinglePoGantt } from "@/components/procurement/single-po-gantt";
 import {
   DEFAULT_PO_CURRENCY,
@@ -30,6 +34,7 @@ import type {
   PoTimelineEntry,
   PurchaseOrder,
   ShipmentLineAllocation,
+  Supplier,
 } from "@/types/database";
 
 const STATUS_LABELS: Record<PoStatus, string> = {
@@ -72,16 +77,18 @@ async function downloadPoPdf(poId: string, poNumber: string) {
 
 export default function PurchaseOrderPage() {
   const params = useParams();
-  const router = useRouter();
   const poId = params.id as string;
 
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [timeline, setTimeline] = useState<PoTimelineEntry | null>(null);
   const [allocations, setAllocations] = useState<ShipmentLineAllocation[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [skus, setSkus] = useState<PoSkuOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   const loadPo = useCallback(async () => {
     setLoading(true);
@@ -110,6 +117,29 @@ export default function PurchaseOrderPage() {
   useEffect(() => {
     void loadPo();
   }, [loadPo]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadMeta() {
+      try {
+        const [supRes, skuRes] = await Promise.all([
+          fetch("/api/procurement/suppliers"),
+          fetch("/api/procurement/skus"),
+        ]);
+        const supData = await supRes.json();
+        const skuData = await skuRes.json();
+        if (!active) return;
+        setSuppliers(supData.suppliers ?? []);
+        setSkus(skuData.skus ?? []);
+      } catch {
+        // metadata is optional for viewing
+      }
+    }
+    void loadMeta();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const allocationByLine = useMemo(
     () => new Map(allocations.map((a) => [a.po_line_id, a])),
@@ -205,7 +235,7 @@ export default function PurchaseOrderPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => router.push(`/dashboard/procurement?edit=${po.id}`)}
+              onClick={() => setEditOpen(true)}
               disabled={busy}
             >
               <Pencil className="h-3.5 w-3.5" />
@@ -327,6 +357,21 @@ export default function PurchaseOrderPage() {
           </Card>
         </aside>
       </div>
+
+      {editOpen && po && (
+        <EditPoDialog
+          po={po}
+          suppliers={suppliers}
+          skus={skus}
+          onClose={() => setEditOpen(false)}
+          onSaved={(updated) => {
+            setPo(updated);
+            setEditOpen(false);
+            void loadPo();
+          }}
+          onSupplierCreated={(s) => setSuppliers((prev) => [...prev, s])}
+        />
+      )}
     </PageShell>
   );
 }
