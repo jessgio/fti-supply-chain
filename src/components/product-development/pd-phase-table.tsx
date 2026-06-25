@@ -17,6 +17,10 @@ import {
   resolveDurationDaysForRow,
 } from "@/lib/product-development/duration";
 import { applyScheduleToRows } from "@/lib/product-development/schedule-form-rows";
+import {
+  isNpdConfirmationPhase,
+  resolveNpdConfirmationStartDate,
+} from "@/lib/product-development/npd-confirmation-schedule";
 import { cn } from "@/lib/utils";
 import type {
   PdComponentInput,
@@ -130,7 +134,10 @@ export function phasesToInput(
   });
 }
 
-export function projectPhasesToFormRows(phases: PdPhaseDetail[]): PhaseFormRow[] {
+export function projectPhasesToFormRows(
+  phases: PdPhaseDetail[],
+  npdConfirmationStartDate?: string | null,
+): PhaseFormRow[] {
   const childParentIds = new Set(
     phases.map((p) => p.parent_phase_id).filter((id): id is string => Boolean(id)),
   );
@@ -162,11 +169,22 @@ export function projectPhasesToFormRows(phases: PdPhaseDetail[]): PhaseFormRow[]
       })),
     }));
 
-  return applyScheduleToRows(rows);
+  return applyScheduleToRows(rows, {
+    npdConfirmationStartDate: resolveNpdConfirmationStartDate(
+      npdConfirmationStartDate,
+    ),
+  });
 }
 
-function commitRows(rows: PhaseFormRow[]): PhaseFormRow[] {
-  return applyScheduleToRows(rows);
+function commitRows(
+  rows: PhaseFormRow[],
+  npdConfirmationStartDate?: string | null,
+): PhaseFormRow[] {
+  return applyScheduleToRows(rows, {
+    npdConfirmationStartDate: resolveNpdConfirmationStartDate(
+      npdConfirmationStartDate,
+    ),
+  });
 }
 
 export function clearAllDurations(rows: PhaseFormRow[]): PhaseFormRow[] {
@@ -299,13 +317,17 @@ interface PdPhaseTableProps {
   phases: PhaseFormRow[];
   onChange: (phases: PhaseFormRow[]) => void;
   showBulkClearActions?: boolean;
+  /** When set, locks NPD Confirmation start to the approved formula tracker date. */
+  npdConfirmationStartDate?: string | null;
 }
 
 export function PdPhaseTable({
   phases,
   onChange,
   showBulkClearActions = false,
+  npdConfirmationStartDate,
 }: PdPhaseTableProps) {
+  const npdLockedStart = resolveNpdConfirmationStartDate(npdConfirmationStartDate);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const highlightedIdsRef = useRef(highlightedIds);
   const skipNextDismissRef = useRef(false);
@@ -334,7 +356,7 @@ export function PdPhaseTable({
   }
 
   function commit(next: PhaseFormRow[], options?: { highlightSourceId?: string }) {
-    const scheduled = commitRows(next);
+    const scheduled = commitRows(next, npdConfirmationStartDate);
     if (options?.highlightSourceId) {
       flashAffected(phases, scheduled, options.highlightSourceId);
     }
@@ -491,7 +513,8 @@ export function PdPhaseTable({
               const startReadOnly =
                 row.is_parent ||
                 row.date_anchor === "end" ||
-                (hasIncomingDeps && row.date_anchor !== "start");
+                (hasIncomingDeps && row.date_anchor !== "start") ||
+                (Boolean(npdLockedStart) && isNpdConfirmationPhase(row.name));
               const finishReadOnly = row.is_parent;
               return (
               <tr
@@ -592,11 +615,13 @@ export function PdPhaseTable({
                       updateRow(row.clientId, patch, { highlight: true });
                     }}
                     title={
-                      row.is_parent
-                        ? "Calculated from child task dates"
-                        : startReadOnly
-                          ? "Calculated from dependencies, parallel links, or finish anchor"
-                          : "Set anchor start date — finish updates from duration"
+                      npdLockedStart && isNpdConfirmationPhase(row.name)
+                        ? "Start date from approved Formula Tracker confirmation"
+                        : row.is_parent
+                          ? "Calculated from child task dates"
+                          : startReadOnly
+                            ? "Calculated from dependencies, parallel links, or finish anchor"
+                            : "Set anchor start date — finish updates from duration"
                     }
                   />
                 </td>

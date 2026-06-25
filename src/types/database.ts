@@ -868,6 +868,9 @@ export interface PdGanttBar {
   isShifted: boolean;
   dependsOnLabel: string | null;
   picNames: string[];
+  isHeader: boolean;
+  parentPhaseId: string | null;
+  childCount: number;
 }
 
 export interface PdUpcomingPhase {

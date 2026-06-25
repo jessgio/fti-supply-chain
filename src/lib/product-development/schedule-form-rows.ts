@@ -1,5 +1,9 @@
 import { computePdTimeline, type PdDateAnchor } from "@/lib/product-development/gantt";
 import {
+  isNpdConfirmationPhase,
+  type PdTimelineScheduleOptions,
+} from "@/lib/product-development/npd-confirmation-schedule";
+import {
   formatIsoDate,
   resolveDurationDaysForRow,
 } from "@/lib/product-development/duration";
@@ -106,7 +110,10 @@ export function buildScheduleAnchors(
  * Apply dependency / parallel scheduling to form rows in real time.
  * Uses the same engine as the Gantt chart.
  */
-export function applyScheduleToRows(rows: PhaseFormRow[]): PhaseFormRow[] {
+export function applyScheduleToRows(
+  rows: PhaseFormRow[],
+  options: PdTimelineScheduleOptions = {},
+): PhaseFormRow[] {
   if (rows.length === 0) return rows;
 
   const { phases, links } = rowsToScheduleModel(rows);
@@ -115,7 +122,14 @@ export function applyScheduleToRows(rows: PhaseFormRow[]): PhaseFormRow[] {
   );
   if (!hasAnchors && links.length === 0) return rows;
 
-  const timeline = computePdTimeline(phases, links, buildScheduleAnchors(rows));
+  const npdLockedStart = options.npdConfirmationStartDate ?? null;
+
+  const timeline = computePdTimeline(
+    phases,
+    links,
+    buildScheduleAnchors(rows),
+    options,
+  );
   const computedByKey = new Map(timeline.map((t) => [t.phase.id, t]));
 
   const parentIds = new Set(
@@ -129,16 +143,25 @@ export function applyScheduleToRows(rows: PhaseFormRow[]): PhaseFormRow[] {
     if (!computed) return row;
 
     const isParentRow = row.is_parent || parentIds.has(rowKey(row));
+    const npdApprovedStart =
+      npdLockedStart && isNpdConfirmationPhase(row.name)
+        ? npdLockedStart
+        : null;
     const preserveEndAnchor =
       !isParentRow && row.date_anchor === "end" && row.end_date;
     const preserveStartAnchor =
-      !isParentRow && row.date_anchor === "start" && row.start_date;
+      !isParentRow &&
+      !npdApprovedStart &&
+      row.date_anchor === "start" &&
+      row.start_date;
 
-    const nextStart = preserveStartAnchor
-      ? row.start_date
-      : computed.computedStart
-        ? formatIsoDate(computed.computedStart)
-        : row.start_date;
+    const nextStart = npdApprovedStart
+      ? npdApprovedStart
+      : preserveStartAnchor
+        ? row.start_date
+        : computed.computedStart
+          ? formatIsoDate(computed.computedStart)
+          : row.start_date;
     const nextEnd = preserveEndAnchor
       ? row.end_date
       : computed.computedEnd
@@ -152,7 +175,11 @@ export function applyScheduleToRows(rows: PhaseFormRow[]): PhaseFormRow[] {
       ...row,
       start_date: nextStart,
       end_date: nextEnd,
-      date_anchor: isParentRow ? null : (row.date_anchor ?? null),
+      date_anchor: npdApprovedStart
+        ? "start"
+        : isParentRow
+          ? null
+          : (row.date_anchor ?? null),
     };
   });
 }

@@ -143,7 +143,12 @@ export default function PdProjectDetailPage() {
 
   const applyProjectToState = useCallback((p: PdProjectDetail) => {
     setProject(p);
-    setEditPhases(projectPhasesToFormRows(p.phases));
+    setEditPhases(
+      projectPhasesToFormRows(
+        p.phases,
+        p.npd_approved_entry?.confirmation_date,
+      ),
+    );
     setMasterForm(p);
     setCycleDrafts(
       Object.fromEntries(
@@ -1108,7 +1113,13 @@ export default function PdProjectDetailPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <PdGantt phases={project.phases} links={project.phase_links} />
+            <PdGantt
+              phases={project.phases}
+              links={project.phase_links}
+              npdConfirmationStartDate={
+                project.npd_approved_entry?.confirmation_date
+              }
+            />
           </CardContent>
         </Card>
       )}
@@ -1679,6 +1690,9 @@ export default function PdProjectDetailPage() {
                 phases={editPhases}
                 onChange={setEditPhases}
                 showBulkClearActions
+                npdConfirmationStartDate={
+                  project.npd_approved_entry?.confirmation_date
+                }
               />
             </CardContent>
           </Card>

@@ -1,4 +1,8 @@
 import {
+  isNpdConfirmationPhase,
+  type PdTimelineScheduleOptions,
+} from "@/lib/product-development/npd-confirmation-schedule";
+import {
   addCalendarDays,
   calculateEndDate,
   calculateStartDate,
@@ -278,11 +282,21 @@ export function computePdTimeline(
   phases: PdPhaseDetail[],
   links: PdPhaseLink[] = [],
   anchors: Map<string, PdDateAnchor> = new Map(),
+  options: PdTimelineScheduleOptions = {},
 ): ComputedPhase[] {
   const sorted = [...phases].sort((a, b) => a.sort_order - b.sort_order);
   const phaseIds = sorted.map((p) => p.id);
   const { dependsOn, parallelWith } = buildLinkMaps(links);
   const successorsByPred = buildSuccessorsByPredecessor(dependsOn);
+
+  const npdStartOverride = options.npdConfirmationStartDate ?? null;
+  const timelineAnchors = new Map(anchors);
+  if (npdStartOverride) {
+    const npdPhase = sorted.find((p) => isNpdConfirmationPhase(p.name));
+    if (npdPhase) {
+      timelineAnchors.set(npdPhase.id, "start");
+    }
+  }
 
   const manualStarts = new Map<string, Date | null>();
   const manualEnds = new Map<string, Date | null>();
@@ -290,9 +304,13 @@ export function computePdTimeline(
   const ends = new Map<string, Date | null>();
 
   for (const phase of sorted) {
-    manualStarts.set(phase.id, parseDate(phase.start_date));
+    const phaseStartDate =
+      npdStartOverride && isNpdConfirmationPhase(phase.name)
+        ? npdStartOverride
+        : phase.start_date;
+    manualStarts.set(phase.id, parseDate(phaseStartDate));
     manualEnds.set(phase.id, parseDate(phase.end_date));
-    starts.set(phase.id, parseDate(phase.start_date));
+    starts.set(phase.id, parseDate(phaseStartDate));
     ends.set(phase.id, parseDate(phase.end_date));
   }
 
@@ -312,7 +330,7 @@ export function computePdTimeline(
       );
       const resolved = resolvePhaseSchedule(
         phase,
-        anchors.get(phase.id),
+        timelineAnchors.get(phase.id),
         manualStarts.get(phase.id) ?? null,
         manualEnds.get(phase.id) ?? null,
         minStart,
@@ -333,13 +351,13 @@ export function computePdTimeline(
     for (const cluster of clusters) {
       let clusterStart: Date | null = null;
       for (const id of cluster) {
-        if (anchors.get(id) === "end") continue;
+        if (timelineAnchors.get(id) === "end") continue;
         const s = starts.get(id);
         if (s && (!clusterStart || s > clusterStart)) clusterStart = s;
       }
       if (!clusterStart) continue;
       for (const id of cluster) {
-        if (anchors.get(id) === "end") continue;
+        if (timelineAnchors.get(id) === "end") continue;
         if (starts.get(id)?.getTime() !== clusterStart.getTime()) {
           starts.set(id, clusterStart);
           changed = true;
@@ -347,7 +365,7 @@ export function computePdTimeline(
       }
     }
 
-    if (reapplyEndAnchors(sorted, anchors, manualEnds, starts, ends)) {
+    if (reapplyEndAnchors(sorted, timelineAnchors, manualEnds, starts, ends)) {
       changed = true;
     }
 
@@ -357,7 +375,7 @@ export function computePdTimeline(
       const days = resolveDurationDays(phase);
       if (!days) continue;
       const mode: PdDurationMode = phase.duration_mode ?? "working_days";
-      const anchor = anchors.get(phase.id);
+      const anchor = timelineAnchors.get(phase.id);
       const manualEnd = manualEnds.get(phase.id);
 
       let newEnd: Date;
@@ -396,10 +414,20 @@ export function computePdTimeline(
 export function buildPdGanttBars(
   phases: PdPhaseDetail[],
   links: PdPhaseLink[] = [],
+  options: PdTimelineScheduleOptions = {},
 ): PdGanttBar[] {
-  const timeline = computePdTimeline(phases, links);
+  const timeline = computePdTimeline(phases, links, new Map(), options);
   const byId = new Map(phases.map((p) => [p.id, p]));
   const { dependsOn } = buildLinkMaps(links);
+
+  const childCountByParent = new Map<string, number>();
+  for (const phase of phases) {
+    if (!phase.parent_phase_id) continue;
+    childCountByParent.set(
+      phase.parent_phase_id,
+      (childCountByParent.get(phase.parent_phase_id) ?? 0) + 1,
+    );
+  }
 
   return timeline
     .filter((t) => t.computedStart && t.computedEnd)
@@ -408,6 +436,7 @@ export function buildPdGanttBars(
       const depNames = depIds
         .map((id) => byId.get(id)?.name)
         .filter((n): n is string => Boolean(n));
+      const childCount = childCountByParent.get(t.phase.id) ?? 0;
 
       return {
         phaseId: t.phase.id,
@@ -420,6 +449,9 @@ export function buildPdGanttBars(
         picNames: t.phase.pics
           .map((p) => p.profile_name)
           .filter((n): n is string => Boolean(n)),
+        isHeader: t.phase.is_root_task || childCount > 0,
+        parentPhaseId: t.phase.parent_phase_id ?? null,
+        childCount,
       };
     });
 }
@@ -427,8 +459,9 @@ export function buildPdGanttBars(
 export function getProjectEstimatedEnd(
   phases: PdPhaseDetail[],
   links: PdPhaseLink[] = [],
+  options: PdTimelineScheduleOptions = {},
 ): string | null {
-  const timeline = computePdTimeline(phases, links);
+  const timeline = computePdTimeline(phases, links, new Map(), options);
   let latest: Date | null = null;
   for (const t of timeline) {
     if (t.computedEnd && (!latest || t.computedEnd > latest)) {
@@ -496,5 +529,7 @@ export function getPdBarStyle(
     width: Math.max(right - left, 0.5),
   };
 }
+
+export type { PdTimelineScheduleOptions } from "@/lib/product-development/npd-confirmation-schedule";
 
 export { addCalendarDays as addDays, formatIsoDate as formatPdIsoDate };
