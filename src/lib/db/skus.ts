@@ -20,6 +20,41 @@ export interface CreatedSkuRow {
   franchise_name: string | null;
 }
 
+export interface UpdateSkuInput {
+  is_active?: boolean;
+  is_packaging?: boolean;
+  franchise_id?: string | null;
+  franchise_name?: string | null;
+}
+
+function mapSkuRow(data: {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  is_active: boolean;
+  franchise_id: string | null;
+  product_franchises: unknown;
+}): CreatedSkuRow {
+  const franchise = data.product_franchises as
+    | { name: string }
+    | { name: string }[]
+    | null;
+  const franchiseName = Array.isArray(franchise)
+    ? (franchise[0]?.name ?? null)
+    : (franchise?.name ?? null);
+
+  return {
+    id: data.id,
+    sku_code: data.sku_code,
+    name: data.name,
+    is_bundle: data.is_bundle,
+    is_active: data.is_active,
+    franchise_id: data.franchise_id,
+    franchise_name: franchiseName,
+  };
+}
+
 async function resolveFranchiseId(
   supabase: SupabaseClient,
   franchiseId?: string | null,
@@ -107,21 +142,66 @@ export async function createSku(
 
   if (error) throw error;
 
-  const franchise = data.product_franchises as unknown as
-    | { name: string }
-    | { name: string }[]
-    | null;
-  const franchiseName = Array.isArray(franchise)
-    ? (franchise[0]?.name ?? null)
-    : (franchise?.name ?? null);
+  return mapSkuRow(data);
+}
 
-  return {
-    id: data.id,
-    sku_code: data.sku_code,
-    name: data.name,
-    is_bundle: data.is_bundle,
-    is_active: data.is_active,
-    franchise_id: data.franchise_id,
-    franchise_name: franchiseName,
-  };
+export async function updateSku(
+  supabase: SupabaseClient,
+  id: string,
+  input: UpdateSkuInput,
+): Promise<CreatedSkuRow> {
+  const { data: existing, error: fetchError } = await supabase
+    .from("skus")
+    .select("id, is_bundle")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!existing) {
+    throw new Error("SKU not found.");
+  }
+
+  const updates: {
+    is_active?: boolean;
+    is_packaging?: boolean;
+    franchise_id?: string;
+  } = {};
+
+  if (typeof input.is_active === "boolean") {
+    updates.is_active = input.is_active;
+  }
+  if (typeof input.is_packaging === "boolean") {
+    updates.is_packaging = input.is_packaging;
+  }
+
+  if (input.franchise_id !== undefined || input.franchise_name !== undefined) {
+    if (existing.is_bundle) {
+      throw new Error("Bundle SKUs cannot be assigned to a franchise.");
+    }
+    const franchiseId = await resolveFranchiseId(
+      supabase,
+      typeof input.franchise_id === "string" ? input.franchise_id : null,
+      typeof input.franchise_name === "string" ? input.franchise_name : null,
+    );
+    if (!franchiseId) {
+      throw new Error("Franchise is required.");
+    }
+    updates.franchise_id = franchiseId;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new Error("No valid fields to update.");
+  }
+
+  const { data, error } = await supabase
+    .from("skus")
+    .update(updates)
+    .eq("id", id)
+    .select(
+      "id, sku_code, name, is_bundle, is_active, franchise_id, product_franchises(name)",
+    )
+    .single();
+
+  if (error) throw error;
+
+  return mapSkuRow(data);
 }

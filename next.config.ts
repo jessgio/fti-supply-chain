@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // pdfkit loads Helvetica.afm from disk; bundling breaks __dirname resolution.
-  serverExternalPackages: ["pdfkit"],
+  // These packages read files from disk; bundling breaks __dirname resolution.
+  serverExternalPackages: ["pdfkit", "color-books"],
   experimental: {
     serverActions: {
       bodySizeLimit: "100mb",

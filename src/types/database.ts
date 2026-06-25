@@ -582,3 +582,361 @@ export interface Profile {
   full_name: string | null;
   role: UserRole;
 }
+
+// ── Product Development ──────────────────────────────────────────────────────
+
+export type PdProjectStatus =
+  | "draft"
+  | "active"
+  | "on_hold"
+  | "completed"
+  | "cancelled";
+
+export type PdPhaseStatus =
+  | "not_started"
+  | "in_progress"
+  | "completed"
+  | "delayed";
+
+export type PdDurationMode = "effective_days" | "working_days";
+
+export type PdPhaseLinkType = "depends_on" | "parallel_with";
+
+export interface PdPhaseLink {
+  id: string;
+  project_id: string;
+  from_phase_id: string;
+  to_phase_id: string;
+  link_type: PdPhaseLinkType;
+  created_at: string;
+}
+
+export type PdComponentType =
+  | "formula"
+  | "shades"
+  | "ingredients"
+  | "scents"
+  | "packaging"
+  | "unit_box"
+  | "primary_packaging"
+  | "secondary_packaging"
+  | "applicator"
+  | "other";
+
+export interface PdProject {
+  id: string;
+  name: string;
+  description: string | null;
+  status: PdProjectStatus;
+  product_name: string | null;
+  launch_date: string | null;
+  manufacturer: string | null;
+  product_claim: string | null;
+  net_weight: string | null;
+  volume_test_result: string | null;
+  retail_price: number | null;
+  asp: number | null;
+  pricing_rmb_rate: number | null;
+  pricing_usd_rate: number | null;
+  pricing_note: string | null;
+  currency: string;
+  key_ingredients: string | null;
+  extract: string | null;
+  full_inci_list: string | null;
+  shades_list: string | null;
+  ingredient_claims: string | null;
+  ingredient_concept: string | null;
+  colorant_source: string | null;
+  scent_fragrance: string | null;
+  precautions: string | null;
+  halal_certification: string | null;
+  stability_test: string | null;
+  hript: string | null;
+  efficacy_test: string | null;
+  technical_sheet: string | null;
+  master_view_data: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdPhase {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  sort_order: number;
+  is_root_task: boolean;
+  parent_phase_id: string | null;
+  depends_on_phase_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  duration_days: number | null;
+  duration_text: string | null;
+  duration_mode: PdDurationMode;
+  actual_end_date: string | null;
+  status: PdPhaseStatus;
+  cycle_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdPhasePic {
+  id: string;
+  phase_id: string;
+  profile_id: string;
+  profile_name?: string | null;
+}
+
+export interface PdPhaseComponent {
+  id: string;
+  phase_id: string;
+  component_type: PdComponentType;
+  name: string;
+  description: string | null;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface PdPackagingItem {
+  id: string;
+  project_id: string;
+  part_name: string;
+  part_type: string | null;
+  supplier_code: string | null;
+  material_spec: string | null;
+  sort_order: number;
+}
+
+export interface PdShadeFile {
+  id: string;
+  project_id: string;
+  shade_name: string;
+  lab_no: string | null;
+  mpd_confirmation: string | null;
+  bpom: string | null;
+  gs1: string | null;
+  sort_order: number;
+}
+
+export interface PdMasterShade {
+  id: string;
+  project_id: string;
+  shade_name: string;
+  lab_no: string | null;
+  gs1: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export type PdPricingLineKey =
+  | "cogm"
+  | "primary"
+  | "secondary"
+  | "extract"
+  | "lartas";
+
+export interface PdPricingLine {
+  id: string;
+  project_id: string;
+  line_key: PdPricingLineKey;
+  amount: number | null;
+  moq: string | null;
+  supplier_id: string | null;
+  offer_note: string | null;
+  sort_order: number;
+  supplier_name?: string | null;
+  supplier_pic_name?: string | null;
+  supplier_pic_phone?: string | null;
+  offer_letter?: PdFile | null;
+  statement_letter?: PdFile | null;
+}
+
+export interface PdPantoneSwatch {
+  id: string;
+  project_id: string;
+  color_name: string;
+  pantone_code: string;
+  sort_order: number;
+  hex_color?: string | null;
+  created_at: string;
+  swatch_file?: PdFile | null;
+}
+
+export interface PdFile {
+  id: string;
+  project_id: string;
+  phase_id: string | null;
+  component_id: string | null;
+  shade_file_id: string | null;
+  master_shade_id: string | null;
+  formula_tracker_entry_id: string | null;
+  pricing_line_id: string | null;
+  pantone_swatch_id: string | null;
+  file_name: string;
+  storage_path: string;
+  mime_type: string | null;
+  file_category: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  download_url?: string | null;
+}
+
+export interface PdChatMessage {
+  id: string;
+  project_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  author_id: string;
+  author_name?: string | null;
+  created_at: string;
+}
+
+export interface PdCycleNote {
+  id: string;
+  project_id: string;
+  phase_id: string | null;
+  title: string | null;
+  notes: string;
+  created_by: string | null;
+  author_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdPhaseInput {
+  id?: string;
+  /** Client-side id used to wire dependencies before rows exist in the DB. */
+  client_id?: string;
+  name: string;
+  description?: string | null;
+  sort_order: number;
+  is_root_task?: boolean;
+  parent_phase_id?: string | null;
+  depends_on_phase_id?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  duration_days?: number | null;
+  duration_text?: string | null;
+  duration_mode?: PdDurationMode;
+  status?: PdPhaseStatus;
+  depends_on_phase_ids?: string[];
+  parallel_with_phase_ids?: string[];
+  pic_profile_ids?: string[];
+  components?: PdComponentInput[];
+}
+
+export interface PdComponentInput {
+  id?: string;
+  component_type: PdComponentType;
+  name: string;
+  description?: string | null;
+  sort_order?: number;
+}
+
+export interface PdPhaseDetail extends PdPhase {
+  pics: PdPhasePic[];
+  components: PdPhaseComponent[];
+  files: PdFile[];
+  depends_on_phase_ids: string[];
+  parallel_with_phase_ids: string[];
+}
+
+export interface PdProjectDetail extends PdProject {
+  phases: PdPhaseDetail[];
+  phase_links: PdPhaseLink[];
+  packaging_items: PdPackagingItem[];
+  shade_files: PdShadeFile[];
+  master_shades: PdMasterShade[];
+  pricing_lines: PdPricingLine[];
+  packaging_asset_fields: Record<string, string | null>;
+  pantone_swatches: PdPantoneSwatch[];
+  files: PdFile[];
+  cycle_notes: PdCycleNote[];
+  npd_approved_entry: PdFormulaTrackerEntryDetail | null;
+}
+
+export interface PdGanttBar {
+  phaseId: string;
+  label: string;
+  start: Date;
+  end: Date;
+  status: PdPhaseStatus;
+  isShifted: boolean;
+  dependsOnLabel: string | null;
+  picNames: string[];
+}
+
+export interface PdUpcomingPhase {
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
+}
+
+export interface PdProjectSummary extends PdProject {
+  phase_count: number;
+  completed_phases: number;
+  next_phase_name: string | null;
+  estimated_end_date: string | null;
+  cover_image_url: string | null;
+  cover_image_id: string | null;
+  days_until_launch: number | null;
+  upcoming_phases_7d: PdUpcomingPhase[];
+}
+
+export interface PdFormulaTrackerEntry {
+  id: string;
+  project_id: string;
+  brief_concept: string | null;
+  target_ingredient: string | null;
+  product_name: string | null;
+  product_project_id: string | null;
+  parent_items: string | null;
+  sample_date: string | null;
+  sample_trial_no: string | null;
+  lab_no: string | null;
+  texture_review: string | null;
+  scent: string | null;
+  texture_benchmark: string | null;
+  color_benchmark: string | null;
+  benchmark_change_confirmation: string | null;
+  benchmark_change_reason: string | null;
+  efficacy_result: string | null;
+  main_feedback: string | null;
+  benchmark_changed_from_previous_feedback: string | null;
+  benchmark_change_from_previous_explanation: string | null;
+  texture_feedback: string | null;
+  scent_feedback: string | null;
+  scent_review: string | null;
+  efficacy_feedback: string | null;
+  summary: string | null;
+  npd_confirmation: string | null;
+  confirmation_date: string | null;
+  confirmed_by: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdFormulaTrackerEntryDetail extends PdFormulaTrackerEntry {
+  brief_files: PdFile[];
+  project_name?: string | null;
+}
+
+export type PdFormulaTrackerEntryInput = Omit<
+  PdFormulaTrackerEntry,
+  "id" | "project_id" | "created_by" | "created_at" | "updated_at"
+>;
+
+export interface PdFormulaTrackerMasterProject {
+  project_id: string;
+  project_name: string;
+  product_name: string | null;
+  project_status: string;
+  trial_count: number;
+  first_trial_date: string | null;
+  last_trial_date: string | null;
+  total_span_days: number | null;
+  entries: PdFormulaTrackerEntryDetail[];
+}

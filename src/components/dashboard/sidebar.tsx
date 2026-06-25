@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  Beaker,
   Boxes,
   FlaskConical,
+  FolderKanban,
   GanttChart,
   LayoutDashboard,
   Layers,
@@ -19,6 +21,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   ShoppingCart,
+  TestTube2,
   TrendingUp,
   Truck,
   Upload,
@@ -113,6 +116,26 @@ const links: NavItem[] = [
     ],
   },
   { href: "/dashboard/insights", label: "Supply Chain Insights", icon: Lightbulb },
+  {
+    href: "/dashboard/product-development",
+    label: "Product Development",
+    icon: Beaker,
+    roles: ["admin", "supply_chain"],
+    children: [
+      {
+        href: "/dashboard/product-development/projects",
+        label: "Projects",
+        icon: FolderKanban,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/product-development/formula-tracker",
+        label: "Formula Tracker",
+        icon: TestTube2,
+        roles: ["admin", "supply_chain"],
+      },
+    ],
+  },
   {
     href: "/dashboard/uploads",
     label: "Data Uploads",

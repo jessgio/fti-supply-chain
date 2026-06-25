@@ -47,6 +47,10 @@ export default function MappingsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [editingFranchiseId, setEditingFranchiseId] = useState<string | null>(
+    null,
+  );
+  const [newFranchiseName, setNewFranchiseName] = useState("");
   const [addSkuCode, setAddSkuCode] = useState("");
   const [addSkuName, setAddSkuName] = useState("");
   const [addFranchiseId, setAddFranchiseId] = useState("");
@@ -98,6 +102,72 @@ export default function MappingsPage() {
   }, [skus, search, statusFilter]);
 
   const inactiveCount = skus.filter((s) => !s.is_active && !s.is_bundle).length;
+
+  const franchiseOptions = useMemo(() => {
+    const byId = new Map(franchises.map((f) => [f.id, f]));
+    for (const sku of skus) {
+      if (
+        sku.franchise_id &&
+        sku.franchise_name &&
+        !byId.has(sku.franchise_id)
+      ) {
+        byId.set(sku.franchise_id, {
+          id: sku.franchise_id,
+          name: sku.franchise_name,
+        });
+      }
+    }
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [franchises, skus]);
+
+  async function updateFranchise(
+    sku: SkuRow,
+    franchiseId: string,
+    franchiseName?: string,
+  ) {
+    if (sku.is_bundle) return;
+    if (!franchiseName && (!franchiseId || franchiseId === sku.franchise_id)) {
+      return;
+    }
+
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const body: Record<string, string> = franchiseName
+        ? { franchise_name: franchiseName }
+        : { franchise_id: franchiseId };
+
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+
+      const updated = data.sku as SkuRow;
+      setSkus((prev) =>
+        prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
+      );
+
+      if (updated.franchise_id && updated.franchise_name) {
+        setFranchises((prev) => {
+          if (prev.some((f) => f.id === updated.franchise_id)) return prev;
+          return [
+            ...prev,
+            { id: updated.franchise_id!, name: updated.franchise_name! },
+          ].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+
+      setEditingFranchiseId(null);
+      setNewFranchiseName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
 
   async function toggleActive(sku: SkuRow) {
     if (sku.is_bundle) return;
@@ -306,7 +376,8 @@ export default function MappingsPage() {
           <CardDescription>
             Inactive SKUs remain in franchise and bundle mappings. Re-uploading
             the mappings Excel does not reset status. Only active, franchise-mapped
-            single SKUs appear in inventory forecast.
+            single SKUs appear in inventory forecast. Change a franchise from the
+            dropdown in the table.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -378,7 +449,81 @@ export default function MappingsPage() {
                         {sku.sku_code}
                       </td>
                       <td className="px-3 py-2">
-                        {sku.franchise_name ?? "—"}
+                        {sku.is_bundle ? (
+                          "—"
+                        ) : editingFranchiseId === sku.id ? (
+                          <div className="flex min-w-[200px] flex-wrap items-center gap-2">
+                            <Input
+                              placeholder="New franchise name"
+                              value={newFranchiseName}
+                              onChange={(e) => setNewFranchiseName(e.target.value)}
+                              className="h-8 min-w-[140px] flex-1 text-xs"
+                              disabled={updatingId === sku.id}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && newFranchiseName.trim()) {
+                                  void updateFranchise(
+                                    sku,
+                                    "",
+                                    newFranchiseName.trim(),
+                                  );
+                                }
+                                if (e.key === "Escape") {
+                                  setEditingFranchiseId(null);
+                                  setNewFranchiseName("");
+                                }
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              disabled={
+                                updatingId === sku.id ||
+                                !newFranchiseName.trim()
+                              }
+                              onClick={() =>
+                                updateFranchise(
+                                  sku,
+                                  "",
+                                  newFranchiseName.trim(),
+                                )
+                              }
+                            >
+                              {updatingId === sku.id ? "Saving…" : "Save"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={updatingId === sku.id}
+                              onClick={() => {
+                                setEditingFranchiseId(null);
+                                setNewFranchiseName("");
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Select
+                            value={sku.franchise_id ?? ""}
+                            disabled={updatingId === sku.id}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === "__new__") {
+                                setEditingFranchiseId(sku.id);
+                                setNewFranchiseName("");
+                                return;
+                              }
+                              void updateFranchise(sku, value);
+                            }}
+                            className="h-8 min-w-[160px] text-xs"
+                          >
+                            {franchiseOptions.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                            <option value="__new__">+ New franchise…</option>
+                          </Select>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         {sku.is_bundle ? (

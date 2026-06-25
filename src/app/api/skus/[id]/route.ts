@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole } from "@/lib/auth";
+import { updateSku } from "@/lib/db/skus";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 
@@ -15,34 +16,49 @@ export async function PATCH(
     const body = (await request.json()) as {
       is_active?: boolean;
       is_packaging?: boolean;
+      franchise_id?: string | null;
+      franchise_name?: string | null;
     };
 
-    const updates: { is_active?: boolean; is_packaging?: boolean } = {};
+    const input: {
+      is_active?: boolean;
+      is_packaging?: boolean;
+      franchise_id?: string | null;
+      franchise_name?: string | null;
+    } = {};
+
     if (typeof body.is_active === "boolean") {
-      updates.is_active = body.is_active;
+      input.is_active = body.is_active;
     }
     if (typeof body.is_packaging === "boolean") {
-      updates.is_packaging = body.is_packaging;
+      input.is_packaging = body.is_packaging;
+    }
+    if (body.franchise_id !== undefined) {
+      input.franchise_id =
+        typeof body.franchise_id === "string" ? body.franchise_id : null;
+    }
+    if (body.franchise_name !== undefined) {
+      input.franchise_name =
+        typeof body.franchise_name === "string" ? body.franchise_name : null;
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(input).length === 0) {
       return NextResponse.json(
-        { error: "Provide is_active and/or is_packaging as booleans" },
+        {
+          error:
+            "Provide is_active, is_packaging, franchise_id, and/or franchise_name",
+        },
         { status: 400 },
       );
     }
 
     const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from("skus")
-      .update(updates)
-      .eq("id", id)
-      .select("id, sku_code, is_active, is_packaging")
-      .single();
+    const sku = await updateSku(supabase, id, input);
 
-    if (error) throw error;
-    return NextResponse.json({ ok: true, sku: data });
+    return NextResponse.json({ ok: true, sku });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+    const message = errorMessage(error);
+    const status = message.includes("not found") ? 404 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
