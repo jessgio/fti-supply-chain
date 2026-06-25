@@ -265,7 +265,7 @@ export function PdMasterView({
               label="Ingredient Concept"
               value={project.ingredient_concept}
             />
-            <MasterTextBlock label="Shades List" value={project.shades_list} />
+            <MasterTextBlock label="Shades/Variants List" value={project.shades_list} />
             <MasterTextBlock
               label="Colorant Source"
               value={project.colorant_source}
@@ -305,7 +305,7 @@ export function PdMasterView({
       </div>
 
       <Card className="overflow-hidden border-stone-200">
-        <SectionHeader title="Shades" />
+        <SectionHeader title="Shades/Variants" />
         <PdMasterShadesGrid
           project={project}
           editable={editable}

@@ -59,7 +59,7 @@ export function PdSupportingFilesTable({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-stone-200 bg-stone-50 text-left text-xs uppercase text-stone-500">
-              <th className="px-4 py-2">Shade</th>
+              <th className="px-4 py-2">Shade/Variant</th>
               <th className="px-4 py-2">Lab no.</th>
               <th className="px-4 py-2">NPD Confirmation</th>
               <th className="px-4 py-2">BPOM</th>
@@ -74,7 +74,7 @@ export function PdSupportingFilesTable({
                   colSpan={6}
                   className="px-4 py-6 text-center text-stone-500"
                 >
-                  Add shades in the Shades section above to track regulatory
+                  Add shades/variants in the Shades/Variants section above to track regulatory
                   files per variant.
                 </td>
               </tr>

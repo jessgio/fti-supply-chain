@@ -1275,7 +1275,7 @@ export default function PdProjectDetailPage() {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-stone-600">
-                      Shades List
+                      Shades/Variants List
                     </label>
                     <Input
                       value={masterForm.shades_list ?? ""}
@@ -1335,10 +1335,10 @@ export default function PdProjectDetailPage() {
 
               <div className="border-t border-stone-100 pt-6">
                 <h3 className="mb-3 text-sm font-semibold text-emerald-900">
-                  Shades
+                  Shades/Variants
                 </h3>
                 <p className="mb-3 text-xs text-stone-500">
-                  Add shade variants and upload tube and swatch reference images.
+                  Add shades/variants and upload tube and swatch reference images.
                 </p>
                 <PdMasterShadesGrid
                   project={project}
@@ -1528,12 +1528,12 @@ export default function PdProjectDetailPage() {
                 <p className="mb-3 text-xs text-stone-500">
                   NPD Confirmation links automatically when a Formula Tracker
                   trial is approved. Upload BPOM files and enter GS1 codes per
-                  shade below.
+                  shade/variant below.
                 </p>
                 <div className="space-y-2">
                   {project.master_shades.length === 0 ? (
                     <p className="text-sm text-stone-500">
-                      No shades yet — add them in the Shades section above.
+                      No shades/variants yet — add them in the Shades/Variants section above.
                     </p>
                   ) : (
                     [...project.master_shades]

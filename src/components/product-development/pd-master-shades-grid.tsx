@@ -156,7 +156,7 @@ function ShadeGridCell({
               if (e.key === "Enter") e.currentTarget.blur();
             }}
             className="w-full bg-transparent text-center text-xs font-semibold text-emerald-900 outline-none placeholder:text-emerald-700/50"
-            placeholder="Shade name"
+            placeholder="Shade/variant name"
           />
         ) : (
           <p className="text-xs font-semibold text-emerald-900">{shade.shade_name}</p>
@@ -193,7 +193,7 @@ function ShadeGridCell({
       {editable && onDeleteShade && (
         <button
           type="button"
-          title="Remove shade"
+          title="Remove shade/variant"
           onClick={() => {
             if (confirm(`Remove "${shade.shade_name}"?`)) {
               void onDeleteShade(shade.id);
@@ -224,7 +224,7 @@ export function PdMasterShadesGrid({
   if (shades.length === 0 && !editable) {
     return (
       <p className="px-4 py-8 text-center text-sm text-stone-500">
-        No shades added yet.
+        No shades/variants added yet.
       </p>
     );
   }
@@ -252,14 +252,14 @@ export function PdMasterShadesGrid({
             className="flex min-h-[10rem] flex-col items-center justify-center gap-2 rounded-md border border-dashed border-stone-300 bg-stone-50/50 text-stone-500 transition-colors hover:border-emerald-400 hover:bg-emerald-50/40 hover:text-emerald-800"
           >
             <Plus className="h-5 w-5" />
-            <span className="text-xs font-medium">Add shade</span>
+            <span className="text-xs font-medium">Add shade/variant</span>
           </button>
         )}
       </div>
 
       {editable && (
         <p className="text-xs text-stone-500">
-          Each shade shows the product tube and colour swatch. Click a shade name
+          Each shade/variant shows the product tube and colour swatch. Click a shade/variant name
           to edit it. Upload hi-res PNG or JPEG images for best results.
         </p>
       )}
