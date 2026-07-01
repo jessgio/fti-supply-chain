@@ -10,7 +10,12 @@ const DEFAULT_STOCKOUT_SOON_DAYS = 30;
 const DEFAULT_UPCOMING_SHIPMENT_DAYS = 14;
 const MAX_TABLE_ROWS = 10;
 
-const OPEN_PO_STATUSES: PoStatus[] = ["planned", "ordered", "in_transit"];
+const OPEN_PO_STATUSES: PoStatus[] = [
+  "planned",
+  "ordered",
+  "in_production",
+  "in_transit",
+];
 
 type LarkElement = Record<string, unknown>;
 

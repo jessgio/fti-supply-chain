@@ -209,6 +209,7 @@ export interface NpdStockRow {
 export type PoStatus =
   | "planned"
   | "ordered"
+  | "in_production"
   | "in_transit"
   | "received"
   | "cancelled";
@@ -287,6 +288,8 @@ export interface PurchaseOrder {
   notes: string | null;
   /** Optional FK to a pd_projects row — links this PO to a product development launch. */
   pd_project_id: string | null;
+  pd_project_name?: string | null;
+  pd_project_product_name?: string | null;
   created_at?: string;
   updated_at?: string;
   lines?: PurchaseOrderLine[];
@@ -951,3 +954,154 @@ export interface PdFormulaTrackerMasterProject {
   approved_confirmation_date: string | null;
   entries: PdFormulaTrackerEntryDetail[];
 }
+
+// ─── Timeline Adjustment ──────────────────────────────────────────────────────
+
+export type TimelineAnchor = "start" | "warehouse_delivery";
+
+export interface ProductTimelineItem {
+  id: string;
+  timeline_id: string;
+  product_name: string;
+  sku_id: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProductTimeline {
+  id: string;
+  products: ProductTimelineItem[];
+  anchor: TimelineAnchor;
+  anchor_date: string;
+  primary_packaging_days: number;
+  secondary_packaging_days: number;
+  extract_days: number;
+  send_to_manufacturer_days: number;
+  manufacturer_filling_days: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProductTimelineInput = Pick<
+  ProductTimeline,
+  | "anchor"
+  | "anchor_date"
+  | "primary_packaging_days"
+  | "secondary_packaging_days"
+  | "extract_days"
+  | "send_to_manufacturer_days"
+  | "manufacturer_filling_days"
+> & {
+  products: Array<Pick<ProductTimelineItem, "product_name" | "sku_id">>;
+};
+
+export interface TimelineProductOption {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  franchise_name: string | null;
+  is_active: boolean;
+  projected_stockout_date: string | null;
+  days_until_stockout: number | null;
+  current_stock: number;
+}
+
+export interface SecondaryPackagingInboundCosmax {
+  id: string;
+  item_code: string;
+  product_name: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface DeliveryNoteSettings {
+  id: string;
+  recipient_company: string;
+  recipient_address: string;
+  recipient_pic_name: string | null;
+  recipient_phone: string | null;
+  recipient_email: string | null;
+  updated_at?: string;
+}
+
+export interface DeliveryNotePortal {
+  id: string;
+  access_token: string;
+  label: string;
+  updated_at?: string;
+}
+
+export interface DeliveryNoteLine {
+  id: string;
+  delivery_note_id: string;
+  packaging_item_id: string | null;
+  item_code: string;
+  product_name: string;
+  cartons: number;
+  pcs_per_carton: number;
+  total_pcs: number;
+}
+
+export interface DeliveryNote {
+  id: string;
+  dn_number: string;
+  po_id: string | null;
+  po_number: string;
+  supplier_id: string | null;
+  delivery_date: string;
+  recipient_name: string;
+  created_at?: string;
+  lines?: DeliveryNoteLine[];
+  supplier_name?: string | null;
+}
+
+export interface ExtractCode {
+  id: string;
+  item_code: string;
+  extract_name: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface ExtractInboundDeliveryNoteLine {
+  id: string;
+  delivery_note_id: string;
+  extract_code_id: string | null;
+  item_code: string;
+  extract_name: string;
+  quantity: number;
+  uom_kg: number;
+  total_kg: number;
+}
+
+export interface ExtractInboundDeliveryNote {
+  id: string;
+  dn_number: string;
+  po_id: string | null;
+  po_number: string;
+  delivery_date: string;
+  recipient_name: string;
+  special_instruction: string | null;
+  created_at?: string;
+  lines?: ExtractInboundDeliveryNoteLine[];
+}
+
+export interface ExtractInboundDnSettings {
+  id: string;
+  recipient_company: string;
+  recipient_address: string;
+  recipient_pic_name: string | null;
+  recipient_phone: string | null;
+  recipient_email: string | null;
+  updated_at?: string;
+}
+
+export interface ExtractInboundPoOption {
+  id: string;
+  po_number: string;
+  status: string;
+  order_date: string;
+  sku_names: string[];
+}
+

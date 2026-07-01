@@ -101,10 +101,12 @@ async function loadOverview(): Promise<Overview | null> {
       purchase_order_lines: { qty_ordered: number; qty_received: number }[];
     }[];
     const openPos = pos.filter((p) =>
-      ["planned", "ordered", "in_transit"].includes(p.status),
+      ["planned", "ordered", "in_production", "in_transit"].includes(p.status),
     ).length;
     const unitsOnOrder = pos
-      .filter((p) => ["ordered", "in_transit"].includes(p.status))
+      .filter((p) =>
+        ["ordered", "in_production", "in_transit"].includes(p.status),
+      )
       .reduce(
         (sum, p) =>
           sum +

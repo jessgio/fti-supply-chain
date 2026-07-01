@@ -166,7 +166,12 @@ export async function listOpenPackagingPoLines(
         "purchase_orders!inner(id, po_number, status, expected_date, suppliers(name))",
     )
     .in("sku_id", packagingSkuIds)
-    .in("purchase_orders.status", ["planned", "ordered", "in_transit"])
+    .in("purchase_orders.status", [
+      "planned",
+      "ordered",
+      "in_production",
+      "in_transit",
+    ])
     .order("expected_date", {
       ascending: true,
       nullsFirst: false,

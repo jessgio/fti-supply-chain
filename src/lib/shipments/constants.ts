@@ -55,11 +55,17 @@ export const INBOUND_STATUS_STYLES: Record<InboundReceiveStatus, string> = {
 };
 
 /** PO statuses shown on the master timeline (ongoing orders). */
-export const TIMELINE_PO_STATUSES = ["planned", "ordered", "in_transit"] as const;
+export const TIMELINE_PO_STATUSES = [
+  "planned",
+  "ordered",
+  "in_production",
+  "in_transit",
+] as const;
 
 export const PO_TIMELINE_STATUS_LABELS: Record<string, string> = {
   planned: "Planned",
   ordered: "Ordered",
+  in_production: "In production",
   in_transit: "In transit",
   received: "Received",
   cancelled: "Cancelled",
@@ -70,6 +76,7 @@ export const PO_TIMELINE_STATUS_LABELS: Record<string, string> = {
 export const PO_TIMELINE_STATUS_STYLES: Record<string, string> = {
   planned: "bg-stone-100 text-stone-700",
   ordered: "bg-blue-100 text-blue-800",
+  in_production: "bg-indigo-100 text-indigo-800",
   in_transit: "bg-violet-100 text-violet-800",
   received: "bg-emerald-100 text-emerald-800",
   cancelled: "bg-stone-200 text-stone-500",

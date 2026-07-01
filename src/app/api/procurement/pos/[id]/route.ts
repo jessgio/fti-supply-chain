@@ -15,6 +15,7 @@ import type { PoStatus } from "@/types/database";
 const VALID_STATUSES: PoStatus[] = [
   "planned",
   "ordered",
+  "in_production",
   "in_transit",
   "received",
   "cancelled",

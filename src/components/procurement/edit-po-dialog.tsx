@@ -23,6 +23,7 @@ export interface PoSkuOption {
   sku_code: string;
   name: string | null;
   is_bundle?: boolean;
+  is_packaging?: boolean;
   franchise_name?: string | null;
 }
 

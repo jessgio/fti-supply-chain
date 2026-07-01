@@ -1,8 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PoStatus } from "@/types/database";
+import {
+  derivePoDisplayStatus,
+  derivePoStatus,
+  PO_ACTIVE_SHIPMENT_STATUSES,
+  type PoLifecycleInput,
+} from "@/lib/procurement/po-lifecycle-rules";
 
-/** Shipment statuses that keep a PO in the in-transit lifecycle. */
-const PO_ACTIVE_SHIPMENT_STATUSES = new Set(["planned", "in_transit"]);
+export { PO_ACTIVE_SHIPMENT_STATUSES };
 
 export async function syncPoStatusesAfterShipmentChange(
   supabase: SupabaseClient,
@@ -34,97 +39,134 @@ export async function poHasOpenShipments(
   });
 }
 
+async function loadPoLifecycleInput(
+  supabase: SupabaseClient,
+  poId: string,
+): Promise<PoLifecycleInput | null> {
+  const { data: po, error: poError } = await supabase
+    .from("purchase_orders")
+    .select(
+      `
+      id,
+      status,
+      order_date,
+      expected_date,
+      created_at,
+      down_payment_pct,
+      discount_amount,
+      tax_pct,
+      pph_pct,
+      other_charges,
+      currency,
+      purchase_order_lines (
+        qty_ordered,
+        qty_received,
+        unit_cost,
+        is_closed
+      ),
+      po_payments (
+        payment_date,
+        purpose,
+        amount,
+        currency
+      ),
+      shipment_purchase_orders (
+        shipments (
+          status,
+          estimated_departure_date,
+          expected_delivery_date
+        )
+      )
+    `,
+    )
+    .eq("id", poId)
+    .maybeSingle();
+  if (poError) throw poError;
+  if (!po) return null;
+
+  const lines = (po.purchase_order_lines ?? []) as Array<{
+    qty_ordered: number;
+    qty_received: number;
+    unit_cost: number | null;
+    is_closed: boolean;
+  }>;
+
+  const payments = (po.po_payments ?? []) as Array<{
+    payment_date: string;
+    purpose: string;
+    amount: number;
+    currency: string;
+  }>;
+
+  const shipmentLinks = (po.shipment_purchase_orders ?? []) as Array<{
+    shipments:
+      | {
+          status: string;
+          estimated_departure_date: string;
+          expected_delivery_date: string;
+        }
+      | {
+          status: string;
+          estimated_departure_date: string;
+          expected_delivery_date: string;
+        }[]
+      | null;
+  }>;
+
+  const shipments = shipmentLinks.flatMap((link) => {
+    const raw = link.shipments;
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw : [raw];
+  });
+
+  return {
+    status: po.status as PoStatus,
+    order_date: po.order_date as string | null,
+    expected_date: po.expected_date as string | null,
+    created_at: po.created_at as string,
+    down_payment_pct: Number(po.down_payment_pct ?? 30),
+    discount_amount: Number(po.discount_amount ?? 0),
+    tax_pct: Number(po.tax_pct ?? 11),
+    pph_pct: Number(po.pph_pct ?? 0),
+    other_charges: Number(po.other_charges ?? 0),
+    currency: (po.currency as string) ?? "IDR",
+    lines: lines.map((line) => ({
+      qty_ordered: Number(line.qty_ordered),
+      qty_received: Number(line.qty_received),
+      unit_cost: line.unit_cost == null ? null : Number(line.unit_cost),
+      is_closed: Boolean(line.is_closed),
+    })),
+    payments: payments.map((payment) => ({
+      payment_date: payment.payment_date,
+      purpose: payment.purpose,
+      amount: Number(payment.amount),
+      currency: payment.currency,
+    })),
+    shipments,
+  };
+}
+
 export async function recalculatePoStatus(
   supabase: SupabaseClient,
   poId: string,
 ): Promise<void> {
-  const { data: po, error: poError } = await supabase
-    .from("purchase_orders")
-    .select("id, status")
-    .eq("id", poId)
-    .maybeSingle();
-  if (poError) throw poError;
-  if (!po || po.status === "cancelled" || po.status === "received") return;
+  const input = await loadPoLifecycleInput(supabase, poId);
+  if (!input) return;
+  if (input.status === "cancelled" || input.status === "planned") return;
 
-  const { data: lines, error: linesError } = await supabase
-    .from("purchase_order_lines")
-    .select("qty_ordered, qty_received, is_closed")
-    .eq("po_id", poId);
-  if (linesError) throw linesError;
-
-  const allLines = lines ?? [];
-  const allReceived = allLines.every(
-    (l) =>
-      l.is_closed ||
-      Number(l.qty_received) >= Number(l.qty_ordered),
-  );
-  const anyReceived = allLines.some((l) => Number(l.qty_received) > 0);
-
-  if (allReceived && anyReceived) {
+  const newStatus = derivePoStatus(input);
+  if (input.status !== newStatus) {
     await supabase
       .from("purchase_orders")
-      .update({
-        status: "received" satisfies PoStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", poId);
-    return;
-  }
-
-  const { data: shipments, error: shipError } = await supabase
-    .from("shipment_purchase_orders")
-    .select("shipments(status, estimated_departure_date)")
-    .eq("po_id", poId);
-  if (shipError) throw shipError;
-
-  const hasActiveShipment = (shipments ?? []).some((link) => {
-    const raw = link.shipments as
-      | { status: string; estimated_departure_date: string }
-      | { status: string; estimated_departure_date: string }[]
-      | null;
-    const s = Array.isArray(raw) ? (raw[0] ?? null) : raw;
-    if (!s) return false;
-    return PO_ACTIVE_SHIPMENT_STATUSES.has(s.status);
-  });
-
-  if (hasActiveShipment || anyReceived) {
-    const newStatus: PoStatus = "in_transit";
-    if (po.status !== newStatus) {
-      await supabase
-        .from("purchase_orders")
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", poId);
-    }
-    return;
-  }
-
-  if (po.status === "in_transit" && !anyReceived) {
-    await supabase
-      .from("purchase_orders")
-      .update({
-        status: "ordered" satisfies PoStatus,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
       .eq("id", poId);
   }
 }
 
 export function computePoDisplayStatus(
-  status: PoStatus,
-  lines: Array<{ qty_ordered: number; qty_received: number; is_closed?: boolean }>,
-  hasShipments: boolean,
+  input: PoLifecycleInput,
 ): string {
-  const anyReceived = lines.some((l) => Number(l.qty_received) > 0);
-  const allReceived = lines.every(
-    (l) =>
-      l.is_closed || Number(l.qty_received) >= Number(l.qty_ordered),
-  );
-
-  if (status === "cancelled") return "cancelled";
-  if (status === "received" || (allReceived && anyReceived)) return "received";
-  if (anyReceived && !allReceived) return "partially_received";
-  if (hasShipments && status === "in_transit") return "shipped";
-  return status;
+  return derivePoDisplayStatus(input);
 }
 
 export function isTimelineActiveShipmentStatus(status: string): boolean {

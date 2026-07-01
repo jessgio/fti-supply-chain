@@ -6,6 +6,7 @@ import type {
   PurchaseOrderLine,
   Supplier,
 } from "@/types/database";
+import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
 
 export interface NewPoLineInput {
   sku_id: string;
@@ -258,6 +259,7 @@ type PoRow = {
   created_at: string;
   updated_at: string;
   suppliers: { name: string } | null;
+  pd_projects: { product_name: string | null; name: string } | { product_name: string | null; name: string }[] | null;
   purchase_order_lines: {
     id: string;
     sku_id: string;
@@ -265,7 +267,7 @@ type PoRow = {
     qty_received: number;
     is_closed: boolean;
     unit_cost: number | null;
-    skus: { sku_code: string; name: string | null } | null;
+    skus: { sku_code: string; name: string | null; is_packaging: boolean } | null;
     po_receipts?: {
       id: string;
       qty_received: number;
@@ -333,6 +335,9 @@ function mapPoRow(row: PoRow): PurchaseOrder {
       po_id: row.id,
     }))
     .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
+  const pdProject = Array.isArray(row.pd_projects)
+    ? (row.pd_projects[0] ?? null)
+    : row.pd_projects;
   return {
     id: row.id,
     po_number: row.po_number,
@@ -349,6 +354,8 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     currency: row.currency ?? "IDR",
     notes: row.notes,
     pd_project_id: row.pd_project_id ?? null,
+    pd_project_name: pdProject?.name ?? null,
+    pd_project_product_name: pdProject?.product_name ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     lines,
@@ -358,13 +365,13 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 
 const PO_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
-  "suppliers(name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name))";
+  "suppliers(name), pd_projects(product_name, name), " +
+  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging))";
 
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
-  "suppliers(name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name), " +
+  "suppliers(name), pd_projects(product_name, name), " +
+  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
@@ -458,6 +465,8 @@ export async function updatePurchaseOrder(
 ): Promise<PurchaseOrder> {
   const existing = await getPurchaseOrder(supabase, id);
   if (!existing) throw new Error("Purchase order not found.");
+
+  const manualStatus = input.status !== undefined;
 
   const lockedStatus =
     existing.status === "received" || existing.status === "cancelled";
@@ -597,6 +606,10 @@ export async function updatePurchaseOrder(
     }
   }
 
+  if (!manualStatus) {
+    await recalculatePoStatus(supabase, id);
+  }
+
   const updated = await getPurchaseOrder(supabase, id);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
@@ -655,7 +668,12 @@ export async function listOpenPoBatchesBySkus(
       "id, sku_id, qty_ordered, qty_received, is_closed, skus(sku_code), purchase_orders!inner(id, expected_date, status)",
     )
     .in("sku_id", skuIds)
-    .in("purchase_orders.status", ["planned", "ordered", "in_transit"]);
+    .in("purchase_orders.status", [
+      "planned",
+      "ordered",
+      "in_production",
+      "in_transit",
+    ]);
   if (error) throw error;
 
   const batches: OpenPoBatch[] = [];
@@ -800,6 +818,8 @@ export async function createPoPayment(
   });
   if (error) throw error;
 
+  await recalculatePoStatus(supabase, poId);
+
   const updated = await getPurchaseOrder(supabase, poId);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
@@ -878,6 +898,8 @@ export async function updatePoPayment(
     .eq("po_id", poId);
   if (error) throw error;
 
+  await recalculatePoStatus(supabase, poId);
+
   const updated = await getPurchaseOrder(supabase, poId);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
@@ -903,6 +925,8 @@ export async function deletePoPayment(
     .eq("id", paymentId)
     .eq("po_id", poId);
   if (error) throw error;
+
+  await recalculatePoStatus(supabase, poId);
 
   const updated = await getPurchaseOrder(supabase, poId);
   if (!updated) throw new Error("Purchase order not found.");

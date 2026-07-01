@@ -10,7 +10,61 @@ import {
   isTimelineActiveShipmentStatus,
   recalculatePoStatus,
 } from "@/lib/db/po-lifecycle";
+import type { PoLifecycleInput } from "@/lib/procurement/po-lifecycle-rules";
 import { TIMELINE_PO_STATUSES } from "@/lib/shipments/constants";
+import type { PoStatus } from "@/types/database";
+
+function buildTimelineLifecycleInput(
+  po: Record<string, unknown>,
+  lines: Array<{
+    qty_ordered: number;
+    qty_received: number;
+    is_closed: boolean;
+    unit_cost?: number | null;
+  }>,
+  payments: Array<{
+    payment_date: string;
+    purpose: string;
+    amount: number;
+    currency?: string;
+  }>,
+  shipments: Array<{
+    estimated_departure_date: string;
+    expected_delivery_date: string;
+    status?: string;
+  }>,
+): PoLifecycleInput {
+  return {
+    status: po.status as PoStatus,
+    order_date: (po.order_date as string | null) ?? null,
+    expected_date: (po.expected_date as string | null) ?? null,
+    created_at: po.created_at as string,
+    down_payment_pct: Number(po.down_payment_pct ?? 30),
+    discount_amount: Number(po.discount_amount ?? 0),
+    tax_pct: Number(po.tax_pct ?? 11),
+    pph_pct: Number(po.pph_pct ?? 0),
+    other_charges: Number(po.other_charges ?? 0),
+    currency: (po.currency as string) ?? "IDR",
+    lines: lines.map((line) => ({
+      qty_ordered: Number(line.qty_ordered),
+      qty_received: Number(line.qty_received),
+      unit_cost: line.unit_cost == null ? null : Number(line.unit_cost),
+      is_closed: Boolean(line.is_closed),
+    })),
+    payments,
+    shipments: shipments.map((shipment) => ({
+      status: shipment.status ?? "planned",
+      estimated_departure_date: shipment.estimated_departure_date,
+      expected_delivery_date: shipment.expected_delivery_date,
+    })),
+  };
+}
+
+export interface InboundReceiveBatchInput {
+  batch_code?: string | null;
+  expiry_date?: string | null;
+  qty: number;
+}
 
 export interface CreateInboundReceiveInput {
   shipment_id: string;
@@ -18,13 +72,16 @@ export interface CreateInboundReceiveInput {
   received_by?: string | null;
   notes?: string | null;
   location?: string;
+  /** @deprecated Use batches on each item instead */
   batch_code?: string | null;
+  /** @deprecated Use batches on each item instead */
   expiry_date?: string | null;
   items: Array<{
     po_line_id: string;
     sku_id: string;
     ordered_qty: number;
     received_qty: number;
+    batches?: InboundReceiveBatchInput[];
   }>;
 }
 
@@ -298,7 +355,28 @@ export async function createInboundReceive(
   if (itemsError) throw itemsError;
 
   for (const item of input.items) {
-    if (item.received_qty > 0) {
+    if (item.received_qty <= 0) continue;
+
+    const batches = (item.batches ?? []).filter((b) => b.qty > 0);
+    if (batches.length > 0) {
+      const batchTotal = batches.reduce((sum, b) => sum + b.qty, 0);
+      if (batchTotal !== item.received_qty) {
+        throw new Error(
+          `Batch quantities must equal received quantity for line ${item.po_line_id}.`,
+        );
+      }
+      for (const batch of batches) {
+        await receivePoLine(
+          supabase,
+          item.po_line_id,
+          batch.qty,
+          receiveDate,
+          input.location ?? "Gudang Finished Goods",
+          batch.batch_code ?? null,
+          batch.expiry_date ?? null,
+        );
+      }
+    } else {
       await receivePoLine(
         supabase,
         item.po_line_id,
@@ -351,14 +429,21 @@ export async function listOngoingPosForTimeline(
       expected_date,
       order_date,
       created_at,
+      down_payment_pct,
+      discount_amount,
+      tax_pct,
+      pph_pct,
+      other_charges,
+      currency,
       suppliers ( name ),
       purchase_order_lines (
         qty_ordered,
         qty_received,
         is_closed,
+        unit_cost,
         skus ( sku_code, name )
       ),
-      po_payments ( payment_date, purpose ),
+      po_payments ( payment_date, purpose, amount, currency ),
       shipment_purchase_orders (
         shipments (
           id,
@@ -386,8 +471,22 @@ export async function listOngoingPosForTimeline(
       qty_ordered: number;
       qty_received: number;
       is_closed: boolean;
+      unit_cost: number | null;
       skus: { sku_code: string; name: string | null } | null;
     }>;
+
+    const rawPayments = (po.po_payments ?? []) as Array<{
+      payment_date: string;
+      purpose: string;
+      amount: number;
+      currency: string;
+    }>;
+    const payments = rawPayments.map((p) => ({
+      payment_date: p.payment_date,
+      purpose: p.purpose,
+      amount: Number(p.amount),
+      currency: p.currency,
+    }));
 
     const shipmentLinks = (po.shipment_purchase_orders ?? []) as unknown as Array<{
       shipments: {
@@ -433,9 +532,12 @@ export async function listOngoingPosForTimeline(
       ? (supplierRaw[0] ?? null)
       : supplierRaw;
     const displayStatus = computePoDisplayStatus(
-      po.status as PoTimelineEntry["status"],
-      lines,
-      shipments.length > 0,
+      buildTimelineLifecycleInput(
+        po as Record<string, unknown>,
+        lines,
+        payments,
+        shipments,
+      ),
     );
 
     return {
@@ -447,12 +549,10 @@ export async function listOngoingPosForTimeline(
       created_at: po.created_at as string,
       order_date: (po.order_date as string | null) ?? null,
       expected_date: po.expected_date as string | null,
-      payments: ((po.po_payments ?? []) as Array<{ payment_date: string; purpose: string }>).map(
-        (p) => ({
-          payment_date: p.payment_date,
-          purpose: p.purpose,
-        }),
-      ),
+      payments: payments.map((p) => ({
+        payment_date: p.payment_date,
+        purpose: p.purpose,
+      })),
       shipments,
       line_items: lines.map((l) => ({
         sku_code: l.skus?.sku_code ?? "",
@@ -471,14 +571,21 @@ const PO_TIMELINE_SELECT = `
   expected_date,
   order_date,
   created_at,
+  down_payment_pct,
+  discount_amount,
+  tax_pct,
+  pph_pct,
+  other_charges,
+  currency,
   suppliers ( name ),
   purchase_order_lines (
     qty_ordered,
     qty_received,
     is_closed,
+    unit_cost,
     skus ( sku_code, name )
   ),
-  po_payments ( payment_date, purpose ),
+  po_payments ( payment_date, purpose, amount, currency ),
   shipment_purchase_orders (
     shipments (
       id,
@@ -502,8 +609,22 @@ function mapPoTimelineRow(po: Record<string, unknown>): PoTimelineEntry {
     qty_ordered: number;
     qty_received: number;
     is_closed: boolean;
+    unit_cost: number | null;
     skus: { sku_code: string; name: string | null } | null;
   }>;
+
+  const rawPayments = (po.po_payments ?? []) as Array<{
+    payment_date: string;
+    purpose: string;
+    amount: number;
+    currency: string;
+  }>;
+  const payments = rawPayments.map((p) => ({
+    payment_date: p.payment_date,
+    purpose: p.purpose,
+    amount: Number(p.amount),
+    currency: p.currency,
+  }));
 
   const shipmentLinks = (po.shipment_purchase_orders ?? []) as unknown as Array<{
     shipments: {
@@ -549,9 +670,7 @@ function mapPoTimelineRow(po: Record<string, unknown>): PoTimelineEntry {
     ? (supplierRaw[0] ?? null)
     : supplierRaw;
   const displayStatus = computePoDisplayStatus(
-    po.status as PoTimelineEntry["status"],
-    lines,
-    shipments.length > 0,
+    buildTimelineLifecycleInput(po, lines, payments, shipments),
   );
 
   return {
@@ -563,12 +682,10 @@ function mapPoTimelineRow(po: Record<string, unknown>): PoTimelineEntry {
     created_at: po.created_at as string,
     order_date: (po.order_date as string | null) ?? null,
     expected_date: po.expected_date as string | null,
-    payments: ((po.po_payments ?? []) as Array<{ payment_date: string; purpose: string }>).map(
-      (p) => ({
-        payment_date: p.payment_date,
-        purpose: p.purpose,
-      }),
-    ),
+    payments: payments.map((p) => ({
+      payment_date: p.payment_date,
+      purpose: p.purpose,
+    })),
     shipments,
     line_items: lines.map((l) => ({
       sku_code: l.skus?.sku_code ?? "",

@@ -41,6 +41,7 @@ type PackagingFilter = "all" | "packaging" | "other";
 const PO_STATUS_LABELS: Record<PoStatus, string> = {
   planned: "Planned",
   ordered: "Ordered",
+  in_production: "In production",
   in_transit: "In transit",
   received: "Received",
   cancelled: "Cancelled",
@@ -49,6 +50,7 @@ const PO_STATUS_LABELS: Record<PoStatus, string> = {
 const PO_STATUS_STYLES: Record<PoStatus, string> = {
   planned: "bg-stone-100 text-stone-700",
   ordered: "bg-sky-100 text-sky-800",
+  in_production: "bg-indigo-100 text-indigo-800",
   in_transit: "bg-amber-100 text-amber-800",
   received: "bg-emerald-100 text-emerald-800",
   cancelled: "bg-rose-100 text-rose-700",

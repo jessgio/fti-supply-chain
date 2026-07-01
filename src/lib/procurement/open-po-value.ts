@@ -3,7 +3,12 @@ import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
 import { getRateToIdr } from "@/lib/procurement/fx-rates";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
-export const OPEN_PO_STATUSES = ["planned", "ordered", "in_transit"] as const;
+export const OPEN_PO_STATUSES = [
+  "planned",
+  "ordered",
+  "in_production",
+  "in_transit",
+] as const;
 
 export function isOpenPo(po: PurchaseOrder): boolean {
   return (OPEN_PO_STATUSES as readonly string[]).includes(po.status);

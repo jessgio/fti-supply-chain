@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PoPaymentsSection } from "@/components/procurement/po-payments-section";
 import { PoShipmentsSection } from "@/components/procurement/po-shipments-section";
+import { PoExtractDeliveryNotesSection } from "@/components/extract-inbound-delivery-note/po-extract-delivery-notes-section";
 import {
   EditPoDialog,
   type PoSkuOption,
@@ -295,6 +296,8 @@ export default function PurchaseOrderPage() {
           />
 
           <PoShipmentsSection po={po} onChanged={loadPo} />
+
+          <PoExtractDeliveryNotesSection poId={po.id} />
         </div>
 
         <aside className="space-y-4">

@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
-import { PackageCheck, Plus, Search } from "lucide-react";
+import { PackageCheck, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,6 +25,22 @@ import {
 import { formatNumber } from "@/lib/utils";
 import type { InboundReceive, Shipment } from "@/types/database";
 
+type LineBatchEntry = {
+  id: string;
+  batch_code: string;
+  expiry_date: string;
+  qty: number;
+};
+
+function newBatchEntry(qty = 0): LineBatchEntry {
+  return {
+    id: crypto.randomUUID(),
+    batch_code: "",
+    expiry_date: "",
+    qty,
+  };
+}
+
 export default function InboundPage() {
   const [receives, setReceives] = useState<InboundReceive[]>([]);
   const [openShipments, setOpenShipments] = useState<Shipment[]>([]);
@@ -42,9 +58,10 @@ export default function InboundPage() {
   );
   const [receivedBy, setReceivedBy] = useState("");
   const [notes, setNotes] = useState("");
-  const [batchCode, setBatchCode] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
   const [lineQtys, setLineQtys] = useState<Record<string, number>>({});
+  const [lineBatches, setLineBatches] = useState<Record<string, LineBatchEntry[]>>(
+    {},
+  );
 
   const loadReceives = useCallback(async () => {
     setLoading(true);
@@ -83,6 +100,7 @@ export default function InboundPage() {
   useEffect(() => {
     if (!selectedShipment) {
       setLineQtys({});
+      setLineBatches({});
       return;
     }
     const qtys: Record<string, number> = {};
@@ -92,7 +110,73 @@ export default function InboundPage() {
       }
     }
     setLineQtys(qtys);
+    setLineBatches({});
   }, [selectedShipment]);
+
+  function updateLineQty(poLineId: string, qty: number) {
+    setLineQtys((prev) => ({ ...prev, [poLineId]: qty }));
+    if (qty <= 0) {
+      setLineBatches((prev) => {
+        const next = { ...prev };
+        delete next[poLineId];
+        return next;
+      });
+    }
+  }
+
+  function addLineBatch(poLineId: string) {
+    const receivedQty = lineQtys[poLineId] ?? 0;
+    const existing = lineBatches[poLineId] ?? [];
+    const allocated = existing.reduce((sum, b) => sum + b.qty, 0);
+    const remaining = Math.max(0, receivedQty - allocated);
+    setLineBatches((prev) => ({
+      ...prev,
+      [poLineId]: [...existing, newBatchEntry(remaining)],
+    }));
+  }
+
+  function updateLineBatch(
+    poLineId: string,
+    batchId: string,
+    patch: Partial<Pick<LineBatchEntry, "batch_code" | "expiry_date" | "qty">>,
+  ) {
+    setLineBatches((prev) => ({
+      ...prev,
+      [poLineId]: (prev[poLineId] ?? []).map((batch) =>
+        batch.id === batchId ? { ...batch, ...patch } : batch,
+      ),
+    }));
+  }
+
+  function removeLineBatch(poLineId: string, batchId: string) {
+    setLineBatches((prev) => {
+      const next = { ...prev };
+      const filtered = (next[poLineId] ?? []).filter((b) => b.id !== batchId);
+      if (filtered.length === 0) {
+        delete next[poLineId];
+      } else {
+        next[poLineId] = filtered;
+      }
+      return next;
+    });
+  }
+
+  function validateBatches(): string | null {
+    for (const [poLineId, batches] of Object.entries(lineBatches)) {
+      const receivedQty = lineQtys[poLineId] ?? 0;
+      if (receivedQty <= 0) continue;
+      const batchTotal = batches.reduce((sum, b) => sum + b.qty, 0);
+      if (batchTotal !== receivedQty) {
+        return "Each line's batch quantities must equal the received quantity.";
+      }
+      if (batches.some((b) => b.qty <= 0)) {
+        return "Each batch must have a positive quantity.";
+      }
+    }
+    return null;
+  }
+
+  const batchValidationError = useMemo(() => validateBatches(), [lineBatches, lineQtys]);
 
   const summary = useMemo(() => ({
     total: receives.length,
@@ -102,16 +186,31 @@ export default function InboundPage() {
 
   async function handleCreate() {
     if (!selectedShipment) return;
+    const batchError = validateBatches();
+    if (batchError) {
+      setFormError(batchError);
+      return;
+    }
     setSaving(true);
     setFormError(null);
 
     const items = (selectedShipment.purchase_orders ?? []).flatMap((po) =>
-      (po.items ?? []).map((item) => ({
-        po_line_id: item.po_line_id,
-        sku_id: item.sku_id,
-        ordered_qty: item.quantity,
-        received_qty: lineQtys[item.po_line_id] ?? 0,
-      })),
+      (po.items ?? []).map((item) => {
+        const batches = (lineBatches[item.po_line_id] ?? [])
+          .filter((b) => b.qty > 0)
+          .map((b) => ({
+            batch_code: b.batch_code.trim() || null,
+            expiry_date: b.expiry_date || null,
+            qty: b.qty,
+          }));
+        return {
+          po_line_id: item.po_line_id,
+          sku_id: item.sku_id,
+          ordered_qty: item.quantity,
+          received_qty: lineQtys[item.po_line_id] ?? 0,
+          ...(batches.length > 0 ? { batches } : {}),
+        };
+      }),
     ).filter((i) => i.received_qty > 0);
 
     try {
@@ -123,8 +222,6 @@ export default function InboundPage() {
           receive_date: receiveDate,
           received_by: receivedBy || null,
           notes: notes || null,
-          batch_code: batchCode || null,
-          expiry_date: expiryDate || null,
           items,
         }),
       });
@@ -133,8 +230,7 @@ export default function InboundPage() {
       setDialogOpen(false);
       setSelectedShipmentId("");
       setNotes("");
-      setBatchCode("");
-      setExpiryDate("");
+      setLineBatches({});
       await loadReceives();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create");
@@ -277,7 +373,7 @@ export default function InboundPage() {
         onClose={() => setDialogOpen(false)}
         title="Log inbound receive"
         description="Select a shipment and confirm received quantities. Stock will be updated automatically."
-        className="max-w-2xl"
+        className="max-w-3xl"
       >
         <div className="space-y-4">
             <div>
@@ -320,25 +416,6 @@ export default function InboundPage() {
                   placeholder="Name"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-stone-700">
-                  Batch code (optional)
-                </label>
-                <Input
-                  value={batchCode}
-                  onChange={(e) => setBatchCode(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-stone-700">
-                  Expiry date (optional)
-                </label>
-                <Input
-                  type="date"
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
-                />
-              </div>
             </div>
 
             {selectedShipment && (
@@ -346,6 +423,10 @@ export default function InboundPage() {
                 <label className="mb-2 block text-sm font-medium text-stone-700">
                   Received quantities
                 </label>
+                <p className="mb-2 text-xs text-stone-500">
+                  Add batch codes and expiry dates per line when stock arrives in
+                  multiple lots.
+                </p>
                 <div className="overflow-x-auto rounded-md border border-stone-200">
                   <table className="w-full text-sm">
                     <thead>
@@ -357,34 +438,160 @@ export default function InboundPage() {
                     </thead>
                     <tbody>
                       {(selectedShipment.purchase_orders ?? []).flatMap((po) =>
-                        (po.items ?? []).map((item) => (
-                          <tr key={item.po_line_id} className="border-b border-stone-100">
-                            <td className="px-3 py-2">
-                              <span className="font-medium">{item.sku_code}</span>
-                              {item.sku_name && (
-                                <span className="ml-1 text-stone-500">{item.sku_name}</span>
+                        (po.items ?? []).map((item) => {
+                          const receivedQty = lineQtys[item.po_line_id] ?? 0;
+                          const batches = lineBatches[item.po_line_id] ?? [];
+                          const batchTotal = batches.reduce((sum, b) => sum + b.qty, 0);
+                          const batchMismatch =
+                            batches.length > 0 && batchTotal !== receivedQty;
+
+                          return (
+                            <Fragment key={item.po_line_id}>
+                              <tr className="border-b border-stone-100">
+                                <td className="px-3 py-2">
+                                  <span className="font-medium">{item.sku_code}</span>
+                                  {item.sku_name && (
+                                    <span className="ml-1 text-stone-500">
+                                      {item.sku_name}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 tabular-nums">
+                                  {formatNumber(item.quantity)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    max={item.quantity}
+                                    className="h-8 w-24"
+                                    value={receivedQty}
+                                    onChange={(e) =>
+                                      updateLineQty(
+                                        item.po_line_id,
+                                        Number(e.target.value),
+                                      )
+                                    }
+                                  />
+                                </td>
+                              </tr>
+                              {receivedQty > 0 && (
+                                <tr className="border-b border-stone-100 bg-stone-50/60">
+                                  <td colSpan={3} className="px-3 py-3">
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-medium text-stone-600">
+                                          Batch allocations
+                                        </span>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs"
+                                          onClick={() => addLineBatch(item.po_line_id)}
+                                        >
+                                          <Plus className="mr-1 h-3 w-3" />
+                                          Add batch
+                                        </Button>
+                                      </div>
+                                      {batches.length === 0 ? (
+                                        <p className="text-xs text-stone-500">
+                                          Optional — add batches to track lot codes and
+                                          expiry dates.
+                                        </p>
+                                      ) : (
+                                        <div className="space-y-2">
+                                          {batches.map((batch) => (
+                                            <div
+                                              key={batch.id}
+                                              className="flex flex-wrap items-end gap-2"
+                                            >
+                                              <div className="min-w-[8rem] flex-1">
+                                                <label className="mb-1 block text-xs text-stone-500">
+                                                  Batch code
+                                                </label>
+                                                <Input
+                                                  className="h-8"
+                                                  placeholder="e.g. LOT-001"
+                                                  value={batch.batch_code}
+                                                  onChange={(e) =>
+                                                    updateLineBatch(
+                                                      item.po_line_id,
+                                                      batch.id,
+                                                      { batch_code: e.target.value },
+                                                    )
+                                                  }
+                                                />
+                                              </div>
+                                              <div className="min-w-[9rem]">
+                                                <label className="mb-1 block text-xs text-stone-500">
+                                                  Expiry date
+                                                </label>
+                                                <Input
+                                                  type="date"
+                                                  className="h-8"
+                                                  value={batch.expiry_date}
+                                                  onChange={(e) =>
+                                                    updateLineBatch(
+                                                      item.po_line_id,
+                                                      batch.id,
+                                                      { expiry_date: e.target.value },
+                                                    )
+                                                  }
+                                                />
+                                              </div>
+                                              <div className="w-24">
+                                                <label className="mb-1 block text-xs text-stone-500">
+                                                  Qty
+                                                </label>
+                                                <Input
+                                                  type="number"
+                                                  min={0}
+                                                  max={receivedQty}
+                                                  className="h-8"
+                                                  value={batch.qty}
+                                                  onChange={(e) =>
+                                                    updateLineBatch(
+                                                      item.po_line_id,
+                                                      batch.id,
+                                                      { qty: Number(e.target.value) },
+                                                    )
+                                                  }
+                                                />
+                                              </div>
+                                              <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 w-8 shrink-0 p-0 text-stone-500 hover:text-rose-600"
+                                                onClick={() =>
+                                                  removeLineBatch(
+                                                    item.po_line_id,
+                                                    batch.id,
+                                                  )
+                                                }
+                                                aria-label="Remove batch"
+                                              >
+                                                <Trash2 className="h-4 w-4" />
+                                              </Button>
+                                            </div>
+                                          ))}
+                                          {batchMismatch && (
+                                            <p className="text-xs text-amber-700">
+                                              Batch quantities ({formatNumber(batchTotal)})
+                                              must equal received quantity (
+                                              {formatNumber(receivedQty)}).
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </td>
-                            <td className="px-3 py-2 tabular-nums">
-                              {formatNumber(item.quantity)}
-                            </td>
-                            <td className="px-3 py-2">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={item.quantity}
-                                className="h-8 w-24"
-                                value={lineQtys[item.po_line_id] ?? 0}
-                                onChange={(e) =>
-                                  setLineQtys((prev) => ({
-                                    ...prev,
-                                    [item.po_line_id]: Number(e.target.value),
-                                  }))
-                                }
-                              />
-                            </td>
-                          </tr>
-                        )),
+                            </Fragment>
+                          );
+                        }),
                       )}
                     </tbody>
                   </table>
@@ -405,7 +612,7 @@ export default function InboundPage() {
             </Button>
             <Button
               onClick={handleCreate}
-              disabled={saving || !selectedShipmentId}
+              disabled={saving || !selectedShipmentId || !!batchValidationError}
             >
               {saving ? "Saving…" : "Log receive"}
             </Button>
