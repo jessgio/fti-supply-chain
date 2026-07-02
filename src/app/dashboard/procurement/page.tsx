@@ -583,7 +583,6 @@ function ProcurementInner() {
                         primaryGroups.length === 1 ? "" : "s"
                       }`}
                 {statusFilter ? ` · ${STATUS_LABELS[statusFilter]}` : ""}
-                {!statusFilter && !skuQ ? " · packaging POs roll up via Packaging BOM" : ""}
               </CardDescription>
             </div>
             <div className="relative w-full sm:w-72">
@@ -646,35 +645,6 @@ function ProcurementInner() {
                       <p className="mt-0.5 text-xs text-stone-500">
                         {group.pos.length} PO{group.pos.length === 1 ? "" : "s"}
                       </p>
-                    )}
-                    {group.packagingComponents.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-xs font-medium text-stone-500">
-                          Packaging BOM
-                        </p>
-                        <ul className="mt-1 flex flex-wrap gap-2">
-                          {group.packagingComponents.map((link) => (
-                            <li
-                              key={link.id}
-                              className="rounded-md border border-stone-200 bg-stone-50 px-2 py-1 text-xs text-stone-700"
-                            >
-                              <span className="font-mono font-medium">
-                                {link.packaging_sku_code}
-                              </span>
-                              {link.packaging_name && (
-                                <span className="text-stone-500">
-                                  {" "}
-                                  · {link.packaging_name}
-                                </span>
-                              )}
-                              <span className="text-stone-400">
-                                {" "}
-                                ×{formatNumber(link.qty_per_unit)}/unit
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
                     )}
                   </div>
                   <table className="w-full text-left text-sm">

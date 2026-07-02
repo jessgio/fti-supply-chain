@@ -1,10 +1,9 @@
 "use client";
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ChevronDown,
   ChevronRight,
   Plane,
   Plus,
@@ -39,13 +38,16 @@ import {
 } from "@/lib/shipments/constants";
 import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
+import { groupShipmentsByPrimaryGood } from "@/lib/shipments/shipment-primary-groups";
 import { formatNumber } from "@/lib/utils";
 import type {
+  ProductPackagingLink,
   PurchaseOrder,
   Shipment,
   ShipmentDocumentType,
   ShipmentLineAllocation,
 } from "@/types/database";
+import type { PoSkuOption } from "@/components/procurement/edit-po-dialog";
 
 const TYPE_ICONS = {
   sea: Ship,
@@ -67,11 +69,14 @@ function ShipmentsInner() {
   const highlightShipmentId = searchParams.get("shipment");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [openPos, setOpenPos] = useState<PurchaseOrder[]>([]);
+  const [skus, setSkus] = useState<PoSkuOption[]>([]);
+  const [packagingLinks, setPackagingLinks] = useState<ProductPackagingLink[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -111,6 +116,29 @@ function ShipmentsInner() {
   useEffect(() => {
     loadShipments();
   }, [loadShipments]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadMeta() {
+      try {
+        const [skuRes, linksRes] = await Promise.all([
+          fetch("/api/procurement/skus"),
+          fetch("/api/packaging/links"),
+        ]);
+        const skuData = await skuRes.json();
+        const linksData = linksRes.ok ? await linksRes.json() : { links: [] };
+        if (!active) return;
+        setSkus(skuData.skus ?? []);
+        setPackagingLinks(linksData.links ?? []);
+      } catch {
+        // metadata is optional for browsing
+      }
+    }
+    void loadMeta();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!dialogOpen) return;
@@ -165,63 +193,27 @@ function ShipmentsInner() {
     setTransitDays(DEFAULT_TRANSIT_DAYS[shipmentType]);
   }, [shipmentType]);
 
-  const groupedByPo = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        po_id: string;
-        po_number: string;
-        supplier_name: string | null;
-        shipments: Shipment[];
-      }
-    >();
-
-    for (const shipment of shipments) {
-      for (const po of shipment.purchase_orders ?? []) {
-        const existing = map.get(po.id);
-        if (existing) {
-          if (!existing.shipments.some((s) => s.id === shipment.id)) {
-            existing.shipments.push(shipment);
-          }
-        } else {
-          map.set(po.id, {
-            po_id: po.id,
-            po_number: po.po_number,
-            supplier_name: po.supplier_name ?? null,
-            shipments: [shipment],
-          });
-        }
-      }
-    }
-
-    return Array.from(map.values())
-      .map((group) => ({
-        ...group,
-        shipments: [...group.shipments].sort((a, b) =>
-          b.estimated_departure_date.localeCompare(a.estimated_departure_date),
-        ),
-      }))
-      .sort((a, b) =>
-        (b.shipments[0]?.estimated_departure_date ?? "").localeCompare(
-          a.shipments[0]?.estimated_departure_date ?? "",
-        ),
-      );
-  }, [shipments]);
+  const groupedBySku = useMemo(
+    () =>
+      groupShipmentsByPrimaryGood(
+        shipments,
+        skus.map((sku) => ({
+          id: sku.id,
+          sku_code: sku.sku_code,
+          name: sku.name,
+          is_packaging: sku.is_packaging ?? false,
+          is_bundle: sku.is_bundle ?? false,
+        })),
+        packagingLinks,
+      ),
+    [shipments, skus, packagingLinks],
+  );
 
   useEffect(() => {
     if (highlightShipmentId) {
       router.replace(`/dashboard/shipments/${highlightShipmentId}`);
     }
   }, [highlightShipmentId, router]);
-
-  function toggleExpandedPo(poId: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(poId)) next.delete(poId);
-      else next.add(poId);
-      return next;
-    });
-  }
 
   const summary = useMemo(() => {
     return {
@@ -322,11 +314,19 @@ function ShipmentsInner() {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative min-w-[200px] flex-1">
+            <div className="min-w-0 flex-1">
+              <CardTitle>Shipments by product</CardTitle>
+              <CardDescription>
+                {shipments.length} shipment{shipments.length === 1 ? "" : "s"}{" "}
+                across {groupedBySku.length} product
+                {groupedBySku.length === 1 ? "" : "s"}
+              </CardDescription>
+            </div>
+            <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
               <Input
                 className="pl-9"
-                placeholder="Search shipment, PO, supplier…"
+                placeholder="Search shipment, PO, SKU, supplier…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -342,116 +342,135 @@ function ShipmentsInner() {
             <p className="py-8 text-center text-sm text-stone-500">
               No shipments yet. Create one to track a PO delivery.
             </p>
+          ) : groupedBySku.length === 0 ? (
+            <p className="py-8 text-center text-sm text-stone-500">
+              No shipments match your search.
+            </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 text-left">
-                    <th className="w-8 py-2" />
-                    <th className="py-2 pr-4 font-medium text-stone-500">PO</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Supplier</th>
-                    <th className="py-2 pr-4 font-medium text-stone-500">Shipments</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {groupedByPo.map((group) => {
-                    const isOpen = expanded.has(group.po_id);
-                    return (
-                      <Fragment key={group.po_id}>
-                        <tr className="border-b border-stone-100 hover:bg-stone-50/50">
-                          <td className="py-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleExpandedPo(group.po_id)}
-                              className="flex h-6 w-6 items-center justify-center rounded text-stone-400 hover:bg-stone-100"
-                            >
-                              {isOpen ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
-                            </button>
-                          </td>
-                          <td className="py-2 pr-4">
-                            <PoHoverLink
-                              poId={group.po_id}
-                              poNumber={group.po_number}
-                            />
-                          </td>
-                          <td className="py-2 pr-4 text-stone-600">
-                            {group.supplier_name ?? "—"}
-                          </td>
-                          <td className="py-2 pr-4 text-stone-600">
-                            {group.shipments.length}
-                          </td>
+            <div className="space-y-8">
+              {groupedBySku.map((group) => (
+                <section key={group.key}>
+                  <div className="mb-3 border-b border-stone-200 pb-3">
+                    <h3 className="text-base font-semibold text-stone-900">
+                      {group.label}
+                    </h3>
+                    {group.skuCode ? (
+                      <p className="mt-0.5 font-mono text-xs text-stone-500">
+                        {group.skuCode}
+                        <span className="ml-2 font-sans text-stone-400">
+                          · {group.poCount} PO{group.poCount === 1 ? "" : "s"}
+                          {" · "}
+                          {group.shipmentCount} shipment
+                          {group.shipmentCount === 1 ? "" : "s"}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-stone-500">
+                        {group.poCount} PO{group.poCount === 1 ? "" : "s"}
+                        {" · "}
+                        {group.shipmentCount} shipment
+                        {group.shipmentCount === 1 ? "" : "s"}
+                      </p>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-stone-200 text-left">
+                          <th className="py-2 pr-4 font-medium text-stone-500">
+                            Shipment
+                          </th>
+                          <th className="py-2 pr-4 font-medium text-stone-500">
+                            Type
+                          </th>
+                          <th className="py-2 pr-4 font-medium text-stone-500">
+                            Supplier
+                          </th>
+                          <th className="py-2 pr-4 font-medium text-stone-500">
+                            Schedule
+                          </th>
                         </tr>
-                        {isOpen &&
-                          group.shipments.map((shipment) => {
-                            const Icon = TYPE_ICONS[shipment.shipment_type];
-                            return (
-                              <tr
-                                key={shipment.id}
-                                className="cursor-pointer border-b border-stone-100 bg-stone-50/60 hover:bg-stone-100/70"
-                                onClick={() =>
-                                  router.push(`/dashboard/shipments/${shipment.id}`)
-                                }
-                              >
-                                <td />
-                                <td className="py-2 pr-4 pl-2">
+                      </thead>
+                      <tbody>
+                        {group.entries.map((entry) => {
+                          const { shipment } = entry;
+                          const Icon = TYPE_ICONS[shipment.shipment_type];
+                          return (
+                            <tr
+                              key={`${group.key}:${entry.shipment.id}:${entry.po_id}`}
+                              className="cursor-pointer border-b border-stone-100 hover:bg-stone-50/70"
+                              onClick={() =>
+                                router.push(`/dashboard/shipments/${shipment.id}`)
+                              }
+                            >
+                              <td className="py-2 pr-4">
+                                <span
+                                  className="inline-flex flex-wrap items-center gap-2"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   <ShipmentHoverLink
                                     shipmentId={shipment.id}
                                     shipmentNumber={shipment.shipment_number}
                                   />
-                                </td>
-                                <td className="py-2 pr-4 text-stone-600">
-                                  <span className="inline-flex items-center gap-1.5">
-                                    <Icon className="h-4 w-4" />
-                                    {SHIPMENT_TYPE_LABELS[shipment.shipment_type]}
-                                  </span>
-                                </td>
-                                <td className="py-2 pr-4">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-stone-600">
-                                      {formatDisplayDate(
-                                        shipment.estimated_departure_date,
-                                      )}{" "}
-                                      →{" "}
-                                      {formatDisplayDate(
-                                        shipment.expected_delivery_date,
-                                      )}
-                                    </span>
-                                    <Badge
-                                      className={
-                                        SHIPMENT_STATUS_STYLES[
-                                          shipment.status as ShipmentStatus
-                                        ]
-                                      }
-                                    >
-                                      {
-                                        SHIPMENT_STATUS_LABELS[
-                                          shipment.status as ShipmentStatus
-                                        ]
-                                      }
-                                    </Badge>
-                                    {(shipment.missing_document_count ?? 0) > 0 && (
-                                      <Badge className="bg-amber-100 text-amber-800">
-                                        {shipment.missing_document_count}{" "}
-                                        {shipment.missing_document_count === 1
-                                          ? "document"
-                                          : "documents"}{" "}
-                                        to upload
-                                      </Badge>
+                                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                                  <PoHoverLink
+                                    poId={entry.po_id}
+                                    poNumber={entry.po_number}
+                                  />
+                                </span>
+                              </td>
+                              <td className="py-2 pr-4 text-stone-600">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Icon className="h-4 w-4" />
+                                  {SHIPMENT_TYPE_LABELS[shipment.shipment_type]}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-4 text-stone-600">
+                                {entry.supplier_name ?? "—"}
+                              </td>
+                              <td className="py-2 pr-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-stone-600">
+                                    {formatDisplayDate(
+                                      shipment.estimated_departure_date,
+                                    )}{" "}
+                                    →{" "}
+                                    {formatDisplayDate(
+                                      shipment.expected_delivery_date,
                                     )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
+                                  </span>
+                                  <Badge
+                                    className={
+                                      SHIPMENT_STATUS_STYLES[
+                                        shipment.status as ShipmentStatus
+                                      ]
+                                    }
+                                  >
+                                    {
+                                      SHIPMENT_STATUS_LABELS[
+                                        shipment.status as ShipmentStatus
+                                      ]
+                                    }
+                                  </Badge>
+                                  {(shipment.missing_document_count ?? 0) > 0 && (
+                                    <Badge className="bg-amber-100 text-amber-800">
+                                      {shipment.missing_document_count}{" "}
+                                      {shipment.missing_document_count === 1
+                                        ? "document"
+                                        : "documents"}{" "}
+                                      to upload
+                                    </Badge>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </CardContent>
