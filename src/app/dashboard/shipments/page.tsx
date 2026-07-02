@@ -2,7 +2,7 @@
 
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,7 +10,6 @@ import {
   Plus,
   Search,
   Ship,
-  Trash2,
   Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,8 +37,15 @@ import {
   type ShipmentStatus,
   type ShipmentType,
 } from "@/lib/shipments/constants";
+import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
+import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
 import { formatNumber } from "@/lib/utils";
-import type { PurchaseOrder, Shipment, ShipmentLineAllocation } from "@/types/database";
+import type {
+  PurchaseOrder,
+  Shipment,
+  ShipmentDocumentType,
+  ShipmentLineAllocation,
+} from "@/types/database";
 
 const TYPE_ICONS = {
   sea: Ship,
@@ -56,6 +62,7 @@ export default function ShipmentsPage() {
 }
 
 function ShipmentsInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const highlightShipmentId = searchParams.get("shipment");
   const [shipments, setShipments] = useState<Shipment[]>([]);
@@ -64,9 +71,7 @@ function ShipmentsInner() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
-  const [expanded, setExpanded] = useState<Set<string>>(() =>
-    highlightShipmentId ? new Set() : new Set(),
-  );
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -82,6 +87,9 @@ function ShipmentsInner() {
   const [shipmentNumber, setShipmentNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [lineQtys, setLineQtys] = useState<Record<string, number>>({});
+  const [requiredDocuments, setRequiredDocuments] = useState<
+    ShipmentDocumentType[]
+  >(() => defaultRequiredDocuments("sea"));
 
   const loadShipments = useCallback(async () => {
     setLoading(true);
@@ -201,14 +209,10 @@ function ShipmentsInner() {
   }, [shipments]);
 
   useEffect(() => {
-    if (!highlightShipmentId || groupedByPo.length === 0) return;
-    const poId = groupedByPo.find((g) =>
-      g.shipments.some((s) => s.id === highlightShipmentId),
-    )?.po_id;
-    if (poId) {
-      setExpanded((prev) => new Set(prev).add(poId));
+    if (highlightShipmentId) {
+      router.replace(`/dashboard/shipments/${highlightShipmentId}`);
     }
-  }, [highlightShipmentId, groupedByPo]);
+  }, [highlightShipmentId, router]);
 
   function toggleExpandedPo(poId: string) {
     setExpanded((prev) => {
@@ -250,6 +254,7 @@ function ShipmentsInner() {
           notes: notes || null,
           po_ids: selectedPoIds,
           items,
+          required_documents: requiredDocuments,
         }),
       });
       const data = await res.json();
@@ -257,6 +262,7 @@ function ShipmentsInner() {
       setDialogOpen(false);
       setSelectedPoIds([]);
       setNotes("");
+      setRequiredDocuments(defaultRequiredDocuments("sea"));
       await loadShipments();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create");
@@ -265,16 +271,6 @@ function ShipmentsInner() {
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this shipment?")) return;
-    const res = await fetch(`/api/shipments/${id}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? "Failed to delete");
-      return;
-    }
-    await loadShipments();
-  }
 
   function toggleSelectedPo(poId: string) {
     setSelectedPoIds((prev) =>
@@ -291,7 +287,12 @@ function ShipmentsInner() {
             Log when PO goods depart and track expected delivery dates.
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button
+          onClick={() => {
+            setRequiredDocuments(defaultRequiredDocuments(shipmentType));
+            setDialogOpen(true);
+          }}
+        >
           <Plus className="mr-2 h-4 w-4" />
           New shipment
         </Button>
@@ -390,7 +391,10 @@ function ShipmentsInner() {
                             return (
                               <tr
                                 key={shipment.id}
-                                className="border-b border-stone-100 bg-stone-50/60"
+                                className="cursor-pointer border-b border-stone-100 bg-stone-50/60 hover:bg-stone-100/70"
+                                onClick={() =>
+                                  router.push(`/dashboard/shipments/${shipment.id}`)
+                                }
                               >
                                 <td />
                                 <td className="py-2 pr-4 pl-2">
@@ -429,15 +433,14 @@ function ShipmentsInner() {
                                         ]
                                       }
                                     </Badge>
-                                    {shipment.status !== "closed" && (
-                                      <Button
-                                        variant="ghost"
-                                        className="h-7 w-7 p-0 text-stone-400 hover:text-rose-600"
-                                        onClick={() => handleDelete(shipment.id)}
-                                        aria-label="Delete shipment"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
+                                    {(shipment.missing_document_count ?? 0) > 0 && (
+                                      <Badge className="bg-amber-100 text-amber-800">
+                                        {shipment.missing_document_count}{" "}
+                                        {shipment.missing_document_count === 1
+                                          ? "document"
+                                          : "documents"}{" "}
+                                        to upload
+                                      </Badge>
                                     )}
                                   </div>
                                 </td>
@@ -599,6 +602,12 @@ function ShipmentsInner() {
               <label className="mb-1 block text-sm font-medium text-stone-700">Notes</label>
               <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
+
+            <ShipmentDocumentChecklist
+              shipmentType={shipmentType}
+              selected={requiredDocuments}
+              onChange={setRequiredDocuments}
+            />
 
           {formError && (
             <p className="text-sm text-rose-600">{formError}</p>

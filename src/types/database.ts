@@ -509,6 +509,42 @@ export interface Shipment {
   created_at?: string;
   updated_at?: string;
   purchase_orders?: ShipmentPoRef[];
+  required_documents?: ShipmentDocumentType[];
+  missing_document_count?: number;
+}
+
+export type ShipmentDocumentType =
+  | "commercial_invoice"
+  | "packing_list"
+  | "bill_of_lading"
+  | "awb_label"
+  | "coo_form_fe"
+  | "pib"
+  | "sppb"
+  | "forwarder_invoice"
+  | "lartas";
+
+export type ShipmentDocumentVersionStatus = "draft" | "final";
+
+export interface ShipmentDocumentVersion {
+  id: string;
+  shipment_id: string;
+  document_type: ShipmentDocumentType;
+  version_number: number;
+  status: ShipmentDocumentVersionStatus;
+  file_name: string;
+  mime_type: string | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ShipmentDocumentSummary {
+  document_type: ShipmentDocumentType;
+  required: boolean;
+  latest_version: ShipmentDocumentVersion | null;
+  version_count: number;
+  has_final: boolean;
 }
 
 export interface ShipmentLineAllocation {

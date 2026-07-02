@@ -15,7 +15,7 @@ export function ShipmentHoverLink({
 }: ShipmentHoverLinkProps) {
   return (
     <HoverSnapshotLink
-      href={`/dashboard/shipments?shipment=${shipmentId}`}
+      href={`/dashboard/shipments/${shipmentId}`}
       label={shipmentNumber}
       snapshotUrl={`/api/shipments/${shipmentId}/snapshot`}
       className={className}

@@ -4,6 +4,7 @@ import type {
   ShipmentLineAllocation,
   ShipmentStatus,
   ShipmentType,
+  ShipmentDocumentType,
 } from "@/types/database";
 import {
   calculateExpectedDeliveryDate,
@@ -18,6 +19,13 @@ import {
   stripShipmentDuplicateSuffix,
 } from "@/lib/shipments/shipment-number";
 import { syncPoStatusesAfterShipmentChange } from "@/lib/db/po-lifecycle";
+import {
+  deleteShipmentDocuments,
+  getMissingDocumentCountsByShipmentId,
+  getRequiredDocuments,
+  setRequiredDocuments,
+} from "@/lib/db/shipment-documents";
+import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
 
 export interface CreateShipmentInput {
   shipment_number?: string;
@@ -29,6 +37,7 @@ export interface CreateShipmentInput {
   notes?: string | null;
   po_ids: string[];
   items: Array<{ po_line_id: string; quantity: number }>;
+  required_documents?: ShipmentDocumentType[];
 }
 
 export interface UpdateShipmentInput {
@@ -42,6 +51,7 @@ export interface UpdateShipmentInput {
   notes?: string | null;
   po_ids?: string[];
   items?: Array<{ po_line_id: string; quantity: number }>;
+  required_documents?: ShipmentDocumentType[];
 }
 
 export interface ShipmentListParams {
@@ -234,7 +244,15 @@ export async function listShipments(
     );
   }
 
-  return rows;
+  const missingCounts = await getMissingDocumentCountsByShipmentId(
+    supabase,
+    rows.map((s) => s.id),
+  );
+
+  return rows.map((s) => ({
+    ...s,
+    missing_document_count: missingCounts.get(s.id) ?? 0,
+  }));
 }
 
 export async function getShipment(
@@ -248,12 +266,15 @@ export async function getShipment(
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return mapShipmentRow(data as unknown as ShipmentRow);
+  const shipment = mapShipmentRow(data as unknown as ShipmentRow);
+  shipment.required_documents = await getRequiredDocuments(supabase, id);
+  return shipment;
 }
 
 export async function getLineAllocations(
   supabase: SupabaseClient,
   poIds: string[],
+  excludeShipmentId?: string,
 ): Promise<ShipmentLineAllocation[]> {
   if (poIds.length === 0) return [];
 
@@ -270,17 +291,19 @@ export async function getLineAllocations(
 
   const { data: allocated, error: allocError } = await supabase
     .from("shipment_items")
-    .select("po_line_id, quantity")
+    .select("po_line_id, quantity, shipment_id")
     .in("po_line_id", lineIds);
   if (allocError) throw allocError;
 
   const allocatedByLine = new Map<string, number>();
+  const currentByLine = new Map<string, number>();
   for (const row of allocated ?? []) {
     const id = row.po_line_id as string;
-    allocatedByLine.set(
-      id,
-      (allocatedByLine.get(id) ?? 0) + Number(row.quantity),
-    );
+    const qty = Number(row.quantity);
+    allocatedByLine.set(id, (allocatedByLine.get(id) ?? 0) + qty);
+    if (excludeShipmentId && row.shipment_id === excludeShipmentId) {
+      currentByLine.set(id, (currentByLine.get(id) ?? 0) + qty);
+    }
   }
 
   return (lines ?? []).map((line) => {
@@ -299,10 +322,12 @@ export async function getLineAllocations(
     if (!po) {
       throw new Error("Missing purchase order for line allocation.");
     }
+    const lineId = line.id as string;
     const qtyOrdered = Number(line.qty_ordered);
-    const qtyAllocated = allocatedByLine.get(line.id as string) ?? 0;
+    const qtyAllocated = allocatedByLine.get(lineId) ?? 0;
+    const currentQty = currentByLine.get(lineId) ?? 0;
     return {
-      po_line_id: line.id as string,
+      po_line_id: lineId,
       po_id: po.id,
       po_number: po.po_number,
       sku_id: line.sku_id as string,
@@ -310,7 +335,7 @@ export async function getLineAllocations(
       sku_name: sku?.name ?? null,
       qty_ordered: qtyOrdered,
       qty_allocated: qtyAllocated,
-      qty_available: Math.max(0, qtyOrdered - qtyAllocated),
+      qty_available: Math.max(0, qtyOrdered - qtyAllocated + currentQty),
     };
   });
 }
@@ -517,6 +542,20 @@ export async function createShipment(
     .insert(itemRows);
   if (itemsError) throw itemsError;
 
+  if (input.required_documents !== undefined) {
+    await setRequiredDocuments(
+      supabase,
+      shipment.id,
+      input.required_documents,
+    );
+  } else {
+    await setRequiredDocuments(
+      supabase,
+      shipment.id,
+      defaultRequiredDocuments(input.shipment_type),
+    );
+  }
+
   await syncPoStatusesAfterShipmentChange(supabase, input.po_ids);
 
   const created = await getShipment(supabase, shipment.id);
@@ -596,6 +635,10 @@ export async function updateShipment(
     if (itemsError) throw itemsError;
   }
 
+  if (input.required_documents !== undefined) {
+    await setRequiredDocuments(supabase, id, input.required_documents);
+  }
+
   await syncPoStatusesAfterShipmentChange(supabase, poIds);
 
   const updated = await getShipment(supabase, id);
@@ -622,6 +665,7 @@ export async function deleteShipment(
   }
 
   const poIds = (existing.purchase_orders ?? []).map((po) => po.id);
+  await deleteShipmentDocuments(supabase, id);
   const { error } = await supabase.from("shipments").delete().eq("id", id);
   if (error) throw error;
 

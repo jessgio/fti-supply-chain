@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Truck } from "lucide-react";
+import { FileStack, Plus, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
@@ -17,12 +17,16 @@ import {
   type ShipmentStatus,
   type ShipmentType,
 } from "@/lib/shipments/constants";
-import { formatNumber } from "@/lib/utils";
+import { ShipmentDocumentsDialog } from "@/components/shipments/shipment-documents-dialog";
+import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
+import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
 import type {
   PurchaseOrder,
   Shipment,
+  ShipmentDocumentType,
   ShipmentLineAllocation,
 } from "@/types/database";
+import { formatNumber } from "@/lib/utils";
 
 export function PoShipmentsSection({
   po,
@@ -45,6 +49,13 @@ export function PoShipmentsSection({
   const [shipmentNumber, setShipmentNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [lineQtys, setLineQtys] = useState<Record<string, number>>({});
+  const [requiredDocuments, setRequiredDocuments] = useState<
+    ShipmentDocumentType[]
+  >(() => defaultRequiredDocuments("sea"));
+  const [documentsShipment, setDocumentsShipment] = useState<Shipment | null>(
+    null,
+  );
+  const [documentsOpen, setDocumentsOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/shipments")
@@ -120,6 +131,7 @@ export function PoShipmentsSection({
           notes: notes || null,
           po_ids: [po.id],
           items,
+          required_documents: requiredDocuments,
         }),
       });
       const data = await res.json();
@@ -141,7 +153,10 @@ export function PoShipmentsSection({
           <p className="text-sm font-medium text-stone-700">Shipments</p>
         </div>
         {po.status !== "received" && po.status !== "cancelled" && (
-          <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
+          <Button size="sm" variant="outline" onClick={() => {
+            setRequiredDocuments(defaultRequiredDocuments(shipmentType));
+            setDialogOpen(true);
+          }}>
             <Plus className="h-3.5 w-3.5" />
             Log shipment
           </Button>
@@ -165,13 +180,27 @@ export function PoShipmentsSection({
                   ETA {formatDisplayDate(shipment.expected_delivery_date)}
                 </p>
               </div>
-              <Badge
-                className={
-                  SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]
-                }
-              >
-                {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  className={
+                    SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]
+                  }
+                >
+                  {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
+                </Badge>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  onClick={() => {
+                    setDocumentsShipment(shipment);
+                    setDocumentsOpen(true);
+                  }}
+                >
+                  <FileStack className="mr-1 h-3.5 w-3.5" />
+                  Docs
+                </Button>
+              </div>
             </div>
           ))}
         </div>
@@ -274,6 +303,12 @@ export function PoShipmentsSection({
             </p>
           )}
 
+          <ShipmentDocumentChecklist
+            shipmentType={shipmentType}
+            selected={requiredDocuments}
+            onChange={setRequiredDocuments}
+          />
+
           {formError && <p className="text-sm text-red-600">{formError}</p>}
 
           <div className="flex justify-end gap-2">
@@ -289,6 +324,15 @@ export function PoShipmentsSection({
           </div>
         </div>
       </Dialog>
+
+      <ShipmentDocumentsDialog
+        shipment={documentsShipment}
+        open={documentsOpen}
+        onClose={() => {
+          setDocumentsOpen(false);
+          setDocumentsShipment(null);
+        }}
+      />
     </div>
   );
 }

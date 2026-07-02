@@ -18,7 +18,13 @@ export async function GET(request: Request) {
       );
     }
 
-    const allocations = await getLineAllocations(createAdminClient(), poIds);
+    const excludeShipmentId =
+      searchParams.get("exclude_shipment_id")?.trim() || undefined;
+    const allocations = await getLineAllocations(
+      createAdminClient(),
+      poIds,
+      excludeShipmentId,
+    );
     return NextResponse.json({ allocations });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
