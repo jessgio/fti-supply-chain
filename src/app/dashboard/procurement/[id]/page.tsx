@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
   Pencil,
+  Trash2,
   Truck,
 } from "lucide-react";
 import { PageShell } from "@/components/dashboard/page-shell";
@@ -46,6 +47,7 @@ import type {
 
 export default function PurchaseOrderPage() {
   const params = useParams();
+  const router = useRouter();
   const poId = params.id as string;
 
   const [po, setPo] = useState<PurchaseOrder | null>(null);
@@ -124,6 +126,43 @@ export default function PurchaseOrderPage() {
       allocations.some((a) => a.qty_allocated > 0),
     [timeline?.shipments, allocations],
   );
+
+  const canDelete = useMemo(
+    () => !(po?.lines ?? []).some((line) => line.qty_received > 0),
+    [po?.lines],
+  );
+
+  async function handleDelete() {
+    if (!po) return;
+    if (!canDelete) {
+      setError(
+        "This PO has received items and cannot be deleted. Cancel it instead.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete purchase order ${po.po_number}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/pos/${poId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete PO");
+      router.push("/dashboard/procurement");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete PO");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function setStatus(status: PoStatus) {
     setBusy(true);
@@ -212,6 +251,18 @@ export default function PurchaseOrderPage() {
               <Pencil className="h-3.5 w-3.5" />
               Edit
             </Button>
+            {canDelete && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDelete}
+                disabled={busy}
+                className="text-rose-700 hover:text-rose-800"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            )}
             {po.status !== "received" && po.status !== "cancelled" && nextStatus(po.status) && (
               <Button
                 size="sm"
