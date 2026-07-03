@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   DEFAULT_PO_CURRENCY,
   PO_CURRENCIES,
+  PO_UNIT_COST_STEP,
 } from "@/lib/procurement/currencies";
 import { DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import {
@@ -393,6 +394,7 @@ export function EditPoDialog({
                       className="w-28"
                       type="number"
                       min="0"
+                      step={PO_UNIT_COST_STEP}
                       placeholder="Unit cost"
                       value={line.unit_cost}
                       onChange={(e) =>

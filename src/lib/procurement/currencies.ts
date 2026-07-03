@@ -19,19 +19,22 @@ export function isValidPoCurrency(currency: string): currency is PoCurrency {
   return VALID_PO_CURRENCY.has(currency);
 }
 
-const ZERO_DECIMAL_CURRENCIES = new Set<PoCurrency>(["IDR", "JPY", "KRW"]);
+/** Max decimal places for PO line unit costs and derived totals. */
+export const PO_UNIT_COST_DECIMALS = 5;
+
+/** `step` attribute for unit-cost number inputs. */
+export const PO_UNIT_COST_STEP = "0.00001";
 
 export function formatPoMoney(value: number, currency: string = DEFAULT_PO_CURRENCY): string {
   const code = (PO_CURRENCIES.some((c) => c.code === currency)
     ? currency
     : DEFAULT_PO_CURRENCY) as PoCurrency;
   const locale = code === "IDR" ? "id-ID" : "en-US";
-  const decimals = ZERO_DECIMAL_CURRENCIES.has(code) ? 0 : 2;
 
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: code,
-    maximumFractionDigits: decimals,
-    minimumFractionDigits: decimals,
+    maximumFractionDigits: PO_UNIT_COST_DECIMALS,
+    minimumFractionDigits: 0,
   }).format(value);
 }

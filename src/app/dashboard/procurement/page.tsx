@@ -42,6 +42,7 @@ import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
   PO_CURRENCIES,
+  PO_UNIT_COST_STEP,
 } from "@/lib/procurement/currencies";
 import {
   billableLineQty,
@@ -1098,6 +1099,7 @@ function CreatePoDialog({
                 className="w-28"
                 type="number"
                 min="0"
+                step={PO_UNIT_COST_STEP}
                 placeholder="Unit cost"
                 value={line.unit_cost}
                 onChange={(e) => updateLine(idx, { unit_cost: e.target.value })}
