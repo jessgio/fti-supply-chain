@@ -99,45 +99,55 @@ export async function listExtracts(
   supabase: SupabaseClient,
   params: ListExtractsParams = {},
 ): Promise<ExtractSummary[]> {
-  const [{ data: extracts, error }, manufacturerNames] = await Promise.all([
-    supabase.from("extracts").select("id, item_no, description, unit"),
-    loadManufacturerNamesByExtractId(supabase),
-  ]);
+  const [{ data: extracts, error }, manufacturerNames, statsRes] =
+    await Promise.all([
+      supabase.from("extracts").select("id, item_no, description, unit"),
+      loadManufacturerNamesByExtractId(supabase),
+      supabase.rpc("get_extract_summaries"),
+    ]);
   if (error) throw error;
+  if (statsRes.error) throw statsRes.error;
 
-  const txns = await fetchAllRows<TxnRow>(() =>
-    supabase
-      .from("extract_transactions")
-      .select(
-        "id, extract_id, txn_date, seq, received, issued, balance, category",
-      ),
-  );
+  type StatsRow = {
+    extract_id: string;
+    txn_count: number;
+    first_date: string | null;
+    last_date: string | null;
+    starting_balance: number;
+    ending_balance: number;
+    total_received: number;
+    total_issued: number;
+    waste_issued: number;
+  };
 
-  const byExtract = new Map<string, ExtractTransaction[]>();
-  for (const row of txns) {
-    const list = byExtract.get(row.extract_id) ?? [];
-    list.push(mapTxn(row));
-    byExtract.set(row.extract_id, list);
+  const statsByExtract = new Map<string, StatsRow>();
+  for (const row of (statsRes.data ?? []) as StatsRow[]) {
+    statsByExtract.set(row.extract_id, row);
   }
 
   let summaries: ExtractSummary[] = (extracts ?? []).map((ex) => {
-    const rows = byExtract.get(ex.id) ?? [];
-    const stats = computeLedgerStats(rows);
+    const stats = statsByExtract.get(ex.id);
+    const starting = Number(stats?.starting_balance ?? 0);
+    const totalReceived = Number(stats?.total_received ?? 0);
+    const wasteIssued = Number(stats?.waste_issued ?? 0);
+    const denom = starting + totalReceived;
+    const wastePct = denom > 0 ? (wasteIssued / denom) * 100 : null;
+
     return {
       id: ex.id,
       item_no: ex.item_no,
       description: ex.description,
       manufacturer_name: manufacturerNames.get(ex.id) ?? null,
       unit: ex.unit,
-      txn_count: stats.txn_count,
-      first_date: stats.first_date,
-      last_date: stats.last_date,
-      starting_balance: stats.starting_balance,
-      ending_balance: stats.ending_balance,
-      total_received: stats.total_received,
-      total_issued: stats.total_issued,
-      waste_issued: stats.waste_issued,
-      waste_pct: stats.waste_pct,
+      txn_count: Number(stats?.txn_count ?? 0),
+      first_date: stats?.first_date ?? null,
+      last_date: stats?.last_date ?? null,
+      starting_balance: starting,
+      ending_balance: Number(stats?.ending_balance ?? 0),
+      total_received: totalReceived,
+      total_issued: Number(stats?.total_issued ?? 0),
+      waste_issued: wasteIssued,
+      waste_pct: wastePct === null ? null : Number(wastePct.toFixed(2)),
     } satisfies ExtractSummary;
   });
 

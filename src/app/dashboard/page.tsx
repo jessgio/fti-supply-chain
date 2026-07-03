@@ -10,12 +10,12 @@ import {
 } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadGrowthAnalytics } from "@/lib/analytics/growth-load";
+import { getCachedGrowthAnalytics } from "@/lib/analytics/growth-cache";
 import { computeGrowthMetrics } from "@/lib/analytics/growth";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
 import { formatCurrency, formatNumber, formatPct } from "@/lib/utils";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 120;
 
 const steps = [
   {
@@ -58,19 +58,24 @@ async function loadOverview(): Promise<Overview | null> {
   try {
     const supabase = createAdminClient();
 
-    const [{ recommendations, skuCount }, skusRes, posRes, stockRes, salesMomPct] =
+    const [{ recommendations, skuCount }, posRes, stockRes, salesMomPct] =
       await Promise.all([
         loadRestockRecommendations(supabase),
-        supabase.from("skus").select("sku_code, retail_price"),
         supabase
           .from("purchase_orders")
-          .select("status, purchase_order_lines(qty_ordered, qty_received)"),
+          .select("status, purchase_order_lines(qty_ordered, qty_received)")
+          .in("status", [
+            "planned",
+            "ordered",
+            "in_production",
+            "in_transit",
+          ]),
         supabase
           .from("stock_levels")
           .select("as_of_date")
           .order("as_of_date", { ascending: false })
           .limit(1),
-        loadSalesMom(supabase),
+        loadSalesMom(),
       ]);
 
     const reorderNow = recommendations.filter(
@@ -83,12 +88,25 @@ async function loadOverview(): Promise<Overview | null> {
       (r) => r.days_until_stockout !== null && r.days_until_stockout <= 30,
     ).length;
 
+    const skuCodes = [...new Set(recommendations.map((r) => r.sku_code))];
     const retailBySku = new Map<string, number>();
-    for (const s of (skusRes.data ?? []) as {
-      sku_code: string;
-      retail_price: number | null;
-    }[]) {
-      retailBySku.set(s.sku_code, Number(s.retail_price ?? 0));
+    const CHUNK = 500;
+    const chunks: string[][] = [];
+    for (let i = 0; i < skuCodes.length; i += CHUNK) {
+      chunks.push(skuCodes.slice(i, i + CHUNK));
+    }
+    const skuPriceResults = await Promise.all(
+      chunks.map((codes) =>
+        supabase.from("skus").select("sku_code, retail_price").in("sku_code", codes),
+      ),
+    );
+    for (const { data } of skuPriceResults) {
+      for (const s of (data ?? []) as {
+        sku_code: string;
+        retail_price: number | null;
+      }[]) {
+        retailBySku.set(s.sku_code, Number(s.retail_price ?? 0));
+      }
     }
     const inventoryValue = recommendations.reduce(
       (sum, r) =>
@@ -100,9 +118,7 @@ async function loadOverview(): Promise<Overview | null> {
       status: string;
       purchase_order_lines: { qty_ordered: number; qty_received: number }[];
     }[];
-    const openPos = pos.filter((p) =>
-      ["planned", "ordered", "in_production", "in_transit"].includes(p.status),
-    ).length;
+    const openPos = pos.length;
     const unitsOnOrder = pos
       .filter((p) =>
         ["ordered", "in_production", "in_transit"].includes(p.status),
@@ -134,13 +150,14 @@ async function loadOverview(): Promise<Overview | null> {
   }
 }
 
-async function loadSalesMom(
-  supabase: ReturnType<typeof createAdminClient>,
-): Promise<number | null> {
+async function loadSalesMom(): Promise<number | null> {
   try {
-    const { points, coverage } = await loadGrowthAnalytics(supabase, {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const { points, coverage } = await getCachedGrowthAnalytics({
       grain: "month",
-    });
+      from: threeMonthsAgo.toISOString().slice(0, 10),
+    })();
     return computeGrowthMetrics(points, "month", "sales", coverage)
       .salesMomPct;
   } catch {

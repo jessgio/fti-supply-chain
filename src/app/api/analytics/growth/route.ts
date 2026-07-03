@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   aggregateGrowthForView,
-  loadGrowthAnalytics,
 } from "@/lib/analytics/growth-load";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { getCachedGrowthAnalytics } from "@/lib/analytics/growth-cache";
 import { errorMessage } from "@/lib/errors";
 import type { TimeGrain } from "@/types/database";
 
@@ -20,14 +19,13 @@ export async function GET(request: Request) {
     const aggregateChannels =
       searchParams.get("aggregate_channels") !== "false";
 
-    const supabase = createAdminClient();
-    const { points, coverage } = await loadGrowthAnalytics(supabase, {
+    const { points, coverage } = await getCachedGrowthAnalytics({
       grain,
       channelId,
       franchiseId,
       from,
       to,
-    });
+    })();
 
     const viewPoints = aggregateGrowthForView(
       points,

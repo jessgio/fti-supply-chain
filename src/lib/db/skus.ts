@@ -21,6 +21,7 @@ export interface CreatedSkuRow {
 }
 
 export interface UpdateSkuInput {
+  name?: string | null;
   is_active?: boolean;
   is_packaging?: boolean;
   franchise_id?: string | null;
@@ -152,7 +153,7 @@ export async function updateSku(
 ): Promise<CreatedSkuRow> {
   const { data: existing, error: fetchError } = await supabase
     .from("skus")
-    .select("id, is_bundle")
+    .select("id, sku_code, is_bundle")
     .eq("id", id)
     .maybeSingle();
   if (fetchError) throw fetchError;
@@ -161,10 +162,15 @@ export async function updateSku(
   }
 
   const updates: {
+    name?: string;
     is_active?: boolean;
     is_packaging?: boolean;
     franchise_id?: string;
   } = {};
+
+  if (input.name !== undefined) {
+    updates.name = input.name?.trim() || existing.sku_code;
+  }
 
   if (typeof input.is_active === "boolean") {
     updates.is_active = input.is_active;

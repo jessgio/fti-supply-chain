@@ -25,19 +25,22 @@ export async function GET(request: Request) {
     const sortParam = searchParams.get("sort");
     const sortDirParam = searchParams.get("sort_dir");
     const includeSummary = searchParams.get("summary") !== "0";
+    const includePayments = searchParams.get("payments") !== "0";
 
     const supabase = createAdminClient();
     const [payments, summary] = await Promise.all([
-      listPaymentLedger(supabase, {
-        search: searchParams.get("search") ?? undefined,
-        purpose: searchParams.get("purpose") ?? undefined,
-        month: searchParams.get("month") ?? undefined,
-        sort:
-          sortParam && SORT_KEYS.includes(sortParam as PaymentLedgerSortKey)
-            ? (sortParam as PaymentLedgerSortKey)
-            : undefined,
-        sortDir: sortDirParam === "asc" ? "asc" : "desc",
-      }),
+      includePayments
+        ? listPaymentLedger(supabase, {
+            search: searchParams.get("search") ?? undefined,
+            purpose: searchParams.get("purpose") ?? undefined,
+            month: searchParams.get("month") ?? undefined,
+            sort:
+              sortParam && SORT_KEYS.includes(sortParam as PaymentLedgerSortKey)
+                ? (sortParam as PaymentLedgerSortKey)
+                : undefined,
+            sortDir: sortDirParam === "asc" ? "asc" : "desc",
+          })
+        : Promise.resolve([]),
       includeSummary
         ? computePaymentDashboardSummary(supabase)
         : Promise.resolve(null),

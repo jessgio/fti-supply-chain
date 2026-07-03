@@ -1,11 +1,22 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
-import {
-  GrowthChart,
-  type ChartView,
-} from "@/components/dashboard/growth-chart";
+import type { ChartView } from "@/components/dashboard/growth-chart";
+
+const GrowthChart = dynamic(
+  () =>
+    import("@/components/dashboard/growth-chart").then((m) => m.GrowthChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[352px] items-center justify-center text-sm text-stone-500">
+        Loading chart…
+      </div>
+    ),
+  },
+);
 import { Button } from "@/components/ui/button";
 import {
   Card,

@@ -169,6 +169,32 @@ export default function MappingsPage() {
     }
   }
 
+  async function updateProductName(sku: SkuRow, name: string) {
+    const trimmed = name.trim();
+    if (trimmed === (sku.name ?? "").trim()) return;
+
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+
+      const updated = data.sku as SkuRow;
+      setSkus((prev) =>
+        prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   async function toggleActive(sku: SkuRow) {
     if (sku.is_bundle) return;
     setUpdatingId(sku.id);
@@ -376,8 +402,8 @@ export default function MappingsPage() {
           <CardDescription>
             Inactive SKUs remain in franchise and bundle mappings. Re-uploading
             the mappings Excel does not reset status. Only active, franchise-mapped
-            single SKUs appear in inventory forecast. Change a franchise from the
-            dropdown in the table.
+            single SKUs appear in inventory forecast. Edit product names inline;
+            change a franchise from the dropdown in the table.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -433,6 +459,7 @@ export default function MappingsPage() {
                 <thead>
                   <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
                     <th className="px-3 py-2">SKU</th>
+                    <th className="px-3 py-2">Product name</th>
                     <th className="px-3 py-2">Franchise</th>
                     <th className="px-3 py-2">Type</th>
                     <th className="px-3 py-2">Forecast</th>
@@ -447,6 +474,13 @@ export default function MappingsPage() {
                     >
                       <td className="px-3 py-2 font-mono text-xs sm:text-sm">
                         {sku.sku_code}
+                      </td>
+                      <td className="px-3 py-2">
+                        <ProductNameInput
+                          name={sku.name}
+                          disabled={updatingId === sku.id}
+                          onSave={(name) => updateProductName(sku, name)}
+                        />
                       </td>
                       <td className="px-3 py-2">
                         {sku.is_bundle ? (
@@ -636,5 +670,37 @@ export default function MappingsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ProductNameInput({
+  name,
+  disabled,
+  onSave,
+}: {
+  name: string | null;
+  disabled: boolean;
+  onSave: (name: string) => void;
+}) {
+  const [value, setValue] = useState(name ?? "");
+
+  useEffect(() => {
+    setValue(name ?? "");
+  }, [name]);
+
+  return (
+    <Input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => onSave(value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.currentTarget.blur();
+        }
+      }}
+      placeholder="Product name"
+      className="h-8 min-w-[160px] text-xs"
+      disabled={disabled}
+    />
   );
 }

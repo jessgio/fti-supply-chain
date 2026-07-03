@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrder } from "@/types/database";
 import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
-import { paymentAmountIdr } from "@/lib/procurement/payment-idr";
+import {
+  paymentAmountIdrWithRates,
+  preloadPaymentFxRates,
+} from "@/lib/procurement/payment-idr";
 import { getRateToIdr } from "@/lib/procurement/fx-rates";
 import { poFxDate } from "@/lib/procurement/open-po-value";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
@@ -156,18 +159,32 @@ export async function listPaymentLedger(
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows: PaymentLedgerRow[] = [];
-  for (const row of (data ?? []) as unknown as PaymentRow[]) {
-    const po = row.purchase_orders;
-    if (!po) continue;
-
-    const amountIdr = await paymentAmountIdr({
+  const paymentRows = (data ?? []) as unknown as PaymentRow[];
+  const fxRates = await preloadPaymentFxRates(
+    paymentRows.map((row) => ({
       amount: Number(row.amount),
       currency: row.currency ?? "IDR",
       exchange_rate:
         row.exchange_rate === null ? null : Number(row.exchange_rate),
       payment_date: row.payment_date,
-    });
+    })),
+  );
+
+  const rows: PaymentLedgerRow[] = [];
+  for (const row of paymentRows) {
+    const po = row.purchase_orders;
+    if (!po) continue;
+
+    const amountIdr = paymentAmountIdrWithRates(
+      {
+        amount: Number(row.amount),
+        currency: row.currency ?? "IDR",
+        exchange_rate:
+          row.exchange_rate === null ? null : Number(row.exchange_rate),
+        payment_date: row.payment_date,
+      },
+      fxRates,
+    );
 
     const ledgerRow: PaymentLedgerRow = {
       id: row.id,
@@ -311,8 +328,7 @@ export async function computePaymentDashboardSummary(
   });
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  const [monthRows, purchaseOrders, allPaymentsResult] = await Promise.all([
-    listPaymentLedger(supabase, { month: monthKey }),
+  const [purchaseOrders, allPaymentsResult] = await Promise.all([
     listPurchaseOrders(supabase),
     supabase
       .from("po_payments")
@@ -323,17 +339,45 @@ export async function computePaymentDashboardSummary(
 
   if (allPaymentsResult.error) throw allPaymentsResult.error;
 
-  const paymentsByPo = new Map<string, (typeof allPaymentsResult.data)[number][]>();
-  for (const payment of allPaymentsResult.data ?? []) {
+  const allPayments = allPaymentsResult.data ?? [];
+  const fxRates = await preloadPaymentFxRates(
+    allPayments.map((payment) => ({
+      amount: Number(payment.amount),
+      currency: payment.currency ?? "IDR",
+      exchange_rate:
+        payment.exchange_rate === null
+          ? null
+          : Number(payment.exchange_rate),
+      payment_date: payment.payment_date,
+    })),
+  );
+
+  const paymentsByPo = new Map<string, (typeof allPayments)[number][]>();
+  for (const payment of allPayments) {
     const list = paymentsByPo.get(payment.po_id) ?? [];
     list.push(payment);
     paymentsByPo.set(payment.po_id, list);
   }
 
-  const monthPaymentsIdr = monthRows.reduce(
-    (sum, row) => sum + (row.amount_idr ?? 0),
-    0,
-  );
+  const monthPaymentsIdr = allPayments
+    .filter((payment) => payment.payment_date.startsWith(monthKey))
+    .reduce(
+      (sum, payment) =>
+        sum +
+        paymentAmountIdrWithRates(
+          {
+            amount: Number(payment.amount),
+            currency: payment.currency ?? "IDR",
+            exchange_rate:
+              payment.exchange_rate === null
+                ? null
+                : Number(payment.exchange_rate),
+            payment_date: payment.payment_date,
+          },
+          fxRates,
+        ),
+      0,
+    );
 
   let balanceRemainingIdr = 0;
   let unpaidPoCount = 0;
@@ -373,12 +417,7 @@ export async function computePaymentDashboardSummary(
 
     let paidTotalIdr = 0;
     for (const payment of poPayments) {
-      paidTotalIdr += await paymentAmountIdr({
-        amount: payment.amount,
-        currency: payment.currency,
-        exchange_rate: payment.exchange_rate,
-        payment_date: payment.payment_date,
-      });
+      paidTotalIdr += paymentAmountIdrWithRates(payment, fxRates);
     }
 
     const paidDownPoCurrency = sumPurposePaymentsInPoCurrency(

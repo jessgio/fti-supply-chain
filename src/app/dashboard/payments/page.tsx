@@ -1,12 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   Banknote,
   ChevronDown,
   ChevronRight,
@@ -27,7 +24,6 @@ import { StatCard } from "@/components/ui/stat-card";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { PaymentHoverLink } from "@/components/procurement/payment-hover-link";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
-import { formatNumber } from "@/lib/utils";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import type {
@@ -37,42 +33,8 @@ import type {
 } from "@/lib/db/payments";
 
 type SortDir = "asc" | "desc";
-
-function SortableHeader({
-  label,
-  columnKey,
-  activeKey,
-  sortDir,
-  onSort,
-}: {
-  label: string;
-  columnKey: PaymentLedgerSortKey;
-  activeKey: PaymentLedgerSortKey;
-  sortDir: SortDir;
-  onSort: (key: PaymentLedgerSortKey) => void;
-}) {
-  const active = activeKey === columnKey;
-  return (
-    <th className="py-2 pr-4">
-      <button
-        type="button"
-        className="flex items-center gap-1 whitespace-nowrap text-left font-medium text-stone-500 hover:text-stone-800"
-        onClick={() => onSort(columnKey)}
-      >
-        {label}
-        {active ? (
-          sortDir === "asc" ? (
-            <ArrowUp className="h-3 w-3 shrink-0" />
-          ) : (
-            <ArrowDown className="h-3 w-3 shrink-0" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" />
-        )}
-      </button>
-    </th>
-  );
-}
+const DEFAULT_PAYMENT_SORT_KEY: PaymentLedgerSortKey = "payment_date";
+const DEFAULT_PAYMENT_SORT_DIR: SortDir = "desc";
 
 function fmtIdr(value: number | null | undefined): string {
   if (value == null) return "—";
@@ -88,33 +50,47 @@ export default function PaymentsPage() {
   const debouncedSearch = useDebouncedValue(search);
   const [purpose, setPurpose] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [sortKey, setSortKey] = useState<PaymentLedgerSortKey>("payment_date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const summaryRequestedRef = useRef(false);
+
+  const loadSummary = useCallback(async () => {
+    try {
+      const res = await fetch("/api/payments?payments=0");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load payment summary");
+      setSummary(data.summary ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load payment summary");
+    }
+  }, []);
 
   const loadPayments = useCallback(async () => {
+    if (!summaryRequestedRef.current) {
+      summaryRequestedRef.current = true;
+      void loadSummary();
+    }
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (purpose) params.set("purpose", purpose);
-      params.set("sort", sortKey);
-      params.set("sort_dir", sortDir);
+      params.set("sort", DEFAULT_PAYMENT_SORT_KEY);
+      params.set("sort_dir", DEFAULT_PAYMENT_SORT_DIR);
+      params.set("summary", "0");
 
       const res = await fetch(`/api/payments?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load payments");
       setPayments(data.payments ?? []);
-      setSummary(data.summary ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, purpose, sortKey, sortDir]);
+  }, [debouncedSearch, purpose, loadSummary]);
 
   useEffect(() => {
-    loadPayments();
+    void Promise.resolve().then(loadPayments);
   }, [loadPayments]);
 
   const mismatchCount = useMemo(() => {
@@ -146,15 +122,6 @@ export default function PaymentsPage() {
     }
     return parts.join(" · ");
   }, [summary, mismatchCount]);
-
-  function handleSort(key: PaymentLedgerSortKey) {
-    if (sortKey === key) {
-      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "payment_date" ? "desc" : "desc");
-    }
-  }
 
   const groupedByPo = useMemo(() => {
     const map = new Map<

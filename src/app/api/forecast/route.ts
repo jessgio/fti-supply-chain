@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireReadRole } from "@/lib/auth";
 import {
   DAYS_PER_MONTH,
   DEFAULT_LEAD_TIME_MONTHS,
@@ -15,6 +16,9 @@ export const maxDuration = 120;
 
 export async function GET(request: Request) {
   try {
+    const denied = await requireReadRole();
+    if (denied) return denied;
+
     const { searchParams } = new URL(request.url);
     const leadTimeDays = Number(
       searchParams.get("lead_time_days") ??
