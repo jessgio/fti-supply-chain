@@ -48,6 +48,19 @@ export interface PackagingLinkContribution {
   contribution: number;
 }
 
+/** Packaging material linked to a finished-good SKU (inventory forecast expand row). */
+export interface ProductLinkedPackagingRow {
+  packaging_sku_code: string;
+  packaging_name: string | null;
+  qty_per_unit: number;
+  qty_on_hand: number;
+  on_order_qty: number;
+  /** Packaging units implied by this FG's restock or on-order batch. */
+  need_from_product: number;
+  /** Net PO qty for the packaging SKU across all linked finished goods. */
+  recommended_po_qty: number;
+}
+
 export interface ProductPackagingLink {
   id: string;
   product_sku_id: string;

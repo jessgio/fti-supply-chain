@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +47,7 @@ import { applySeasonalityToggle } from "@/lib/forecast/seasonality-toggle";
 import type {
   DemandPattern,
   NpdStockRow,
+  ProductLinkedPackagingRow,
   RestockRecommendation,
   VelocityClass,
 } from "@/types/database";
@@ -317,6 +327,10 @@ export default function InventoryPage() {
     RestockRecommendation[]
   >([]);
   const [npdSkus, setNpdSkus] = useState<NpdStockRow[]>([]);
+  const [packagingByProduct, setPackagingByProduct] = useState<
+    Record<string, ProductLinkedPackagingRow[]>
+  >({});
+  const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
   const [seasonalityEnabled, setSeasonalityEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -362,6 +376,15 @@ export default function InventoryPage() {
     }
   }
 
+  function toggleSkuExpanded(skuCode: string) {
+    setExpandedSkus((prev) => {
+      const next = new Set(prev);
+      if (next.has(skuCode)) next.delete(skuCode);
+      else next.add(skuCode);
+      return next;
+    });
+  }
+
   useEffect(() => {
     let active = true;
     async function loadForecast() {
@@ -374,6 +397,7 @@ export default function InventoryPage() {
         if (!active) return;
         setRawRecommendations(data.recommendations ?? []);
         setNpdSkus(data.npd_skus ?? []);
+        setPackagingByProduct(data.packaging_by_product ?? {});
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Forecast failed");
       } finally {
@@ -616,7 +640,8 @@ export default function InventoryPage() {
                 Ramadan / Q4 uplift when in the reorder window). Stockout is
                 on-hand only; Batch stockout projects when the latest incoming
                 PO batch runs out after current stock (FIFO). Restock qty is the
-                standard {DEFAULT_TARGET_STOCK_MONTHS}-month batch.
+                standard {DEFAULT_TARGET_STOCK_MONTHS}-month batch. Expand a SKU
+                row to see linked packaging stock and restock needs.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -866,6 +891,9 @@ export default function InventoryPage() {
                 {filtered.map((row) => {
                   const risk = riskOf(row);
                   const badge = RISK_BADGE[risk];
+                  const packagingLinks = packagingByProduct[row.sku_code] ?? [];
+                  const hasPackaging = packagingLinks.length > 0;
+                  const isExpanded = expandedSkus.has(row.sku_code);
                   const stockoutGapDays =
                     row.has_stockout_gap &&
                     row.projected_stockout_date &&
@@ -877,11 +905,42 @@ export default function InventoryPage() {
                         )
                       : null;
                   return (
-                    <tr key={row.sku_code} className="border-b border-stone-100">
+                    <Fragment key={row.sku_code}>
+                    <tr className="border-b border-stone-100">
                       <td className="py-2 pr-4">
                         <Badge className={badge.className}>{badge.label}</Badge>
                       </td>
-                      <td className="py-2 pr-4 font-medium">{row.sku_code}</td>
+                      <td className="py-2 pr-4 font-medium">
+                        <div className="flex items-center gap-1">
+                          {hasPackaging ? (
+                            <button
+                              type="button"
+                              className="rounded p-0.5 text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+                              onClick={() => toggleSkuExpanded(row.sku_code)}
+                              aria-expanded={isExpanded}
+                              aria-label={
+                                isExpanded
+                                  ? `Collapse packaging for ${row.sku_code}`
+                                  : `Expand packaging for ${row.sku_code}`
+                              }
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="w-5 shrink-0" aria-hidden />
+                          )}
+                          <span>{row.sku_code}</span>
+                          {hasPackaging && (
+                            <span className="text-xs font-normal text-stone-400">
+                              ({packagingLinks.length} pkg)
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2 pr-4">{row.franchise_name ?? "—"}</td>
                       <td className="py-2 pr-4">
                         <Badge
@@ -1015,6 +1074,61 @@ export default function InventoryPage() {
                         )}
                       </td>
                     </tr>
+                    {isExpanded &&
+                      packagingLinks.map((pkg) => (
+                        <tr
+                          key={`${row.sku_code}-${pkg.packaging_sku_code}`}
+                          className="border-b border-stone-100 bg-stone-50/80"
+                        >
+                          <td className="py-1.5 pr-4" />
+                          <td className="py-1.5 pr-4 pl-6 text-xs text-stone-600">
+                            <span className="font-medium text-stone-500">
+                              Packaging ·{" "}
+                            </span>
+                            <span className="font-mono">
+                              {pkg.packaging_sku_code}
+                            </span>
+                            {pkg.packaging_name ? (
+                              <span className="text-stone-500">
+                                {" "}
+                                · {pkg.packaging_name}
+                              </span>
+                            ) : null}
+                            <span className="text-stone-400">
+                              {" "}
+                              · {formatNumber(pkg.qty_per_unit)}/unit
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-4" colSpan={3} />
+                          <td className="py-1.5 pr-4 tabular-nums">
+                            {formatNumber(pkg.qty_on_hand)}
+                          </td>
+                          <td className="py-1.5 pr-4 tabular-nums text-sky-700">
+                            {pkg.on_order_qty > 0
+                              ? formatNumber(pkg.on_order_qty)
+                              : "—"}
+                          </td>
+                          <td className="py-1.5 pr-4" colSpan={7} />
+                          <td
+                            className="py-1.5 pr-4 font-medium tabular-nums text-emerald-800"
+                            title={
+                              pkg.need_from_product > 0
+                                ? `${formatNumber(pkg.need_from_product)} units needed from this SKU's restock batch`
+                                : pkg.recommended_po_qty > 0
+                                  ? "Net packaging PO qty across all linked finished goods"
+                                  : undefined
+                            }
+                          >
+                            {pkg.recommended_po_qty > 0
+                              ? formatNumber(pkg.recommended_po_qty)
+                              : pkg.need_from_product > 0
+                                ? formatNumber(pkg.need_from_product)
+                                : "—"}
+                          </td>
+                          <td className="py-1.5 pr-4" colSpan={2} />
+                        </tr>
+                      ))}
+                    </Fragment>
                   );
                 })}
               </tbody>
