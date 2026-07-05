@@ -4,7 +4,10 @@ import type { CompanySettings, PurchaseOrder, Supplier } from "@/types/database"
 import { billableLineQty, computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
 import { composePoPdfNotes } from "@/lib/procurement/supplier-po-notes";
 import { formatPoMoney } from "@/lib/procurement/currencies";
-import { resolveVendorLineLabel } from "@/lib/procurement/vendor-line-label";
+import {
+  resolveProductLineLabel,
+  showSkuCodeSubline,
+} from "@/lib/procurement/product-line-label";
 
 const require = createRequire(import.meta.url);
 const PDFDocument = require("pdfkit") as typeof PDFDocumentType;
@@ -14,7 +17,6 @@ export interface PoPdfData {
   supplier: Supplier | null;
   company: CompanySettings;
   logo?: Buffer | null;
-  vendorProductNames?: Map<string, string>;
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -90,8 +92,7 @@ function contactBlock(
 }
 
 export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
-  const { po, supplier, company, logo, vendorProductNames } = data;
-  const vendorNames = vendorProductNames ?? new Map<string, string>();
+  const { po, supplier, company, logo } = data;
   const totals = computePoInvoiceTotals(po);
   const currency = po.currency ?? "IDR";
 
@@ -206,9 +207,8 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     for (const line of po.lines ?? []) {
       const billedQty = billableLineQty(line, po);
       const total = lineTotal(billedQty, line.unit_cost);
-      const productLabel = resolveVendorLineLabel(line, vendorNames);
-      const showInternalSku =
-        vendorNames.has(line.sku_id) && line.sku_code && line.sku_code !== productLabel;
+      const productLabel = resolveProductLineLabel(line);
+      const showInternalSku = showSkuCodeSubline(line);
 
       const productWidth = colSku - 8;
       const paddingTop = 6;

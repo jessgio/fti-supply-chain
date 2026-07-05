@@ -426,11 +426,11 @@ function ProcurementInner() {
             Suppliers
           </Button>
           <Link
-            href="/dashboard/procurement/vendor-products"
+            href="/dashboard/procurement/product-names"
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 transition-colors hover:bg-stone-50"
           >
             <Tags className="h-4 w-4" />
-            Vendor product names
+            Product names
           </Link>
           <Button variant="outline" onClick={() => setSettingsOpen(true)}>
             <Settings className="h-4 w-4" />

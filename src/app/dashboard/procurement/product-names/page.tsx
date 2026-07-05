@@ -12,10 +12,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { VendorProductMapping } from "@/types/database";
+import type { SkuProductName } from "@/types/database";
 
-export default function VendorProductsPage() {
-  const [mappings, setMappings] = useState<VendorProductMapping[]>([]);
+export default function ProductNamesPage() {
+  const [skus, setSkus] = useState<SkuProductName[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -27,15 +27,13 @@ export default function VendorProductsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/procurement/vendor-products");
+      const res = await fetch("/api/procurement/product-names");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load");
-      const rows = (data.mappings ?? []) as VendorProductMapping[];
-      setMappings(rows);
+      const rows = (data.skus ?? []) as SkuProductName[];
+      setSkus(rows);
       setDraft(
-        Object.fromEntries(
-          rows.map((r) => [r.sku_id, r.vendor_product_name ?? ""]),
-        ),
+        Object.fromEntries(rows.map((r) => [r.sku_id, r.product_name ?? ""])),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -50,41 +48,44 @@ export default function VendorProductsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return mappings;
-    return mappings.filter(
-      (m) =>
-        m.sku_code.toLowerCase().includes(q) ||
-        (m.sku_name?.toLowerCase().includes(q) ?? false) ||
-        (draft[m.sku_id]?.toLowerCase().includes(q) ?? false) ||
-        (m.vendor_product_name?.toLowerCase().includes(q) ?? false),
+    if (!q) return skus;
+    return skus.filter(
+      (s) =>
+        s.sku_code.toLowerCase().includes(q) ||
+        (s.product_name?.toLowerCase().includes(q) ?? false) ||
+        (draft[s.sku_id]?.toLowerCase().includes(q) ?? false),
     );
-  }, [mappings, search, draft]);
+  }, [skus, search, draft]);
 
   const changedCount = useMemo(
     () =>
-      mappings.filter((m) => {
-        const current = (draft[m.sku_id] ?? "").trim();
-        const original = (m.vendor_product_name ?? "").trim();
+      skus.filter((s) => {
+        const current = (draft[s.sku_id] ?? "").trim();
+        const original = (s.product_name ?? "").trim();
         return current !== original;
       }).length,
-    [mappings, draft],
+    [skus, draft],
   );
 
-  const mappedCount = useMemo(
-    () => mappings.filter((m) => (draft[m.sku_id] ?? "").trim()).length,
-    [mappings, draft],
+  const namedCount = useMemo(
+    () =>
+      skus.filter((s) => {
+        const name = (draft[s.sku_id] ?? "").trim();
+        return name && name !== s.sku_code;
+      }).length,
+    [skus, draft],
   );
 
   async function handleSave() {
-    const updates = mappings
-      .filter((m) => {
-        const current = (draft[m.sku_id] ?? "").trim();
-        const original = (m.vendor_product_name ?? "").trim();
+    const updates = skus
+      .filter((s) => {
+        const current = (draft[s.sku_id] ?? "").trim();
+        const original = (s.product_name ?? "").trim();
         return current !== original;
       })
-      .map((m) => ({
-        sku_id: m.sku_id,
-        vendor_product_name: draft[m.sku_id]?.trim() || null,
+      .map((s) => ({
+        sku_id: s.sku_id,
+        product_name: draft[s.sku_id]?.trim() || null,
       }));
 
     if (updates.length === 0) return;
@@ -93,19 +94,17 @@ export default function VendorProductsPage() {
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/procurement/vendor-products", {
+      const res = await fetch("/api/procurement/product-names", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ updates }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      const rows = (data.mappings ?? []) as VendorProductMapping[];
-      setMappings(rows);
+      const rows = (data.skus ?? []) as SkuProductName[];
+      setSkus(rows);
       setDraft(
-        Object.fromEntries(
-          rows.map((r) => [r.sku_id, r.vendor_product_name ?? ""]),
-        ),
+        Object.fromEntries(rows.map((r) => [r.sku_id, r.product_name ?? ""])),
       );
       setSaved(true);
     } catch (err) {
@@ -127,11 +126,11 @@ export default function VendorProductsPage() {
             Back to procurement
           </Link>
           <h1 className="text-2xl font-semibold text-stone-900">
-            Vendor product names
+            Product names
           </h1>
           <p className="mt-1 text-stone-600">
-            Map internal SKUs to the product names your suppliers use. PO PDFs
-            show the vendor name instead of the SKU code.
+            Set the product name for each SKU. These names appear on purchase
+            order PDFs and throughout the app.
           </p>
         </div>
         <Button onClick={handleSave} disabled={saving || changedCount === 0}>
@@ -147,9 +146,9 @@ export default function VendorProductsPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-stone-500">Mapped SKUs</p>
+            <p className="text-sm text-stone-500">Named SKUs</p>
             <p className="mt-1 text-2xl font-semibold text-stone-900">
-              {mappedCount}
+              {namedCount}
             </p>
           </CardContent>
         </Card>
@@ -167,9 +166,9 @@ export default function VendorProductsPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <CardTitle>SKU mappings</CardTitle>
+              <CardTitle>SKU product names</CardTitle>
               <CardDescription>
-                {filtered.length} of {mappings.length} SKUs
+                {filtered.length} of {skus.length} SKUs
               </CardDescription>
             </div>
             <div className="relative w-full max-w-xs">
@@ -196,8 +195,7 @@ export default function VendorProductsPage() {
                 <thead>
                   <tr className="border-b border-stone-200 text-stone-500">
                     <th className="py-2 pr-4">SKU</th>
-                    <th className="py-2 pr-4">Internal name</th>
-                    <th className="py-2">Vendor product name</th>
+                    <th className="py-2">Product name</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -205,9 +203,6 @@ export default function VendorProductsPage() {
                     <tr key={row.sku_id} className="border-b border-stone-100">
                       <td className="py-2.5 pr-4 font-medium text-stone-900">
                         {row.sku_code}
-                      </td>
-                      <td className="py-2.5 pr-4 text-stone-600">
-                        {row.sku_name ?? "—"}
                       </td>
                       <td className="py-2.5">
                         <AutoResizeTextarea
@@ -218,7 +213,7 @@ export default function VendorProductsPage() {
                               [row.sku_id]: e.target.value,
                             }))
                           }
-                          placeholder="Name the vendor recognizes"
+                          placeholder={row.sku_code}
                         />
                       </td>
                     </tr>

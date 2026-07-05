@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  listVendorProductMappings,
-  upsertVendorProductNames,
-} from "@/lib/db/vendor-products";
+  listSkuProductNames,
+  upsertSkuProductNames,
+} from "@/lib/db/sku-product-names";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
 export async function GET() {
   try {
     const supabase = createAdminClient();
-    const mappings = await listVendorProductMappings(supabase);
-    return NextResponse.json({ mappings });
+    const skus = await listSkuProductNames(supabase);
+    return NextResponse.json({ skus });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -26,9 +26,9 @@ export async function PATCH(request: Request) {
     const raw = Array.isArray(body?.updates) ? body.updates : [];
     const updates = raw
       .filter((u: { sku_id?: string }) => u?.sku_id)
-      .map((u: { sku_id: string; vendor_product_name?: string | null }) => ({
+      .map((u: { sku_id: string; product_name?: string | null }) => ({
         sku_id: u.sku_id,
-        vendor_product_name: u.vendor_product_name ?? null,
+        product_name: u.product_name ?? null,
       }));
 
     if (updates.length === 0) {
@@ -39,9 +39,9 @@ export async function PATCH(request: Request) {
     }
 
     const supabase = createAdminClient();
-    await upsertVendorProductNames(supabase, updates);
-    const mappings = await listVendorProductMappings(supabase);
-    return NextResponse.json({ mappings });
+    await upsertSkuProductNames(supabase, updates);
+    const skus = await listSkuProductNames(supabase);
+    return NextResponse.json({ skus });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

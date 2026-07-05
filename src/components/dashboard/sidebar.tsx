@@ -175,6 +175,12 @@ const links: NavItem[] = [
     icon: Boxes,
     children: [
       {
+        href: "/dashboard/mappings/cogs",
+        label: "COGS",
+        icon: Banknote,
+        roles: ["admin", "supply_chain"],
+      },
+      {
         href: "/dashboard/extracts/mappings",
         label: "Extract Mappings",
         icon: Link2,

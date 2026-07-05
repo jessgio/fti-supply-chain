@@ -26,6 +26,7 @@ export interface UpdateSkuInput {
   is_packaging?: boolean;
   franchise_id?: string | null;
   franchise_name?: string | null;
+  unit_cogs?: number | null;
 }
 
 function mapSkuRow(data: {
@@ -166,6 +167,7 @@ export async function updateSku(
     is_active?: boolean;
     is_packaging?: boolean;
     franchise_id?: string;
+    unit_cogs?: number | null;
   } = {};
 
   if (input.name !== undefined) {
@@ -192,6 +194,13 @@ export async function updateSku(
       throw new Error("Franchise is required.");
     }
     updates.franchise_id = franchiseId;
+  }
+
+  if (input.unit_cogs !== undefined) {
+    if (input.unit_cogs != null && input.unit_cogs < 0) {
+      throw new Error("Unit COGS cannot be negative.");
+    }
+    updates.unit_cogs = input.unit_cogs;
   }
 
   if (Object.keys(updates).length === 0) {

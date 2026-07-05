@@ -17,6 +17,29 @@ const GrowthChart = dynamic(
     ),
   },
 );
+
+const ProductContributionChart = dynamic(
+  () =>
+    import("@/components/dashboard/product-contribution-chart").then(
+      (m) => m.ProductContributionChart,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[320px] items-center justify-center text-sm text-stone-500">
+        Loading chart…
+      </div>
+    ),
+  },
+);
+
+const ContributionWindowToggle = dynamic(
+  () =>
+    import("@/components/dashboard/product-contribution-chart").then(
+      (m) => m.ContributionWindowToggle,
+    ),
+  { ssr: false },
+);
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -35,8 +58,11 @@ import {
   type GrowthPctKind,
 } from "@/lib/analytics/growth";
 import type {
+  ContributionWindow,
   FranchiseGrowthPoint,
+  FranchiseProductContribution,
   PeriodCoverage,
+  ProductContributionMeta,
   TimeGrain,
 } from "@/types/database";
 
@@ -233,6 +259,17 @@ export default function SalesPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("franchise");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [contributionWindow, setContributionWindow] =
+    useState<ContributionWindow>("mtd");
+  const [contributionRows, setContributionRows] = useState<
+    FranchiseProductContribution[]
+  >([]);
+  const [contributionMeta, setContributionMeta] =
+    useState<ProductContributionMeta | null>(null);
+  const [contributionLoading, setContributionLoading] = useState(true);
+  const [contributionError, setContributionError] = useState<string | null>(
+    null,
+  );
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -282,6 +319,32 @@ export default function SalesPage() {
     load();
   }, [grain, channelId, franchiseId]);
 
+  useEffect(() => {
+    async function loadContribution() {
+      setContributionLoading(true);
+      setContributionError(null);
+      try {
+        const params = new URLSearchParams();
+        if (channelId) params.set("channel_id", channelId);
+        if (franchiseId) params.set("franchise_id", franchiseId);
+        const res = await fetch(
+          `/api/analytics/product-contribution?${params}`,
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to load");
+        setContributionRows(data.rows ?? []);
+        setContributionMeta(data.meta ?? null);
+      } catch (err) {
+        setContributionError(
+          err instanceof Error ? err.message : "Failed to load",
+        );
+      } finally {
+        setContributionLoading(false);
+      }
+    }
+    loadContribution();
+  }, [channelId, franchiseId]);
+
   const tableRows = useMemo(() => {
     const rows = latestPeriodGrowthRows(points, {
       franchises: franchiseId || channelId ? undefined : franchises,
@@ -311,6 +374,15 @@ export default function SalesPage() {
   const showSplitGrowth =
     Boolean(coverage?.isPartial) &&
     (grain === "month" || grain === "week");
+
+  const contributionPeriodLabel =
+    contributionWindow === "mtd"
+      ? contributionMeta?.mtd_from && contributionMeta?.as_of
+        ? `${contributionMeta.mtd_from} – ${contributionMeta.as_of}`
+        : "Month to date"
+      : contributionMeta?.ytd_from && contributionMeta?.as_of
+        ? `${contributionMeta.ytd_from} – ${contributionMeta.as_of}`
+        : "Year to date";
 
   return (
     <PageShell wide={true}>
@@ -512,6 +584,44 @@ export default function SalesPage() {
               metric={metric}
               view={chartView}
               coverage={coverage}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Franchise contribution</CardTitle>
+              <CardDescription>
+                Each franchise&apos;s share of total{" "}
+                {metric === "sales" ? "net sales" : "quantity"}.{" "}
+                {contributionPeriodLabel}. Respects channel and franchise
+                filters above.
+              </CardDescription>
+            </div>
+            <ContributionWindowToggle
+              window={contributionWindow}
+              onChange={setContributionWindow}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {contributionLoading ? (
+            <p className="text-sm text-stone-500">Loading...</p>
+          ) : contributionError ? (
+            <p className="text-sm text-red-600">{contributionError}</p>
+          ) : contributionRows.length === 0 ? (
+            <p className="text-sm text-stone-500">
+              No sales data yet. Upload mappings and sales from the Data Uploads
+              page.
+            </p>
+          ) : (
+            <ProductContributionChart
+              rows={contributionRows}
+              window={contributionWindow}
+              metric={metric}
             />
           )}
         </CardContent>

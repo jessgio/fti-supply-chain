@@ -23,6 +23,16 @@ export interface Sku {
   /** Primary packaging material (UB, EFLUTE, JAR, PUMP, etc.) — supply chain only. */
   is_packaging: boolean;
   retail_price: number | null;
+  unit_cogs: number | null;
+}
+
+export interface SkuCogsRow {
+  sku_id: string;
+  sku_code: string;
+  product_name: string | null;
+  franchise_name: string | null;
+  retail_price: number | null;
+  unit_cogs: number | null;
 }
 
 export interface PackagingSkuRow {
@@ -150,6 +160,24 @@ export interface PeriodCoverage {
   daysInPeriod: number;
 }
 
+export type ContributionWindow = "mtd" | "ytd";
+
+export interface FranchiseProductContribution {
+  window_type: ContributionWindow;
+  franchise_id: string;
+  franchise_name: string;
+  sku_code: string;
+  product_name: string;
+  total_qty: number;
+  total_net_sales: number;
+}
+
+export interface ProductContributionMeta {
+  as_of: string | null;
+  mtd_from: string | null;
+  ytd_from: string | null;
+}
+
 export type VelocityClass = "fast" | "normal" | "slow";
 export type DemandPattern = "npd" | "volatile" | "steady";
 
@@ -264,11 +292,10 @@ export interface CompanySettings {
   updated_at?: string;
 }
 
-export interface VendorProductMapping {
+export interface SkuProductName {
   sku_id: string;
   sku_code: string;
-  sku_name: string | null;
-  vendor_product_name: string | null;
+  product_name: string | null;
 }
 
 export interface PurchaseOrderLine {

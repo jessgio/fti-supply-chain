@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -293,7 +294,15 @@ export default function MappingsPage() {
           Product franchises are built from single SKUs only. Add SKUs manually
           for new products, or upload franchise and bundle mappings from Excel.
           Mark retired SKUs as inactive to keep them in historical sales and
-          bundle rules without showing them in the inventory forecast.
+          bundle rules without showing them in the inventory forecast. Set unit
+          costs from{" "}
+          <Link
+            href="/dashboard/mappings/cogs"
+            className="font-medium text-emerald-700 hover:text-emerald-800"
+          >
+            COGS
+          </Link>
+          .
         </p>
       </div>
 

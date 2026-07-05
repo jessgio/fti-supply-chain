@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCompanySettings, downloadCompanyLogo } from "@/lib/db/company-settings";
-import { getVendorProductNamesBySkuIds } from "@/lib/db/vendor-products";
 import { getPurchaseOrder, getSupplier } from "@/lib/db/procurement";
 import { generatePoPdf } from "@/lib/procurement/po-pdf";
 import { errorMessage } from "@/lib/errors";
@@ -30,18 +29,11 @@ export async function GET(
         ? await downloadCompanyLogo(supabase, company.logo_path)
         : null;
 
-    const skuIds = (po.lines ?? []).map((l) => l.sku_id);
-    const vendorProductNames = await getVendorProductNamesBySkuIds(
-      supabase,
-      skuIds,
-    );
-
     const pdf = await generatePoPdf({
       po,
       supplier,
       company,
       logo,
-      vendorProductNames,
     });
 
     return new NextResponse(new Uint8Array(pdf), {
