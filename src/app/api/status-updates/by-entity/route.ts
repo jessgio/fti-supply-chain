@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const entityType = searchParams.get("entity_type");
     const entityId = searchParams.get("entity_id");
     const limit = Math.min(
-      20,
+      200,
       Math.max(1, Number(searchParams.get("limit") ?? "5") || 5),
     );
 
