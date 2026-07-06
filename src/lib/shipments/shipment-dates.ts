@@ -1,4 +1,4 @@
-import type { ShipmentType } from "@/lib/shipments/constants";
+import type { ShipmentStatus, ShipmentType } from "@/lib/shipments/constants";
 import { DEFAULT_TRANSIT_DAYS } from "@/lib/shipments/constants";
 
 export function getDefaultTransitDays(type: ShipmentType): number {
@@ -43,4 +43,14 @@ export function hasDepartureDatePassed(
   today.setHours(0, 0, 0, 0);
   const departure = new Date(`${dateStr}T00:00:00`);
   return departure <= today;
+}
+
+/** Derive planned vs in_transit from departure date; preserve delivered/closed. */
+export function resolveShipmentStatusFromDeparture(
+  current: ShipmentStatus,
+  departureDate: string,
+): ShipmentStatus {
+  if (current === "delivered" || current === "closed") return current;
+  if (hasDepartureDatePassed(departureDate)) return "in_transit";
+  return "planned";
 }

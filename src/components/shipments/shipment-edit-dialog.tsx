@@ -13,6 +13,7 @@ import {
   type ShipmentStatus,
   type ShipmentType,
 } from "@/lib/shipments/constants";
+import { resolveShipmentStatusFromDeparture } from "@/lib/shipments/shipment-dates";
 import { formatNumber } from "@/lib/utils";
 import type {
   PurchaseOrder,
@@ -112,6 +113,12 @@ export function ShipmentEditDialog({
       })
       .catch(() => setOpenPos([]));
   }, [open]);
+
+  useEffect(() => {
+    setStatus((current) =>
+      resolveShipmentStatusFromDeparture(current, departureDate),
+    );
+  }, [departureDate]);
 
   useEffect(() => {
     if (!selectedPoIds.length || !shipmentId) {

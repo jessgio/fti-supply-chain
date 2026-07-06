@@ -8,7 +8,7 @@ import type {
 } from "@/types/database";
 import {
   calculateExpectedDeliveryDate,
-  hasDepartureDatePassed,
+  resolveShipmentStatusFromDeparture,
 } from "@/lib/shipments/shipment-dates";
 import {
   appendShipmentDuplicateSuffix,
@@ -204,13 +204,31 @@ function mapShipmentRow(row: ShipmentRow): Shipment {
   };
 }
 
-function resolveAutoStatus(
-  current: ShipmentStatus,
-  departureDate: string,
-): ShipmentStatus {
-  if (current === "delivered" || current === "closed") return current;
-  if (hasDepartureDatePassed(departureDate)) return "in_transit";
-  return current === "in_transit" ? "in_transit" : "planned";
+function withResolvedStatus(shipment: Shipment): Shipment {
+  return {
+    ...shipment,
+    status: resolveShipmentStatusFromDeparture(
+      shipment.status,
+      shipment.estimated_departure_date,
+    ),
+  };
+}
+
+function shipmentMatchesSearch(shipment: Shipment, query: string): boolean {
+  const q = query.toLowerCase();
+  if (shipment.shipment_number.toLowerCase().includes(q)) return true;
+
+  for (const po of shipment.purchase_orders ?? []) {
+    if (po.po_number.toLowerCase().includes(q)) return true;
+    if ((po.supplier_name ?? "").toLowerCase().includes(q)) return true;
+
+    for (const item of po.items ?? []) {
+      if (item.sku_code.toLowerCase().includes(q)) return true;
+      if ((item.sku_name ?? "").toLowerCase().includes(q)) return true;
+    }
+  }
+
+  return false;
 }
 
 export async function listShipments(
@@ -232,16 +250,8 @@ export async function listShipments(
   let rows = ((data ?? []) as unknown as ShipmentRow[]).map(mapShipmentRow);
 
   if (params.search?.trim()) {
-    const q = params.search.trim().toLowerCase();
-    rows = rows.filter(
-      (s) =>
-        s.shipment_number.toLowerCase().includes(q) ||
-        (s.purchase_orders ?? []).some(
-          (po) =>
-            po.po_number.toLowerCase().includes(q) ||
-            (po.supplier_name ?? "").toLowerCase().includes(q),
-        ),
-    );
+    const q = params.search.trim();
+    rows = rows.filter((s) => shipmentMatchesSearch(s, q));
   }
 
   const missingCounts = await getMissingDocumentCountsByShipmentId(
@@ -249,10 +259,12 @@ export async function listShipments(
     rows.map((s) => s.id),
   );
 
-  return rows.map((s) => ({
-    ...s,
-    missing_document_count: missingCounts.get(s.id) ?? 0,
-  }));
+  return rows.map((s) =>
+    withResolvedStatus({
+      ...s,
+      missing_document_count: missingCounts.get(s.id) ?? 0,
+    }),
+  );
 }
 
 export async function getShipment(
@@ -266,7 +278,7 @@ export async function getShipment(
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const shipment = mapShipmentRow(data as unknown as ShipmentRow);
+  const shipment = withResolvedStatus(mapShipmentRow(data as unknown as ShipmentRow));
   shipment.required_documents = await getRequiredDocuments(supabase, id);
   return shipment;
 }
@@ -505,7 +517,10 @@ export async function createShipment(
       input.estimated_departure_date,
     ));
 
-  const status = resolveAutoStatus("planned", input.estimated_departure_date);
+  const status = resolveShipmentStatusFromDeparture(
+    "planned",
+    input.estimated_departure_date,
+  );
 
   const { data: shipment, error: shipError } = await supabase
     .from("shipments")
@@ -586,9 +601,10 @@ export async function updateShipment(
     await validateShipmentItems(supabase, input.items, id);
   }
 
-  const status = input.status
-    ? input.status
-    : resolveAutoStatus(existing.status, departureDate);
+  const status = resolveShipmentStatusFromDeparture(
+    input.status ?? existing.status,
+    departureDate,
+  );
 
   const { error: updateError } = await supabase
     .from("shipments")

@@ -4,6 +4,8 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronRight,
   Plane,
   Plus,
@@ -30,6 +32,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
   DEFAULT_TRANSIT_DAYS,
+  isShipmentClosed,
   SHIPMENT_STATUS_LABELS,
   SHIPMENT_STATUS_STYLES,
   SHIPMENT_TYPE_LABELS,
@@ -38,8 +41,11 @@ import {
 } from "@/lib/shipments/constants";
 import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
-import { groupShipmentsByPrimaryGood } from "@/lib/shipments/shipment-primary-groups";
-import { formatNumber } from "@/lib/utils";
+import {
+  groupShipmentsByPrimaryGood,
+  type ShipmentGroupEntry,
+} from "@/lib/shipments/shipment-primary-groups";
+import { formatNumber, cn } from "@/lib/utils";
 import type {
   ProductPackagingLink,
   PurchaseOrder,
@@ -54,6 +60,78 @@ const TYPE_ICONS = {
   air: Plane,
   local: Truck,
 } as const;
+
+type SortDir = "asc" | "desc";
+type ShipmentPageTab = "active" | "historical";
+
+const SHIPMENT_TABS: { id: ShipmentPageTab; label: string }[] = [
+  { id: "active", label: "Active shipments" },
+  { id: "historical", label: "Historical shipments" },
+];
+
+function compareByExpectedDelivery(
+  a: ShipmentGroupEntry,
+  b: ShipmentGroupEntry,
+  dir: SortDir,
+): number {
+  const cmp = a.shipment.expected_delivery_date.localeCompare(
+    b.shipment.expected_delivery_date,
+  );
+  if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+  return a.shipment.shipment_number.localeCompare(b.shipment.shipment_number);
+}
+
+function groupDeliverySortKey(
+  entries: ShipmentGroupEntry[],
+  dir: SortDir,
+): string {
+  if (entries.length === 0) return dir === "asc" ? "9999-99-99" : "";
+  const dates = entries.map((entry) => entry.shipment.expected_delivery_date);
+  dates.sort();
+  return dir === "asc" ? dates[0]! : dates[dates.length - 1]!;
+}
+
+function compareGroupsByExpectedDelivery(
+  a: { label: string; entries: ShipmentGroupEntry[] },
+  b: { label: string; entries: ShipmentGroupEntry[] },
+  dir: SortDir,
+): number {
+  const cmp = groupDeliverySortKey(a.entries, dir).localeCompare(
+    groupDeliverySortKey(b.entries, dir),
+  );
+  if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+  return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+}
+
+function ScheduleSortHeader({
+  sortDir,
+  onSort,
+}: {
+  sortDir: SortDir;
+  onSort: () => void;
+}) {
+  return (
+    <th className="py-2 pr-4">
+      <button
+        type="button"
+        className="flex items-center gap-1 whitespace-nowrap text-left font-medium text-stone-500 hover:text-stone-800"
+        onClick={onSort}
+      >
+        Schedule
+        <span className="sr-only">
+          {sortDir === "asc"
+            ? ", sorted soonest delivery first"
+            : ", sorted latest delivery first"}
+        </span>
+        {sortDir === "asc" ? (
+          <ArrowUp className="h-3 w-3 shrink-0" />
+        ) : (
+          <ArrowDown className="h-3 w-3 shrink-0" />
+        )}
+      </button>
+    </th>
+  );
+}
 
 export default function ShipmentsPage() {
   return (
@@ -96,6 +174,19 @@ function ShipmentsInner() {
   const [requiredDocuments, setRequiredDocuments] = useState<
     ShipmentDocumentType[]
   >(() => defaultRequiredDocuments("sea"));
+  const [deliverySortDir, setDeliverySortDir] = useState<SortDir>("asc");
+  const [activeTab, setActiveTab] = useState<ShipmentPageTab>("active");
+
+  const activeShipments = useMemo(
+    () => shipments.filter((shipment) => !isShipmentClosed(shipment.status)),
+    [shipments],
+  );
+  const historicalShipments = useMemo(
+    () => shipments.filter((shipment) => isShipmentClosed(shipment.status)),
+    [shipments],
+  );
+  const visibleShipments =
+    activeTab === "historical" ? historicalShipments : activeShipments;
 
   const loadShipments = useCallback(async () => {
     setLoading(true);
@@ -194,21 +285,28 @@ function ShipmentsInner() {
     setTransitDays(DEFAULT_TRANSIT_DAYS[shipmentType]);
   }, [shipmentType]);
 
-  const groupedBySku = useMemo(
-    () =>
-      groupShipmentsByPrimaryGood(
-        shipments,
-        skus.map((sku) => ({
-          id: sku.id,
-          sku_code: sku.sku_code,
-          name: sku.name,
-          is_packaging: sku.is_packaging ?? false,
-          is_bundle: sku.is_bundle ?? false,
-        })),
-        packagingLinks,
-      ),
-    [shipments, skus, packagingLinks],
-  );
+  const groupedBySku = useMemo(() => {
+    const groups = groupShipmentsByPrimaryGood(
+      visibleShipments,
+      skus.map((sku) => ({
+        id: sku.id,
+        sku_code: sku.sku_code,
+        name: sku.name,
+        is_packaging: sku.is_packaging ?? false,
+        is_bundle: sku.is_bundle ?? false,
+      })),
+      packagingLinks,
+    );
+
+    return [...groups]
+      .map((group) => ({
+        ...group,
+        entries: [...group.entries].sort((a, b) =>
+          compareByExpectedDelivery(a, b, deliverySortDir),
+        ),
+      }))
+      .sort((a, b) => compareGroupsByExpectedDelivery(a, b, deliverySortDir));
+  }, [visibleShipments, skus, packagingLinks, deliverySortDir]);
 
   useEffect(() => {
     if (highlightShipmentId) {
@@ -223,11 +321,12 @@ function ShipmentsInner() {
 
   const summary = useMemo(() => {
     return {
-      total: shipments.length,
-      inTransit: shipments.filter((s) => s.status === "in_transit").length,
-      planned: shipments.filter((s) => s.status === "planned").length,
+      total: activeShipments.length,
+      inTransit: activeShipments.filter((s) => s.status === "in_transit").length,
+      planned: activeShipments.filter((s) => s.status === "planned").length,
+      archived: historicalShipments.length,
     };
-  }, [shipments]);
+  }, [activeShipments, historicalShipments]);
 
   async function handleCreate() {
     setSaving(true);
@@ -285,46 +384,93 @@ function ShipmentsInner() {
             Log when PO goods depart and track expected delivery dates.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setRequiredDocuments(defaultRequiredDocuments(shipmentType));
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New shipment
-        </Button>
+        {activeTab === "active" && (
+          <Button
+            onClick={() => {
+              setRequiredDocuments(defaultRequiredDocuments(shipmentType));
+              setDialogOpen(true);
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            New shipment
+          </Button>
+        )}
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total shipments</CardDescription>
-            <CardTitle className="text-2xl">{summary.total}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>In transit</CardDescription>
-            <CardTitle className="text-2xl">{summary.inTransit}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Planned</CardDescription>
-            <CardTitle className="text-2xl">{summary.planned}</CardTitle>
-          </CardHeader>
-        </Card>
+      {activeTab === "active" ? (
+        <div className="mb-6 grid gap-4 sm:grid-cols-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Active shipments</CardDescription>
+              <CardTitle className="text-2xl">{summary.total}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>In transit</CardDescription>
+              <CardTitle className="text-2xl">{summary.inTransit}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Planned</CardDescription>
+              <CardTitle className="text-2xl">{summary.planned}</CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+      ) : (
+        <div className="mb-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Archived shipments</CardDescription>
+              <CardTitle className="text-2xl">{summary.archived}</CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+      )}
+
+      <div className="mb-4 flex flex-wrap gap-1 border-b border-stone-200">
+        {SHIPMENT_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              "border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
+              activeTab === tab.id
+                ? "border-emerald-700 text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-800",
+            )}
+          >
+            {tab.label}
+            <span className="ml-2 tabular-nums text-stone-400">
+              (
+              {tab.id === "active"
+                ? summary.total
+                : summary.archived}
+              )
+            </span>
+          </button>
+        ))}
       </div>
 
-      <Card>
+      <Card className={cn(activeTab === "historical" && "border-stone-200 bg-stone-50/40")}>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">
-              <CardTitle>Shipments by product</CardTitle>
+              <CardTitle>
+                {activeTab === "historical"
+                  ? "Archived shipments by product"
+                  : "Shipments by product"}
+              </CardTitle>
               <CardDescription>
-                {shipments.length} shipment{shipments.length === 1 ? "" : "s"}{" "}
-                across {groupedBySku.length} product
+                {activeTab === "historical"
+                  ? "Closed shipments are archived here for reference after inbound is complete."
+                  : "Open shipments grouped by product and expected delivery."}
+                {" "}
+                {visibleShipments.length} shipment
+                {visibleShipments.length === 1 ? "" : "s"} across{" "}
+                {groupedBySku.length} product
                 {groupedBySku.length === 1 ? "" : "s"}
               </CardDescription>
             </div>
@@ -337,6 +483,15 @@ function ShipmentsInner() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <Select
+              className="h-9 w-auto min-w-[12rem] shrink-0"
+              value={deliverySortDir}
+              onChange={(e) => setDeliverySortDir(e.target.value as SortDir)}
+              aria-label="Sort by expected delivery"
+            >
+              <option value="asc">Delivery: soonest first</option>
+              <option value="desc">Delivery: latest first</option>
+            </Select>
           </div>
         </CardHeader>
         <CardContent>
@@ -348,6 +503,12 @@ function ShipmentsInner() {
             <p className="py-8 text-center text-sm text-stone-500">
               No shipments yet. Create one to track a PO delivery.
             </p>
+          ) : visibleShipments.length === 0 ? (
+            <p className="py-8 text-center text-sm text-stone-500">
+              {activeTab === "historical"
+                ? "No archived shipments yet. Shipments move here once they are fully received and closed."
+                : "No active shipments right now. Closed shipments are kept in Historical shipments."}
+            </p>
           ) : groupedBySku.length === 0 ? (
             <p className="py-8 text-center text-sm text-stone-500">
               No shipments match your search.
@@ -355,9 +516,25 @@ function ShipmentsInner() {
           ) : (
             <div className="space-y-8">
               {groupedBySku.map((group) => (
-                <section key={group.key}>
-                  <div className="mb-3 border-b border-stone-200 pb-3">
-                    <h3 className="text-base font-semibold text-stone-900">
+                <section
+                  key={group.key}
+                  className={cn(
+                    activeTab === "historical" &&
+                      "rounded-lg border border-stone-200 bg-white/70 p-4",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "mb-3 border-b border-stone-200 pb-3",
+                      activeTab === "historical" && "border-stone-100",
+                    )}
+                  >
+                    <h3
+                      className={cn(
+                        "text-base font-semibold text-stone-900",
+                        activeTab === "historical" && "text-stone-700",
+                      )}
+                    >
                       {group.label}
                     </h3>
                     {group.skuCode ? (
@@ -392,9 +569,14 @@ function ShipmentsInner() {
                           <th className="py-2 pr-4 font-medium text-stone-500">
                             Supplier
                           </th>
-                          <th className="py-2 pr-4 font-medium text-stone-500">
-                            Schedule
-                          </th>
+                          <ScheduleSortHeader
+                            sortDir={deliverySortDir}
+                            onSort={() =>
+                              setDeliverySortDir((dir) =>
+                                dir === "asc" ? "desc" : "asc",
+                              )
+                            }
+                          />
                         </tr>
                       </thead>
                       <tbody>
@@ -404,7 +586,11 @@ function ShipmentsInner() {
                           return (
                             <tr
                               key={`${group.key}:${entry.shipment.id}:${entry.po_id}`}
-                              className="cursor-pointer border-b border-stone-100 hover:bg-stone-50/70"
+                              className={cn(
+                                "cursor-pointer border-b border-stone-100 hover:bg-stone-50/70",
+                                activeTab === "historical" &&
+                                  "bg-stone-50/50 text-stone-600 hover:bg-stone-100/60",
+                              )}
                               onClick={() =>
                                 router.push(`/dashboard/shipments/${shipment.id}`)
                               }
@@ -458,7 +644,13 @@ function ShipmentsInner() {
                                       ]
                                     }
                                   </Badge>
-                                  {(shipment.missing_document_count ?? 0) > 0 && (
+                                  {activeTab === "historical" && (
+                                    <Badge className="bg-stone-200 text-stone-700">
+                                      Archived
+                                    </Badge>
+                                  )}
+                                  {activeTab === "active" &&
+                                    (shipment.missing_document_count ?? 0) > 0 && (
                                     <Badge className="bg-amber-100 text-amber-800">
                                       {shipment.missing_document_count}{" "}
                                       {shipment.missing_document_count === 1

@@ -229,6 +229,7 @@ function ProcurementInner() {
     if (!skuQ) return false;
     if (
       po.po_number.toLowerCase().includes(skuQ) ||
+      (po.supplier_name ?? "").toLowerCase().includes(skuQ) ||
       (po.lines ?? []).some(lineMatchesSku)
     ) {
       return true;
@@ -511,7 +512,7 @@ function ProcurementInner() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
               <Input
                 className="pl-8 pr-8"
-                placeholder="Find POs by number, SKU, or name…"
+                placeholder="Find POs by number, supplier, SKU, or name…"
                 value={skuQuery}
                 onChange={(e) => setSkuQuery(e.target.value)}
               />
