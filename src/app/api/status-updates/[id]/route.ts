@@ -8,6 +8,7 @@ import {
   updateStatusUpdate,
 } from "@/lib/db/status-updates";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyNewlyAddedMentionsOnEdit } from "@/lib/db/notifications";
 import { errorMessage } from "@/lib/errors";
 import type { UserRole } from "@/types/database";
 
@@ -116,6 +117,16 @@ export async function PATCH(request: Request, context: RouteContext) {
         ? body.scoped_sku_ids.filter((skuId: unknown) => typeof skuId === "string")
         : undefined,
     });
+
+    if (body.body !== undefined && mentioned) {
+      await notifyNewlyAddedMentionsOnEdit(supabase, {
+        updateId: id,
+        body: String(body.body).trim(),
+        previousMentionedUserIds: existing.mentioned_user_ids ?? [],
+        nextMentionedUserIds: mentioned,
+        actorId: profile.id,
+      });
+    }
 
     return NextResponse.json({ update });
   } catch (error) {

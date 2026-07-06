@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FileText, Search } from "lucide-react";
 import {
   Card,
@@ -35,6 +36,8 @@ export function StatusUpdatesFeed({
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
   const [entityFilter, setEntityFilter] = useState("");
+  const searchParams = useSearchParams();
+  const highlightNoteId = searchParams.get("note");
 
   const loadGroups = useCallback(async () => {
     const res = await fetch("/api/status-updates?grouped=1");
@@ -71,6 +74,17 @@ export function StatusUpdatesFeed({
     void bootstrap();
   }, []);
 
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void loadGroups();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [loadGroups]);
+
   const filteredGroups = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
     return groups
@@ -98,10 +112,9 @@ export function StatusUpdatesFeed({
             product.sku_name ?? "",
           ]),
           ...updates.flatMap((update) =>
-            (update.associated_products ?? []).flatMap((product) => [
-              product.sku_code,
-              product.sku_name ?? "",
-            ]),
+            (update.associated_products ?? update.scoped_skus ?? []).flatMap(
+              (product) => [product.sku_code, product.sku_name ?? ""],
+            ),
           ),
         ];
 
@@ -127,6 +140,18 @@ export function StatusUpdatesFeed({
   function refresh() {
     void loadGroups();
   }
+
+  useEffect(() => {
+    if (!highlightNoteId || loading) return;
+    const element = document.getElementById(`status-update-${highlightNoteId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    element.classList.add("ring-2", "ring-emerald-400", "ring-offset-2");
+    const timeout = window.setTimeout(() => {
+      element.classList.remove("ring-2", "ring-emerald-400", "ring-offset-2");
+    }, 3000);
+    return () => window.clearTimeout(timeout);
+  }, [highlightNoteId, loading, groups]);
 
   return (
     <div className="space-y-4">

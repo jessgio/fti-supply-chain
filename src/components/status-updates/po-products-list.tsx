@@ -1,4 +1,5 @@
 import type { StatusUpdateScopedSku } from "@/types/database";
+import { SkuProductLabel } from "@/components/status-updates/sku-product-label";
 
 interface PoProductsListProps {
   products: StatusUpdateScopedSku[];
@@ -22,10 +23,10 @@ export function PoProductsList({
             key={product.sku_id}
             className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-700"
           >
-            <span className="font-medium text-stone-900">{product.sku_code}</span>
-            {product.sku_name ? (
-              <span className="text-stone-500"> · {product.sku_name}</span>
-            ) : null}
+            <SkuProductLabel
+              sku_code={product.sku_code}
+              sku_name={product.sku_name}
+            />
           </li>
         ))}
       </ul>

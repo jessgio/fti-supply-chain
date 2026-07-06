@@ -1,4 +1,8 @@
 import Link from "next/link";
+import {
+  resolveProductLineLabel,
+  showSkuCodeSubline,
+} from "@/lib/procurement/product-line-label";
 import type { StatusUpdateRelatedEntity } from "@/types/database";
 
 export const MENTION_RECORD_TYPES = new Set(["po", "payment", "shipment"]);
@@ -158,4 +162,13 @@ export function mentionRecordSearchHaystack(
   ]
     .join(" ")
     .toLowerCase();
+}
+
+export function formatScopedSkuLabel(sku: {
+  sku_code: string;
+  sku_name: string | null;
+}): string {
+  const label = resolveProductLineLabel(sku);
+  const showCode = showSkuCodeSubline(sku);
+  return showCode ? `${label} · ${sku.sku_code}` : label;
 }

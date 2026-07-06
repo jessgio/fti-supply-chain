@@ -14,6 +14,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ConnectedRecordsPicker } from "@/components/status-updates/connected-records-picker";
+import {
+  LinkedPoPicker,
+  type LinkedPoOption,
+} from "@/components/status-updates/linked-po-picker";
 import { MentionInput } from "@/components/status-updates/mention-input";
 import {
   PoProductScopePicker,
@@ -21,6 +25,7 @@ import {
 } from "@/components/status-updates/po-product-scope-picker";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { extractMentionIds } from "@/lib/status-updates/utils";
+import { resolveProductLineLabel } from "@/lib/procurement/product-line-label";
 import type {
   Profile,
   StatusUpdatePoProduct,
@@ -48,6 +53,7 @@ export function StatusUpdatesCreate() {
   const [selectedConnectedKeys, setSelectedConnectedKeys] = useState<string[]>(
     [],
   );
+  const [linkedPos, setLinkedPos] = useState<LinkedPoOption[]>([]);
   const [poProducts, setPoProducts] = useState<StatusUpdatePoProduct[]>([]);
   const [productScopeMode, setProductScopeMode] =
     useState<PoProductScopeMode>("selected");
@@ -94,13 +100,25 @@ export function StatusUpdatesCreate() {
     );
   }, [relatedEntities, selectedPoId]);
 
-  const mentionRecords = useMemo(
-    () =>
-      relatedEntities.filter((entity) =>
-        ["po", "payment", "shipment"].includes(entity.entity_type),
-      ),
-    [relatedEntities],
-  );
+  const mentionRecords = useMemo(() => {
+    const base = relatedEntities.filter((entity) =>
+      ["po", "payment", "shipment"].includes(entity.entity_type),
+    );
+    const seenPoIds = new Set(
+      base.filter((entity) => entity.entity_type === "po").map((entity) => entity.id),
+    );
+    const linkedEntities = linkedPos
+      .filter((po) => !seenPoIds.has(po.id))
+      .map((po) => ({
+        id: po.id,
+        entity_type: "po" as const,
+        label: po.po_number,
+        sublabel: po.supplier_name ?? "Linked PO",
+        status: po.status ?? null,
+        date: null,
+      }));
+    return [...base, ...linkedEntities];
+  }, [relatedEntities, linkedPos]);
 
   const loadRelatedEntities = useCallback(async (skuId: string) => {
     const res = await fetch(
@@ -118,22 +136,26 @@ export function StatusUpdatesCreate() {
     return (data.products ?? []) as StatusUpdatePoProduct[];
   }, []);
 
+  const loadSkus = useCallback(async () => {
+    const res = await fetch("/api/status-updates/skus");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Failed to load SKUs");
+    setSkus(data.skus ?? []);
+  }, []);
+
   useEffect(() => {
     async function bootstrap() {
       setLoading(true);
       setError(null);
       try {
-        const [skuRes, profileRes] = await Promise.all([
-          fetch("/api/procurement/skus"),
+        const [, profileRes] = await Promise.all([
+          loadSkus(),
           fetch("/api/product-development/profiles"),
         ]);
-        const skuData = await skuRes.json();
         const profileData = await profileRes.json();
-        if (!skuRes.ok) throw new Error(skuData.error ?? "Failed to load SKUs");
         if (!profileRes.ok) {
           throw new Error(profileData.error ?? "Failed to load profiles");
         }
-        setSkus(skuData.skus ?? []);
         setProfiles(profileData.profiles ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load page");
@@ -142,7 +164,20 @@ export function StatusUpdatesCreate() {
       }
     }
     void bootstrap();
-  }, []);
+  }, [loadSkus]);
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      void loadSkus();
+      if (selectedPoId) {
+        void loadPoProducts(selectedPoId).then(setPoProducts).catch(() => {});
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [loadSkus, loadPoProducts, selectedPoId]);
 
   useEffect(() => {
     if (!selectedSkuId) {
@@ -239,10 +274,16 @@ export function StatusUpdatesCreate() {
       return;
     }
 
-    const connected_refs = selectedConnectedKeys.map((key) => {
-      const [entityType, entityId] = key.split(":");
-      return { entity_type: entityType, entity_id: entityId };
-    });
+    const connected_refs = [
+      ...selectedConnectedKeys.map((key) => {
+        const [entityType, entityId] = key.split(":");
+        return { entity_type: entityType, entity_id: entityId };
+      }),
+      ...linkedPos.map((po) => ({
+        entity_type: "po",
+        entity_id: po.id,
+      })),
+    ];
     setPosting(true);
     setError(null);
     try {
@@ -310,16 +351,23 @@ export function StatusUpdatesCreate() {
                       : "hover:bg-stone-50 text-stone-800"
                   }`}
                 >
-                  <p className="font-medium">{sku.sku_code}</p>
+                  <p className="font-medium">
+                    {resolveProductLineLabel({
+                      sku_code: sku.sku_code,
+                      sku_name: sku.name,
+                    })}
+                  </p>
                   <p className="truncate text-xs text-stone-500">
-                    {sku.name ?? "Unnamed product"}
+                    {sku.sku_code}
                     {sku.franchise_name ? ` · ${sku.franchise_name}` : ""}
                   </p>
                 </button>
               ))}
               {!loading && filteredSkus.length === 0 && (
                 <p className="px-2 py-4 text-sm text-stone-500">
-                  No products match your search.
+                  {skus.length === 0
+                    ? "No products with active purchase orders."
+                    : "No products match your search."}
                 </p>
               )}
             </div>
@@ -330,14 +378,17 @@ export function StatusUpdatesCreate() {
           <CardHeader>
             <CardTitle className="text-base">
               {selectedSku
-                ? `${selectedSku.sku_code}${selectedSku.name ? ` · ${selectedSku.name}` : ""}`
+                ? resolveProductLineLabel({
+                    sku_code: selectedSku.sku_code,
+                    sku_name: selectedSku.name,
+                  })
                 : "New status update"}
             </CardTitle>
             <CardDescription>
               {selectedSku
                 ? (selectedSku.franchise_name ??
                   "Link to a PO and add your note.")
-                : "Select a product to continue."}
+                : "Select a product with an active purchase order to continue."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -356,6 +407,7 @@ export function StatusUpdatesCreate() {
                     onChange={(e) => {
                       setSelectedPoId(e.target.value);
                       setSelectedConnectedKeys([]);
+                      setLinkedPos([]);
                       setProductScopeMode("all");
                       setSelectedScopedSkuIds([]);
                     }}
@@ -387,6 +439,21 @@ export function StatusUpdatesCreate() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-stone-700">
+                    Linked POs{" "}
+                    <span className="font-normal text-stone-500">
+                      (optional — reference another PO)
+                    </span>
+                  </label>
+                  <LinkedPoPicker
+                    primaryPoId={selectedPoId}
+                    selected={linkedPos}
+                    onChange={setLinkedPos}
+                    disabled={!selectedPoId}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-stone-700">
                     Connected records{" "}
                     <span className="font-normal text-stone-500">
                       (optional — select all that apply)
@@ -409,6 +476,7 @@ export function StatusUpdatesCreate() {
                     onChange={setNoteDraft}
                     profiles={profiles}
                     recordEntities={mentionRecords}
+                    poSearchExcludeId={selectedPoId || undefined}
                     placeholder="Describe the current status… use @ for people, POs, shipments, or payments"
                     multiline
                     onSubmit={postUpdate}

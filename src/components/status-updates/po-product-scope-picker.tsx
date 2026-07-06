@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { SkuProductLabel } from "@/components/status-updates/sku-product-label";
 import type { StatusUpdatePoProduct } from "@/types/database";
 
 export type PoProductScopeMode = "all" | "selected";
@@ -110,15 +111,12 @@ export function PoProductScopePicker({
                   onChange={() => onToggleSku(product.sku_id)}
                 />
                 <span className="min-w-0">
-                  <span className="font-medium text-stone-900">
-                    {product.sku_code}
-                    {isCurrent ? " (current)" : ""}
-                  </span>
-                  {product.sku_name && (
-                    <span className="block truncate text-xs text-stone-500">
-                      {product.sku_name}
-                    </span>
-                  )}
+                  <SkuProductLabel
+                    sku_code={product.sku_code}
+                    sku_name={product.sku_name}
+                    suffix={isCurrent ? " (current)" : ""}
+                    layout="stacked"
+                  />
                 </span>
               </label>
             );

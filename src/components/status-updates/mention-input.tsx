@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   formatRecordMention,
   mentionRecordSearchHaystack,
   recordMentionLabel,
 } from "@/lib/status-updates/utils";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import type { Profile, StatusUpdateRelatedEntity } from "@/types/database";
 
@@ -19,6 +20,8 @@ interface MentionInputProps {
   onChange: (value: string) => void;
   profiles: Profile[];
   recordEntities?: StatusUpdateRelatedEntity[];
+  /** Primary PO for this note — excluded from @ PO search suggestions. */
+  poSearchExcludeId?: string;
   placeholder?: string;
   multiline?: boolean;
   disabled?: boolean;
@@ -48,6 +51,7 @@ export function MentionInput({
   onChange,
   profiles,
   recordEntities = [],
+  poSearchExcludeId,
   placeholder = "Write a note… use @ to mention",
   multiline = false,
   disabled = false,
@@ -58,7 +62,12 @@ export function MentionInput({
 }: MentionInputProps) {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [searchedPos, setSearchedPos] = useState<StatusUpdateRelatedEntity[]>(
+    [],
+  );
+  const [poSearchLoading, setPoSearchLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const debouncedMentionQuery = useDebouncedValue(mentionQuery ?? "");
 
   const mentionableRecords = useMemo(
     () =>
@@ -70,16 +79,78 @@ export function MentionInput({
     [recordEntities],
   );
 
+  useEffect(() => {
+    const query = debouncedMentionQuery.trim();
+    if (query.length < 2) {
+      setSearchedPos([]);
+      setPoSearchLoading(false);
+      return;
+    }
+
+    let active = true;
+    async function searchPos() {
+      setPoSearchLoading(true);
+      try {
+        const params = new URLSearchParams({ q: query });
+        if (poSearchExcludeId) {
+          params.set("exclude", poSearchExcludeId);
+        }
+        const res = await fetch(`/api/status-updates/po-search?${params}`);
+        const data = await res.json();
+        if (!active || !res.ok) return;
+        setSearchedPos(
+          (data.pos ?? []).map(
+            (po: {
+              id: string;
+              po_number: string;
+              status: string;
+              supplier_name: string | null;
+            }) => ({
+              id: po.id,
+              entity_type: "po" as const,
+              label: po.po_number,
+              sublabel: po.supplier_name
+                ? `${po.supplier_name} · ${po.status.replace(/_/g, " ")}`
+                : po.status.replace(/_/g, " "),
+              status: po.status,
+              date: null,
+            }),
+          ),
+        );
+      } catch {
+        if (active) setSearchedPos([]);
+      } finally {
+        if (active) setPoSearchLoading(false);
+      }
+    }
+
+    void searchPos();
+    return () => {
+      active = false;
+    };
+  }, [debouncedMentionQuery, poSearchExcludeId]);
+
+  const allMentionableRecords = useMemo(() => {
+    const byKey = new Map<string, StatusUpdateRelatedEntity>();
+    for (const entity of mentionableRecords) {
+      byKey.set(`${entity.entity_type}:${entity.id}`, entity);
+    }
+    for (const entity of searchedPos) {
+      byKey.set(`po:${entity.id}`, entity);
+    }
+    return [...byKey.values()];
+  }, [mentionableRecords, searchedPos]);
+
   const mentionCandidates = useMemo((): MentionCandidate[] => {
     if (mentionQuery === null) return [];
 
     const query = mentionQuery.toLowerCase();
-    const records = mentionableRecords
+    const records = allMentionableRecords
       .filter((entity) => {
         if (!query) return true;
         return mentionRecordSearchHaystack(entity).includes(query);
       })
-      .slice(0, 5)
+      .slice(0, 6)
       .map(
         (entity): MentionCandidate => ({
           kind: "record",
@@ -101,7 +172,7 @@ export function MentionInput({
       );
 
     return [...records, ...users].slice(0, 8);
-  }, [mentionQuery, mentionableRecords, profiles]);
+  }, [mentionQuery, allMentionableRecords, profiles]);
 
   function handleInputChange(next: string) {
     onChange(next);
@@ -168,8 +239,11 @@ export function MentionInput({
 
   return (
     <div className={cn("relative", className)}>
-      {mentionCandidates.length > 0 && (
+      {mentionQuery !== null && (
         <div className="absolute bottom-full left-0 right-0 z-10 mb-1 max-h-56 overflow-y-auto rounded-md border border-stone-200 bg-white shadow-md">
+          {poSearchLoading && mentionCandidates.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-stone-500">Searching POs…</p>
+          ) : null}
           {mentionCandidates.map((candidate, index) => (
             <button
               key={
@@ -212,6 +286,18 @@ export function MentionInput({
               )}
             </button>
           ))}
+          {!poSearchLoading &&
+          mentionCandidates.length === 0 &&
+          debouncedMentionQuery.trim().length >= 2 ? (
+            <p className="px-3 py-2 text-sm text-stone-500">No matches found.</p>
+          ) : null}
+          {!poSearchLoading &&
+          mentionCandidates.length === 0 &&
+          (mentionQuery ?? "").trim().length < 2 ? (
+            <p className="px-3 py-2 text-sm text-stone-500">
+              Type a PO number, name, or person to mention.
+            </p>
+          ) : null}
         </div>
       )}
       <div className={cn("flex gap-2", multiline && "flex-col")}>

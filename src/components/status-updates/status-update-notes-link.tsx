@@ -13,6 +13,7 @@ import { MessageSquareText } from "lucide-react";
 import type { StatusUpdate, StatusUpdateRecordEntityType } from "@/types/database";
 import {
   formatStatusUpdateTime,
+  formatScopedSkuLabel,
   statusUpdateBodyPreview,
 } from "@/lib/status-updates/utils";
 import { cn } from "@/lib/utils";
@@ -106,7 +107,6 @@ export function StatusUpdateNotesLink({
   }, []);
 
   const loadPreview = useCallback(async () => {
-    if (updates.length > 0) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -124,7 +124,7 @@ export function StatusUpdateNotesLink({
     } finally {
       setLoading(false);
     }
-  }, [entityId, entityType, updates.length]);
+  }, [entityId, entityType]);
 
   const scheduleShow = useCallback(() => {
     clearTimers();
@@ -234,14 +234,11 @@ export function StatusUpdateNotesLink({
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-stone-800">
                         {statusUpdateBodyPreview(update.body)}
                       </p>
-                      {update.scoped_skus && update.scoped_skus.length > 0 ? (
+                      {(update.associated_products ?? update.scoped_skus ?? [])
+                        .length > 0 ? (
                         <p className="mt-1 text-[11px] text-stone-400">
-                          {(update.associated_products ?? update.scoped_skus)
-                            .map((sku) =>
-                              sku.sku_name
-                                ? `${sku.sku_code} · ${sku.sku_name}`
-                                : sku.sku_code,
-                            )
+                      {(update.associated_products ?? update.scoped_skus ?? [])
+                            .map((sku) => formatScopedSkuLabel(sku))
                             .join(", ")}
                         </p>
                       ) : null}

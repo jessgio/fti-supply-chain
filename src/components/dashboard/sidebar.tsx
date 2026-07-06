@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationBell } from "@/components/dashboard/notification-bell";
 import { useSidebar } from "@/components/dashboard/sidebar-context";
 import type { UserRole } from "@/types/database";
 
@@ -265,9 +266,10 @@ interface SidebarProps {
   role?: UserRole | null;
   displayName?: string | null;
   email?: string | null;
+  userId?: string | null;
 }
 
-export function Sidebar({ role, displayName, email }: SidebarProps) {
+export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggleCollapsed } = useSidebar();
@@ -322,19 +324,22 @@ export function Sidebar({ role, displayName, email }: SidebarProps) {
               </>
             )}
           </div>
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="shrink-0 rounded-md p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </button>
+          <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
+            <NotificationBell userId={userId} collapsed={collapsed} />
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className="shrink-0 rounded-md p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MentionInput } from "@/components/status-updates/mention-input";
 import { StatusUpdateEditDialog } from "@/components/status-updates/status-update-edit-dialog";
+import { SkuProductLabel } from "@/components/status-updates/sku-product-label";
 import {
   ENTITY_TYPE_LABELS,
   ENTITY_TYPE_STYLES,
@@ -121,6 +122,18 @@ export function StatusUpdateCard({
     if (expanded) void loadReplies();
   }, [expanded, loadReplies]);
 
+  const mentionRecordsSeed = useMemo(() => {
+    const linkedPoIds = (update.connected_refs ?? [])
+      .filter(
+        (ref) =>
+          ref.entity_type === "po" && ref.entity_id !== update.entity_id,
+      )
+      .map((ref) => ref.entity_id)
+      .sort()
+      .join(",");
+    return `${update.sku_id}:${update.entity_id}:${linkedPoIds}`;
+  }, [update.sku_id, update.entity_id, update.connected_refs]);
+
   useEffect(() => {
     let active = true;
     async function loadMentionRecords() {
@@ -131,8 +144,26 @@ export function StatusUpdateCard({
         const data = await res.json();
         if (!active || !res.ok) return;
         setMentionRecords(
-          (data.entities ?? []).filter((entity: StatusUpdateRelatedEntity) =>
-            ["po", "payment", "shipment"].includes(entity.entity_type),
+          [
+            ...(data.entities ?? []).filter((entity: StatusUpdateRelatedEntity) =>
+              ["po", "payment", "shipment"].includes(entity.entity_type),
+            ),
+            ...(update.connected_refs ?? [])
+              .filter(
+                (ref) =>
+                  ref.entity_type === "po" && ref.entity_id !== update.entity_id,
+              )
+              .map((ref) => ({
+                id: ref.entity_id,
+                entity_type: "po" as const,
+                label: ref.entity_label ?? ref.entity_id,
+                sublabel: "Linked PO",
+                status: null,
+                date: null,
+              })),
+          ].filter(
+            (entity, index, list) =>
+              list.findIndex((entry) => entry.id === entity.id) === index,
           ),
         );
       } catch {
@@ -143,7 +174,7 @@ export function StatusUpdateCard({
     return () => {
       active = false;
     };
-  }, [update.sku_id]);
+  }, [mentionRecordsSeed]);
 
   async function postReply() {
     if (!replyDraft.trim() || postingReply) return;
@@ -207,7 +238,10 @@ export function StatusUpdateCard({
 
   return (
     <>
-    <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+    <article
+      id={`status-update-${update.id}`}
+      className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm"
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {entityTags.map((entityRef) => (
@@ -288,12 +322,10 @@ export function StatusUpdateCard({
                   key={product.sku_id}
                   className="rounded-md border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-xs text-stone-700"
                 >
-                  <span className="font-medium text-stone-900">
-                    {product.sku_code}
-                  </span>
-                  {product.sku_name ? (
-                    <span className="text-stone-500"> · {product.sku_name}</span>
-                  ) : null}
+                  <SkuProductLabel
+                    sku_code={product.sku_code}
+                    sku_name={product.sku_name}
+                  />
                 </li>
               ))}
             </ul>
@@ -349,6 +381,9 @@ export function StatusUpdateCard({
             onChange={setReplyDraft}
             profiles={profiles}
             recordEntities={mentionRecords}
+            poSearchExcludeId={
+              update.entity_type === "po" ? update.entity_id : undefined
+            }
             placeholder="Reply… use @ for people, POs, shipments, or payments"
             onSubmit={postReply}
             submitLabel="Reply"

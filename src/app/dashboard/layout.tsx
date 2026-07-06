@@ -15,6 +15,7 @@ export default async function DashboardLayout({
         role={profile?.role ?? null}
         displayName={profile?.fullName ?? null}
         email={profile?.email ?? null}
+        userId={profile?.id ?? null}
       />
       <main className="min-w-0 flex-1 overflow-auto">{children}</main>
     </SidebarProvider>

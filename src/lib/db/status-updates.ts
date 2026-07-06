@@ -15,10 +15,121 @@ import type {
   StatusUpdateSkuSummary,
 } from "@/types/database";
 import { listProfiles } from "@/lib/db/product-development";
+import { ACTIVE_PO_STATUSES } from "@/lib/procurement/po-primary-groups";
 import { extractMentionIds } from "@/lib/status-updates/utils";
 
 function authorNameMap(profiles: Profile[]): Map<string, string> {
   return new Map(profiles.map((p) => [p.id, p.full_name ?? "Unknown"]));
+}
+
+async function loadSkuIdsOnActivePos(
+  supabase: SupabaseClient,
+): Promise<Set<string>> {
+  const { data: pos, error: poError } = await supabase
+    .from("purchase_orders")
+    .select("id")
+    .in("status", [...ACTIVE_PO_STATUSES]);
+  if (poError) throw poError;
+
+  const poIds = (pos ?? []).map((po) => po.id);
+  if (poIds.length === 0) return new Set();
+
+  const { data: lines, error: linesError } = await supabase
+    .from("purchase_order_lines")
+    .select("sku_id")
+    .in("po_id", poIds);
+  if (linesError) throw linesError;
+
+  return new Set((lines ?? []).map((line) => line.sku_id));
+}
+
+export interface StatusUpdateSkuOption {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  is_packaging: boolean;
+  franchise_name: string | null;
+}
+
+export async function listSkusWithActivePos(
+  supabase: SupabaseClient,
+): Promise<StatusUpdateSkuOption[]> {
+  const activeSkuIds = await loadSkuIdsOnActivePos(supabase);
+  if (activeSkuIds.size === 0) return [];
+
+  const { data, error } = await supabase
+    .from("skus")
+    .select(
+      "id, sku_code, name, is_bundle, is_packaging, product_franchises(name)",
+    )
+    .in("id", [...activeSkuIds])
+    .order("sku_code");
+  if (error) throw error;
+
+  return (data ?? []).map((row) => {
+    const franchise = row.product_franchises as unknown as
+      | { name: string }
+      | { name: string }[]
+      | null;
+    const franchiseName = Array.isArray(franchise)
+      ? (franchise[0]?.name ?? null)
+      : (franchise?.name ?? null);
+    return {
+      id: row.id,
+      sku_code: row.sku_code,
+      name: row.name,
+      is_bundle: row.is_bundle,
+      is_packaging: row.is_packaging,
+      franchise_name: franchiseName,
+    };
+  });
+}
+
+export interface StatusUpdatePoSearchResult {
+  id: string;
+  po_number: string;
+  status: string;
+  supplier_name: string | null;
+}
+
+export async function searchPosForStatusUpdateLinking(
+  supabase: SupabaseClient,
+  query: string,
+  options?: { excludePoId?: string; limit?: number },
+): Promise<StatusUpdatePoSearchResult[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  let request = supabase
+    .from("purchase_orders")
+    .select("id, po_number, status, suppliers(name)")
+    .ilike("po_number", `%${trimmed}%`)
+    .order("order_date", { ascending: false })
+    .limit(options?.limit ?? 10);
+
+  if (options?.excludePoId) {
+    request = request.neq("id", options.excludePoId);
+  }
+
+  const { data, error } = await request;
+  if (error) throw error;
+
+  return (data ?? []).map((row) => {
+    const supplier = row.suppliers as unknown as
+      | { name: string }
+      | { name: string }[]
+      | null;
+    const supplierName = Array.isArray(supplier)
+      ? (supplier[0]?.name ?? null)
+      : (supplier?.name ?? null);
+    return {
+      id: row.id,
+      po_number: row.po_number,
+      status: row.status,
+      supplier_name: supplierName,
+    };
+  });
 }
 
 export async function listStatusUpdatesForSku(
@@ -143,7 +254,7 @@ async function enrichStatusUpdates(
       .in("status_update_id", updateIds),
     supabase
       .from("status_update_skus")
-      .select("status_update_id, sku_id, skus(sku_code, name)")
+      .select("status_update_id, sku_id")
       .in("status_update_id", updateIds),
   ]);
   if (repliesRes.error) throw repliesRes.error;
@@ -175,18 +286,32 @@ async function enrichStatusUpdates(
     refsByUpdate.set(ref.status_update_id, list);
   }
 
-  const scopedByUpdate = new Map<string, StatusUpdateScopedSku[]>();
+  const scopedSkuIdsByUpdate = new Map<string, string[]>();
+  const scopedSkuIds = new Set<string>();
   for (const row of scopedSkusRes.data ?? []) {
-    const sku = row.skus as unknown as
-      | { sku_code: string; name: string | null }
-      | null;
-    const list = scopedByUpdate.get(row.status_update_id) ?? [];
-    list.push({
-      sku_id: row.sku_id,
-      sku_code: sku?.sku_code ?? row.sku_id,
-      sku_name: sku?.name ?? null,
-    });
-    scopedByUpdate.set(row.status_update_id, list);
+    const list = scopedSkuIdsByUpdate.get(row.status_update_id) ?? [];
+    if (!list.includes(row.sku_id)) list.push(row.sku_id);
+    scopedSkuIdsByUpdate.set(row.status_update_id, list);
+    scopedSkuIds.add(row.sku_id);
+  }
+
+  const scopedSkuById = await loadSkuSummariesById(
+    supabase,
+    [...scopedSkuIds],
+  );
+  const scopedByUpdate = new Map<string, StatusUpdateScopedSku[]>();
+  for (const [updateId, skuIds] of scopedSkuIdsByUpdate) {
+    scopedByUpdate.set(
+      updateId,
+      skuIds.map(
+        (skuId) =>
+          scopedSkuById.get(skuId) ?? {
+            sku_id: skuId,
+            sku_code: skuId,
+            sku_name: null,
+          },
+      ),
+    );
   }
 
   const replyCounts = new Map<string, number>();
@@ -341,6 +466,28 @@ export async function listStatusUpdateSkuSummaries(
     );
 }
 
+function appendUpdateToPoGroup(
+  updateIdsByPo: Map<string, string[]>,
+  latestAtByPo: Map<string, string>,
+  poId: string,
+  updateId: string,
+  createdAt: string,
+) {
+  const list = updateIdsByPo.get(poId) ?? [];
+  if (!list.includes(updateId)) {
+    list.push(updateId);
+    updateIdsByPo.set(poId, list);
+  }
+
+  const existingLatest = latestAtByPo.get(poId);
+  if (
+    !existingLatest ||
+    new Date(createdAt).getTime() > new Date(existingLatest).getTime()
+  ) {
+    latestAtByPo.set(poId, createdAt);
+  }
+}
+
 export async function listStatusUpdatePoGroups(
   supabase: SupabaseClient,
 ): Promise<StatusUpdatePoGroup[]> {
@@ -356,24 +503,40 @@ export async function listStatusUpdatePoGroups(
   const latestAtByPo = new Map<string, string>();
 
   for (const update of rawUpdates) {
-    const poId = update.entity_id;
-    const list = updateIdsByPo.get(poId) ?? [];
-    if (!list.includes(update.id)) {
-      list.push(update.id);
-    }
-    updateIdsByPo.set(poId, list);
+    appendUpdateToPoGroup(
+      updateIdsByPo,
+      latestAtByPo,
+      update.entity_id,
+      update.id,
+      update.created_at,
+    );
+  }
 
-    const existingLatest = latestAtByPo.get(poId);
-    if (
-      !existingLatest ||
-      new Date(update.created_at).getTime() > new Date(existingLatest).getTime()
-    ) {
-      latestAtByPo.set(poId, update.created_at);
-    }
+  const primaryUpdateIds = rawUpdates.map((update) => update.id);
+  const { data: linkedPoRefs, error: linkedPoError } = await supabase
+    .from("status_update_refs")
+    .select("status_update_id, entity_id")
+    .eq("entity_type", "po")
+    .in("status_update_id", primaryUpdateIds);
+  if (linkedPoError) throw linkedPoError;
+
+  const createdAtById = new Map(
+    rawUpdates.map((update) => [update.id, update.created_at]),
+  );
+  for (const ref of linkedPoRefs ?? []) {
+    const createdAt = createdAtById.get(ref.status_update_id);
+    if (!createdAt) continue;
+    appendUpdateToPoGroup(
+      updateIdsByPo,
+      latestAtByPo,
+      ref.entity_id,
+      ref.status_update_id,
+      createdAt,
+    );
   }
 
   const poIds = [...updateIdsByPo.keys()];
-  const allUpdateIds = [...updateIdsByPo.values()].flat();
+  const allUpdateIds = [...new Set([...updateIdsByPo.values()].flat())];
 
   const [enriched, poHeaders, poProductsByPo] = await Promise.all([
     enrichStatusUpdates(supabase, allUpdateIds),
@@ -459,25 +622,46 @@ async function loadPoProductsByPoIds(
 
   const { data, error } = await supabase
     .from("purchase_order_lines")
-    .select("po_id, sku_id, skus ( sku_code, name )")
+    .select("po_id, sku_id")
     .in("po_id", poIds)
     .order("sku_id");
   if (error) throw error;
 
   const byPo = new Map<string, StatusUpdateScopedSku[]>();
   for (const line of data ?? []) {
-    const sku = line.skus as unknown as
-      | { sku_code: string; name: string | null }
-      | null;
     const list = byPo.get(line.po_id) ?? [];
     if (list.some((entry) => entry.sku_id === line.sku_id)) continue;
     list.push({
       sku_id: line.sku_id,
-      sku_code: sku?.sku_code ?? line.sku_id,
-      sku_name: sku?.name ?? null,
+      sku_code: line.sku_id,
+      sku_name: null,
     });
     byPo.set(line.po_id, list);
   }
+
+  const skuIds = [
+    ...new Set([...byPo.values()].flat().map((product) => product.sku_id)),
+  ];
+  const [skuById, activeSkuIds] = await Promise.all([
+    loadSkuSummariesById(supabase, skuIds),
+    loadSkuIdsOnActivePos(supabase),
+  ]);
+  for (const [poId, products] of byPo) {
+    byPo.set(
+      poId,
+      products
+        .map(
+          (product) =>
+            skuById.get(product.sku_id) ?? {
+              sku_id: product.sku_id,
+              sku_code: product.sku_id,
+              sku_name: null,
+            },
+        )
+        .filter((product) => activeSkuIds.has(product.sku_id)),
+    );
+  }
+
   return byPo;
 }
 
@@ -563,7 +747,7 @@ export async function createStatusUpdate(
     .single();
   if (error) throw error;
 
-  const connectedRefs = dedupeConnectedRefs(input.connected_refs ?? []);
+  const connectedRefs = dedupeConnectedRefs(input.connected_refs ?? [], input.po_id);
   if (connectedRefs.length > 0) {
     const { error: refsError } = await supabase.from("status_update_refs").insert(
       connectedRefs.map((ref) => ({
@@ -593,12 +777,19 @@ export async function createStatusUpdate(
 
 function dedupeConnectedRefs(
   refs: Array<{ entity_type: StatusUpdateEntityType; entity_id: string }>,
+  primaryPoId?: string,
 ): Array<{ entity_type: StatusUpdateEntityType; entity_id: string }> {
   const seen = new Set<string>();
   const result: Array<{ entity_type: StatusUpdateEntityType; entity_id: string }> =
     [];
   for (const ref of refs) {
-    if (ref.entity_type === "po") continue;
+    if (
+      ref.entity_type === "po" &&
+      primaryPoId &&
+      ref.entity_id === primaryPoId
+    ) {
+      continue;
+    }
     const key = `${ref.entity_type}:${ref.entity_id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -608,6 +799,7 @@ function dedupeConnectedRefs(
 }
 
 const CONNECTED_ENTITY_TYPES = new Set<StatusUpdateEntityType>([
+  "po",
   "payment",
   "shipment",
   "inbound",
@@ -668,7 +860,7 @@ export async function updateStatusUpdate(
 ): Promise<StatusUpdate> {
   const { data: existing, error: existingError } = await supabase
     .from("status_updates")
-    .select("id, sku_id")
+    .select("id, sku_id, entity_type, entity_id")
     .eq("id", id)
     .maybeSingle();
   if (existingError) throw existingError;
@@ -701,7 +893,12 @@ export async function updateStatusUpdate(
       .eq("status_update_id", id);
     if (deleteRefsError) throw deleteRefsError;
 
-    const connectedRefs = dedupeConnectedRefs(input.connected_refs);
+    const primaryPoId =
+      existing.entity_type === "po" ? existing.entity_id : undefined;
+    const connectedRefs = dedupeConnectedRefs(
+      input.connected_refs,
+      primaryPoId,
+    );
     if (connectedRefs.length > 0) {
       const { error: refsError } = await supabase.from("status_update_refs").insert(
         connectedRefs.map((ref) => ({
@@ -914,8 +1111,10 @@ export async function listRelatedEntitiesForSku(
       .from("purchase_orders")
       .select("id, po_number, status, order_date")
       .in("id", poIds)
+      .in("status", [...ACTIVE_PO_STATUSES])
       .order("order_date", { ascending: false });
     if (poError) throw poError;
+    const activePoIds = new Set((pos ?? []).map((po) => po.id));
     for (const po of pos ?? []) {
       entities.push({
         id: po.id,
@@ -932,7 +1131,7 @@ export async function listRelatedEntitiesForSku(
       .select(
         "id, payment_date, amount, payment_request_number, purpose, currency, po_id",
       )
-      .in("po_id", poIds)
+      .in("po_id", [...activePoIds])
       .order("payment_date", { ascending: false });
     if (payError) throw payError;
     for (const payment of payments ?? []) {
@@ -951,7 +1150,7 @@ export async function listRelatedEntitiesForSku(
       .select(
         "po_id, shipment_id, shipments(id, shipment_number, status, estimated_departure_date)",
       )
-      .in("po_id", poIds);
+      .in("po_id", [...activePoIds]);
     if (spError) throw spError;
 
     const shipmentMap = new Map<string, StatusUpdateRelatedEntity>();
@@ -992,7 +1191,7 @@ export async function listRelatedEntitiesForSku(
         const poLine = row.purchase_order_lines as unknown as {
           po_id: string;
         } | null;
-        if (!shipment || !poLine?.po_id) continue;
+        if (!shipment || !poLine?.po_id || !activePoIds.has(poLine.po_id)) continue;
         shipmentMap.set(`${shipment.id}:${poLine.po_id}`, {
           id: shipment.id,
           entity_type: "shipment",
@@ -1009,7 +1208,7 @@ export async function listRelatedEntitiesForSku(
     const { data: inboundByPo, error: inboundPoError } = await supabase
       .from("inbound_receives")
       .select("id, receive_number, status, receive_date, po_id")
-      .in("po_id", poIds)
+      .in("po_id", [...activePoIds])
       .order("receive_date", { ascending: false });
     if (inboundPoError) throw inboundPoError;
     for (const receive of inboundByPo ?? []) {
@@ -1027,7 +1226,7 @@ export async function listRelatedEntitiesForSku(
     const { data: deliveryNotes, error: dnError } = await supabase
       .from("delivery_notes")
       .select("id, dn_number, delivery_date, po_id")
-      .in("po_id", poIds)
+      .in("po_id", [...activePoIds])
       .order("delivery_date", { ascending: false });
     if (dnError) throw dnError;
     for (const note of deliveryNotes ?? []) {
@@ -1044,7 +1243,7 @@ export async function listRelatedEntitiesForSku(
     const { data: extractDeliveryNotes, error: ednError } = await supabase
       .from("extract_inbound_delivery_notes")
       .select("id, dn_number, delivery_date, po_id")
-      .in("po_id", poIds)
+      .in("po_id", [...activePoIds])
       .order("delivery_date", { ascending: false });
     if (ednError) throw ednError;
     for (const note of extractDeliveryNotes ?? []) {
@@ -1103,22 +1302,37 @@ export async function listPoProducts(
 ): Promise<StatusUpdatePoProduct[]> {
   const { data, error } = await supabase
     .from("purchase_order_lines")
-    .select("sku_id, qty_ordered, skus(sku_code, name)")
+    .select("sku_id, qty_ordered")
     .eq("po_id", poId)
     .order("sku_id");
   if (error) throw error;
 
-  return (data ?? []).map((line) => {
-    const sku = line.skus as unknown as
-      | { sku_code: string; name: string | null }
-      | null;
-    return {
-      sku_id: line.sku_id,
-      sku_code: sku?.sku_code ?? line.sku_id,
-      sku_name: sku?.name ?? null,
-      qty_ordered: Number(line.qty_ordered),
-    };
-  });
+  const lines = data ?? [];
+  const [skuById, activeSkuIds] = await Promise.all([
+    loadSkuSummariesById(
+      supabase,
+      lines.map((line) => line.sku_id),
+    ),
+    loadSkuIdsOnActivePos(supabase),
+  ]);
+
+  return lines
+    .map((line) => {
+      const sku =
+        skuById.get(line.sku_id) ??
+        ({
+          sku_id: line.sku_id,
+          sku_code: line.sku_id,
+          sku_name: null,
+        } satisfies StatusUpdateScopedSku);
+      return {
+        sku_id: line.sku_id,
+        sku_code: sku.sku_code,
+        sku_name: sku.sku_name,
+        qty_ordered: Number(line.qty_ordered),
+      };
+    })
+    .filter((product) => activeSkuIds.has(product.sku_id));
 }
 
 export { extractMentionIds } from "@/lib/status-updates/utils";
@@ -1129,13 +1343,25 @@ async function getStatusUpdateIdsForEntity(
   entityId: string,
 ): Promise<string[]> {
   if (entityType === "po") {
-    const { data, error } = await supabase
-      .from("status_updates")
-      .select("id")
-      .eq("entity_type", "po")
-      .eq("entity_id", entityId);
-    if (error) throw error;
-    return (data ?? []).map((row) => row.id);
+    const [directRes, linkedRes] = await Promise.all([
+      supabase
+        .from("status_updates")
+        .select("id")
+        .eq("entity_type", "po")
+        .eq("entity_id", entityId),
+      supabase
+        .from("status_update_refs")
+        .select("status_update_id")
+        .eq("entity_type", "po")
+        .eq("entity_id", entityId),
+    ]);
+    if (directRes.error) throw directRes.error;
+    if (linkedRes.error) throw linkedRes.error;
+
+    const ids = new Set<string>();
+    for (const row of directRes.data ?? []) ids.add(row.id);
+    for (const row of linkedRes.data ?? []) ids.add(row.status_update_id);
+    return [...ids];
   }
 
   const { data, error } = await supabase
@@ -1172,7 +1398,24 @@ export async function listStatusUpdatesForEntity(
 
   const orderedIds = (orderedRows ?? []).map((row) => row.id);
   const updates = await enrichStatusUpdates(supabase, orderedIds);
-  return { updates, total: updateIds.length };
+  const primarySkuIds = [
+    ...new Set(
+      updates
+        .filter(
+          (update) =>
+            !update.applies_to_all_po_products &&
+            (update.scoped_skus?.length ?? 0) === 0,
+        )
+        .map((update) => update.sku_id),
+    ),
+  ];
+  const primarySkuById = await loadSkuSummariesById(supabase, primarySkuIds);
+  return {
+    updates: updates.map((update) =>
+      attachAssociatedProducts(update, primarySkuById),
+    ),
+    total: updateIds.length,
+  };
 }
 
 export async function listStatusUpdateCountsByEntity(
@@ -1188,14 +1431,22 @@ export async function listStatusUpdateCountsByEntity(
   const counts = new Map<string, { count: number; latest_at: string | null }>();
 
   if (entityType === "po") {
-    const { data, error } = await supabase
-      .from("status_updates")
-      .select("entity_id, created_at")
-      .eq("entity_type", "po")
-      .in("entity_id", uniqueIds);
-    if (error) throw error;
+    const [directRes, linkedRes] = await Promise.all([
+      supabase
+        .from("status_updates")
+        .select("entity_id, created_at")
+        .eq("entity_type", "po")
+        .in("entity_id", uniqueIds),
+      supabase
+        .from("status_update_refs")
+        .select("entity_id, status_updates ( created_at )")
+        .eq("entity_type", "po")
+        .in("entity_id", uniqueIds),
+    ]);
+    if (directRes.error) throw directRes.error;
+    if (linkedRes.error) throw linkedRes.error;
 
-    for (const row of data ?? []) {
+    for (const row of directRes.data ?? []) {
       const existing = counts.get(row.entity_id) ?? { count: 0, latest_at: null };
       existing.count += 1;
       if (
@@ -1203,6 +1454,27 @@ export async function listStatusUpdateCountsByEntity(
         new Date(row.created_at).getTime() > new Date(existing.latest_at).getTime()
       ) {
         existing.latest_at = row.created_at;
+      }
+      counts.set(row.entity_id, existing);
+    }
+
+    for (const row of linkedRes.data ?? []) {
+      const update = row.status_updates as unknown as
+        | { created_at: string }
+        | { created_at: string }[]
+        | null;
+      const createdAt = Array.isArray(update)
+        ? (update[0]?.created_at ?? null)
+        : (update?.created_at ?? null);
+      if (!createdAt) continue;
+
+      const existing = counts.get(row.entity_id) ?? { count: 0, latest_at: null };
+      existing.count += 1;
+      if (
+        !existing.latest_at ||
+        new Date(createdAt).getTime() > new Date(existing.latest_at).getTime()
+      ) {
+        existing.latest_at = createdAt;
       }
       counts.set(row.entity_id, existing);
     }

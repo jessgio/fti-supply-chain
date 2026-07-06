@@ -6,6 +6,7 @@ import {
   listStatusUpdateReplies,
 } from "@/lib/db/status-updates";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyNewReplyMentions } from "@/lib/db/notifications";
 import { errorMessage } from "@/lib/errors";
 
 interface RouteContext {
@@ -47,6 +48,14 @@ export async function POST(request: Request, context: RouteContext) {
       body: body.body.trim(),
       author_id: profile.id,
       mentioned_user_ids: mentioned,
+    });
+
+    await notifyNewReplyMentions(createAdminClient(), {
+      replyId: reply.id,
+      statusUpdateId: id,
+      body: body.body.trim(),
+      mentionedUserIds: mentioned,
+      actorId: profile.id,
     });
 
     return NextResponse.json({ reply }, { status: 201 });

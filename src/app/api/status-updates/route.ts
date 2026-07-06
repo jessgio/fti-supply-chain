@@ -9,6 +9,7 @@ import {
   parseConnectedRefs,
 } from "@/lib/db/status-updates";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyNewStatusUpdateMentions } from "@/lib/db/notifications";
 import { errorMessage } from "@/lib/errors";
 
 export async function GET(request: Request) {
@@ -83,6 +84,14 @@ export async function POST(request: Request) {
       scoped_sku_ids: Array.isArray(body.scoped_sku_ids)
         ? body.scoped_sku_ids.filter((id: unknown) => typeof id === "string")
         : undefined,
+    });
+
+    await notifyNewStatusUpdateMentions(createAdminClient(), {
+      updateId: update.id,
+      poId: body.po_id,
+      body: body.body.trim(),
+      mentionedUserIds: mentioned,
+      actorId: profile.id,
     });
 
     return NextResponse.json({ update }, { status: 201 });

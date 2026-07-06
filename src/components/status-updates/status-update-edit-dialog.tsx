@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { ConnectedRecordsPicker } from "@/components/status-updates/connected-records-picker";
+import {
+  LinkedPoPicker,
+  type LinkedPoOption,
+} from "@/components/status-updates/linked-po-picker";
 import { MentionInput } from "@/components/status-updates/mention-input";
 import {
   PoProductScopePicker,
@@ -37,6 +41,7 @@ export function StatusUpdateEditDialog({
 
   const [body, setBody] = useState(update.body);
   const [connectedKeys, setConnectedKeys] = useState<string[]>([]);
+  const [linkedPos, setLinkedPos] = useState<LinkedPoOption[]>([]);
   const [relatedEntities, setRelatedEntities] = useState<
     StatusUpdateRelatedEntity[]
   >([]);
@@ -58,22 +63,42 @@ export function StatusUpdateEditDialog({
     );
   }, [relatedEntities, poId]);
 
-  const mentionRecords = useMemo(
-    () =>
-      relatedEntities.filter((entity) =>
-        ["po", "payment", "shipment"].includes(entity.entity_type),
-      ),
-    [relatedEntities],
-  );
+  const mentionRecords = useMemo(() => {
+    const base = relatedEntities.filter((entity) =>
+      ["po", "payment", "shipment"].includes(entity.entity_type),
+    );
+    const seenPoIds = new Set(
+      base.filter((entity) => entity.entity_type === "po").map((entity) => entity.id),
+    );
+    const linkedEntities = linkedPos
+      .filter((po) => !seenPoIds.has(po.id))
+      .map((po) => ({
+        id: po.id,
+        entity_type: "po" as const,
+        label: po.po_number,
+        sublabel: po.supplier_name ?? "Linked PO",
+        status: po.status ?? null,
+        date: null,
+      }));
+    return [...base, ...linkedEntities];
+  }, [relatedEntities, linkedPos]);
 
   useEffect(() => {
     if (!open) return;
 
     setBody(update.body);
+    setLinkedPos(
+      (update.connected_refs ?? [])
+        .filter((ref) => ref.entity_type === "po")
+        .map((ref) => ({
+          id: ref.entity_id,
+          po_number: ref.entity_label ?? ref.entity_id,
+        })),
+    );
     setConnectedKeys(
-      (update.connected_refs ?? []).map(
-        (ref) => `${ref.entity_type}:${ref.entity_id}`,
-      ),
+      (update.connected_refs ?? [])
+        .filter((ref) => ref.entity_type !== "po")
+        .map((ref) => `${ref.entity_type}:${ref.entity_id}`),
     );
     setProductScopeMode(
       update.applies_to_all_po_products ? "all" : "selected",
@@ -146,10 +171,16 @@ export function StatusUpdateEditDialog({
     setSaving(true);
     setError(null);
     try {
-      const connected_refs = connectedKeys.map((key) => {
-        const [entityType, entityId] = key.split(":");
-        return { entity_type: entityType, entity_id: entityId };
-      });
+      const connected_refs = [
+        ...connectedKeys.map((key) => {
+          const [entityType, entityId] = key.split(":");
+          return { entity_type: entityType, entity_id: entityId };
+        }),
+        ...linkedPos.map((po) => ({
+          entity_type: "po",
+          entity_id: po.id,
+        })),
+      ];
 
       const payload: Record<string, unknown> = {
         body: body.trim(),
@@ -215,6 +246,17 @@ export function StatusUpdateEditDialog({
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-stone-700">
+                    Linked POs
+                  </label>
+                  <LinkedPoPicker
+                    primaryPoId={poId ?? ""}
+                    selected={linkedPos}
+                    onChange={setLinkedPos}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-stone-700">
                     Connected records
                   </label>
                   <ConnectedRecordsPicker
@@ -235,6 +277,7 @@ export function StatusUpdateEditDialog({
                 onChange={setBody}
                 profiles={profiles}
                 recordEntities={mentionRecords}
+                poSearchExcludeId={poId ?? undefined}
                 placeholder="Describe the current status… use @ for people, POs, shipments, or payments"
                 multiline
                 disabled={saving || loading}

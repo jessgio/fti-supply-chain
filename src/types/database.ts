@@ -990,6 +990,23 @@ export interface StatusUpdateEntityCount {
 
 export type StatusUpdateRecordEntityType = "po" | "payment" | "shipment";
 
+export type UserNotificationSourceType = "status_update" | "status_update_reply";
+
+export interface UserNotification {
+  id: string;
+  recipient_id: string;
+  actor_id: string;
+  actor_name?: string | null;
+  source_type: UserNotificationSourceType;
+  source_id: string;
+  status_update_id: string;
+  body_preview: string;
+  po_id: string | null;
+  po_number: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
 export interface PdPhaseInput {
   id?: string;
   /** Client-side id used to wire dependencies before rows exist in the DB. */
