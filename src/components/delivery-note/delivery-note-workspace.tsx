@@ -161,7 +161,7 @@ export function DeliveryNoteWorkspace({
         options.unshift({
           id: poId,
           po_number: note.po_number,
-          status: "closed",
+          status: "received",
           order_date: note.delivery_date,
         });
       }
