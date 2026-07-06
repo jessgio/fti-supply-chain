@@ -13,6 +13,7 @@ import {
   type ShipmentStatus,
   type ShipmentType,
 } from "@/lib/shipments/constants";
+import { mergeAutoFillLineQtys } from "@/lib/shipments/line-qtys";
 import { resolveShipmentStatusFromDeparture } from "@/lib/shipments/shipment-dates";
 import { formatNumber } from "@/lib/utils";
 import type {
@@ -125,15 +126,24 @@ export function ShipmentEditDialog({
       setAllocations([]);
       return;
     }
+    const controller = new AbortController();
     const params = new URLSearchParams();
     selectedPoIds.forEach((id) => params.append("po_id", id));
     params.set("exclude_shipment_id", shipmentId);
-    fetch(`/api/shipments/allocations?${params.toString()}`)
+    fetch(`/api/shipments/allocations?${params.toString()}`, {
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((data) => {
-        setAllocations(data.allocations ?? []);
+        const allocs = (data.allocations ?? []) as ShipmentLineAllocation[];
+        setAllocations(allocs);
+        setLineQtys((prev) => mergeAutoFillLineQtys(prev, allocs));
       })
-      .catch(() => setAllocations([]));
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setAllocations([]);
+      });
+    return () => controller.abort();
   }, [selectedPoIds, shipmentId]);
 
   const visibleAllocations = useMemo(

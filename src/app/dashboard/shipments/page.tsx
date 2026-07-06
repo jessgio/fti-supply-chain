@@ -43,6 +43,7 @@ import {
 } from "@/lib/shipments/constants";
 import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
+import { mergeAutoFillLineQtys } from "@/lib/shipments/line-qtys";
 import {
   groupShipmentsByPrimaryGood,
   type ShipmentGroupEntry,
@@ -251,22 +252,28 @@ function ShipmentsInner() {
   useEffect(() => {
     if (!selectedPoIds.length) {
       setAllocations([]);
+      setLineQtys({});
       return;
     }
+    const controller = new AbortController();
     const params = new URLSearchParams();
     selectedPoIds.forEach((id) => params.append("po_id", id));
-    fetch(`/api/shipments/allocations?${params.toString()}`)
+    fetch(`/api/shipments/allocations?${params.toString()}`, {
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((data) => {
         const allocs = (data.allocations ?? []).filter(
           (a: ShipmentLineAllocation) => a.qty_available > 0,
         );
         setAllocations(allocs);
-        const qtys: Record<string, number> = {};
-        for (const a of allocs) qtys[a.po_line_id] = a.qty_available;
-        setLineQtys(qtys);
+        setLineQtys((prev) => mergeAutoFillLineQtys(prev, allocs));
       })
-      .catch(() => setAllocations([]));
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setAllocations([]);
+      });
+    return () => controller.abort();
   }, [selectedPoIds]);
 
   useEffect(() => {
