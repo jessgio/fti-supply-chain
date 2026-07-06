@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileDown, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, FileDown, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +30,8 @@ interface BootstrapData {
 
 interface DeliveryNoteWorkspaceProps {
   token: string;
+  initialEditNoteId?: string;
+  returnTo?: string;
 }
 
 function emptyLine(): LineDraft {
@@ -79,7 +83,12 @@ function lineDraftFromNoteLine(
   };
 }
 
-export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
+export function DeliveryNoteWorkspace({
+  token,
+  initialEditNoteId,
+  returnTo,
+}: DeliveryNoteWorkspaceProps) {
+  const router = useRouter();
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [notes, setNotes] = useState<DeliveryNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +104,7 @@ export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
   const [editingNoteNumber, setEditingNoteNumber] = useState<string | null>(null);
   const [loadingNoteId, setLoadingNoteId] = useState<string | null>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const initialEditHandled = useRef(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -120,6 +130,14 @@ export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (initialEditHandled.current || loading || !bootstrap || !initialEditNoteId) {
+      return;
+    }
+    initialEditHandled.current = true;
+    void startEdit(initialEditNoteId);
+  }, [loading, bootstrap, initialEditNoteId]);
 
   const lineTotals = useMemo(
     () =>
@@ -171,6 +189,9 @@ export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
     setLines(reset.lines);
     setError(null);
     setSuccess(null);
+    if (returnTo) {
+      router.push(returnTo);
+    }
   }
 
   async function startEdit(noteId: string) {
@@ -265,6 +286,10 @@ export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
         setNotes((prev) =>
           prev.map((note) => (note.id === editingNoteId ? json.note : note)),
         );
+        if (returnTo) {
+          router.push(returnTo);
+          return;
+        }
         cancelEdit();
         setSuccess(`Delivery note ${json.note.dn_number} updated. You can download the PDF below.`);
       } else {
@@ -308,6 +333,16 @@ export function DeliveryNoteWorkspace({ token }: DeliveryNoteWorkspaceProps) {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+      {returnTo && (
+        <Link
+          href={returnTo}
+          className="inline-flex w-fit items-center gap-2 text-sm text-stone-600 hover:text-stone-900"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to delivery notes
+        </Link>
+      )}
+
       <div>
         <h1 className="text-2xl font-semibold text-stone-900">Delivery Note</h1>
         <p className="mt-1 text-sm text-stone-600">

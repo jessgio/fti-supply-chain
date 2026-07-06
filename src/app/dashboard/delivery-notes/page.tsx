@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, FileDown, Link2, Loader2, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { Copy, FileDown, Link2, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ export default function DeliveryNotesDashboardPage() {
   const [settingToken, setSettingToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,6 +95,25 @@ export default function DeliveryNotesDashboardPage() {
       setError(err instanceof Error ? err.message : "Failed to set token.");
     } finally {
       setSettingToken(false);
+    }
+  }
+
+  async function handleDelete(noteId: string, dnNumber: string) {
+    if (!confirm(`Delete delivery note ${dnNumber}? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingNoteId(noteId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/delivery-notes/${noteId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to delete delivery note.");
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete delivery note.");
+    } finally {
+      setDeletingNoteId(null);
     }
   }
 
@@ -180,7 +201,10 @@ export default function DeliveryNotesDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Submission history</CardTitle>
-          <CardDescription>All delivery notes created via the external portal.</CardDescription>
+          <CardDescription>
+            All delivery notes created via the external portal. Edit or delete submissions as
+            needed.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -194,7 +218,7 @@ export default function DeliveryNotesDashboardPage() {
             <p className="text-sm text-stone-500">No delivery notes yet.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
+              <table className="w-full min-w-[840px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-stone-200 text-stone-500">
                     <th className="py-2 pr-4 font-medium">DN number</th>
@@ -203,7 +227,7 @@ export default function DeliveryNotesDashboardPage() {
                     <th className="py-2 pr-4 font-medium">Delivery date</th>
                     <th className="py-2 pr-4 font-medium">Penerima</th>
                     <th className="py-2 pr-4 font-medium">Created</th>
-                    <th className="py-2 font-medium">PDF</th>
+                    <th className="py-2 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -220,13 +244,35 @@ export default function DeliveryNotesDashboardPage() {
                           : "—"}
                       </td>
                       <td className="py-3">
-                        <a
-                          href={`/api/delivery-notes/${note.id}/pdf`}
-                          className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
-                        >
-                          <FileDown className="h-4 w-4" />
-                          Download
-                        </a>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Link
+                            href={`/dashboard/delivery-notes/${note.id}/edit`}
+                            className="inline-flex items-center gap-1 text-stone-700 hover:underline"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Edit
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(note.id, note.dn_number)}
+                            disabled={deletingNoteId === note.id}
+                            className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
+                          >
+                            {deletingNoteId === note.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            Delete
+                          </button>
+                          <a
+                            href={`/api/delivery-notes/${note.id}/pdf`}
+                            className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                          >
+                            <FileDown className="h-4 w-4" />
+                            Download
+                          </a>
+                        </div>
                       </td>
                     </tr>
                   ))}
