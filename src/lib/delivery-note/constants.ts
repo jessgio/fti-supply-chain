@@ -9,3 +9,11 @@ export const DELIVERY_NOTE_NOTES = [
   "This Delivery Note should be signed by both parties.",
   "This Delivery Note should be kept as proof of delivery.",
 ] as const;
+
+export function formatDeliveryNotePdfFilename(note: {
+  delivery_date: string;
+  po_number: string;
+}): string {
+  const datePart = note.delivery_date.replace(/-/g, "");
+  return `DN-${datePart} - ${note.po_number}.pdf`;
+}

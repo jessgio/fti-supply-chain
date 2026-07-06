@@ -7,6 +7,7 @@ import {
   getSupplierForDeliveryNote,
 } from "@/lib/db/delivery-notes";
 import { generateDeliveryNotePdf } from "@/lib/delivery-note/delivery-note-pdf";
+import { formatDeliveryNotePdfFilename } from "@/lib/delivery-note/constants";
 import { requirePortalToken } from "@/lib/delivery-note/portal-auth";
 import { errorMessage } from "@/lib/errors";
 
@@ -51,7 +52,7 @@ export async function GET(
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${note.dn_number}.pdf"`,
+        "Content-Disposition": `attachment; filename="${formatDeliveryNotePdfFilename(note)}"`,
         "Cache-Control": "no-store",
       },
     });

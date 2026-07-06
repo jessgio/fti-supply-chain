@@ -40,6 +40,26 @@ export interface CreateDeliveryNoteInput {
   lines: DeliveryNoteLineInput[];
 }
 
+export type UpdateDeliveryNoteInput = CreateDeliveryNoteInput;
+
+interface ValidatedDeliveryNoteInput {
+  supplier: Supplier;
+  po: { id: string; po_number: string; supplier_id: string; status: string };
+  lineRows: Array<{
+    packaging_item_id: string;
+    item_code: string;
+    product_name: string;
+    cartons: number;
+    pcs_per_carton: number;
+    total_pcs: number;
+  }>;
+}
+
+interface ValidateDeliveryNoteOptions {
+  allowClosedPoId?: string;
+  allowInactivePackagingIds?: string[];
+}
+
 function generateDnNumber(): string {
   const date = new Date();
   const stamp =
@@ -375,10 +395,11 @@ export async function getDeliveryNote(
   };
 }
 
-export async function createDeliveryNote(
+async function validateDeliveryNoteInput(
   supabase: SupabaseClient,
   input: CreateDeliveryNoteInput,
-): Promise<DeliveryNote> {
+  options: ValidateDeliveryNoteOptions = {},
+): Promise<ValidatedDeliveryNoteInput> {
   const supplier = await getMargasetaSupplier(supabase);
   if (!supplier) {
     throw new Error(`Supplier "${DELIVERY_NOTE_SUPPLIER_NAME}" was not found.`);
@@ -395,7 +416,9 @@ export async function createDeliveryNote(
     throw new Error("Selected PO does not belong to the allowed supplier.");
   }
   if (po.status === "received" || po.status === "cancelled") {
-    throw new Error("Selected PO is closed.");
+    if (!options.allowClosedPoId || po.id !== options.allowClosedPoId) {
+      throw new Error("Selected PO is closed.");
+    }
   }
   if (input.lines.length === 0) {
     throw new Error("Add at least one line item.");
@@ -411,10 +434,14 @@ export async function createDeliveryNote(
   const packagingById = new Map(
     (packagingRows ?? []).map((row) => [row.id as string, row]),
   );
+  const allowedInactive = new Set(options.allowInactivePackagingIds ?? []);
 
-  for (const line of input.lines) {
+  const lineRows = input.lines.map((line) => {
     const item = packagingById.get(line.packaging_item_id);
-    if (!item || !item.is_active) {
+    if (!item) {
+      throw new Error("One or more packaging items are invalid.");
+    }
+    if (!item.is_active && !allowedInactive.has(line.packaging_item_id)) {
       throw new Error("One or more packaging items are invalid.");
     }
     if (!Number.isInteger(line.cartons) || line.cartons <= 0) {
@@ -423,7 +450,25 @@ export async function createDeliveryNote(
     if (!Number.isInteger(line.pcs_per_carton) || line.pcs_per_carton <= 0) {
       throw new Error("Pieces per carton must be a positive whole number.");
     }
-  }
+
+    return {
+      packaging_item_id: line.packaging_item_id,
+      item_code: item.item_code as string,
+      product_name: item.product_name as string,
+      cartons: line.cartons,
+      pcs_per_carton: line.pcs_per_carton,
+      total_pcs: line.cartons * line.pcs_per_carton,
+    };
+  });
+
+  return { supplier, po, lineRows };
+}
+
+export async function createDeliveryNote(
+  supabase: SupabaseClient,
+  input: CreateDeliveryNoteInput,
+): Promise<DeliveryNote> {
+  const { supplier, po, lineRows } = await validateDeliveryNoteInput(supabase, input);
 
   const dnNumber = generateDnNumber();
   const { data: note, error: noteError } = await supabase
@@ -440,22 +485,14 @@ export async function createDeliveryNote(
     .single();
   if (noteError) throw noteError;
 
-  const lineRows = input.lines.map((line) => {
-    const item = packagingById.get(line.packaging_item_id)!;
-    return {
-      delivery_note_id: note.id,
-      packaging_item_id: line.packaging_item_id,
-      item_code: item.item_code as string,
-      product_name: item.product_name as string,
-      cartons: line.cartons,
-      pcs_per_carton: line.pcs_per_carton,
-      total_pcs: line.cartons * line.pcs_per_carton,
-    };
-  });
-
   const { data: lines, error: linesError } = await supabase
     .from("delivery_note_lines")
-    .insert(lineRows)
+    .insert(
+      lineRows.map((line) => ({
+        delivery_note_id: note.id,
+        ...line,
+      })),
+    )
     .select(LINE_SELECT);
   if (linesError) throw linesError;
 
@@ -464,6 +501,76 @@ export async function createDeliveryNote(
     supplier_name: supplier.name,
     lines: (lines ?? []) as DeliveryNoteLine[],
   };
+}
+
+export async function updateDeliveryNote(
+  supabase: SupabaseClient,
+  id: string,
+  input: UpdateDeliveryNoteInput,
+): Promise<DeliveryNote> {
+  const existing = await getDeliveryNote(supabase, id);
+  if (!existing) {
+    throw new Error("Delivery note not found.");
+  }
+
+  const allowInactivePackagingIds = (existing.lines ?? [])
+    .map((line) => line.packaging_item_id)
+    .filter((packagingItemId): packagingItemId is string => Boolean(packagingItemId));
+
+  const { supplier, po, lineRows } = await validateDeliveryNoteInput(supabase, input, {
+    allowClosedPoId: existing.po_id ?? undefined,
+    allowInactivePackagingIds,
+  });
+
+  const { data: note, error: noteError } = await supabase
+    .from("delivery_notes")
+    .update({
+      po_id: po.id,
+      po_number: po.po_number,
+      supplier_id: supplier.id,
+      delivery_date: input.delivery_date,
+      recipient_name: input.recipient_name.trim(),
+    })
+    .eq("id", id)
+    .select(NOTE_SELECT)
+    .single();
+  if (noteError) throw noteError;
+
+  const { error: deleteLinesError } = await supabase
+    .from("delivery_note_lines")
+    .delete()
+    .eq("delivery_note_id", id);
+  if (deleteLinesError) throw deleteLinesError;
+
+  const { data: lines, error: linesError } = await supabase
+    .from("delivery_note_lines")
+    .insert(
+      lineRows.map((line) => ({
+        delivery_note_id: id,
+        ...line,
+      })),
+    )
+    .select(LINE_SELECT);
+  if (linesError) throw linesError;
+
+  return {
+    ...(note as DeliveryNote),
+    supplier_name: supplier.name,
+    lines: (lines ?? []) as DeliveryNoteLine[],
+  };
+}
+
+export async function deleteDeliveryNote(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<void> {
+  const existing = await getDeliveryNote(supabase, id);
+  if (!existing) {
+    throw new Error("Delivery note not found.");
+  }
+
+  const { error } = await supabase.from("delivery_notes").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function getSupplierForDeliveryNote(
