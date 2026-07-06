@@ -26,6 +26,8 @@ import type { PoSkuOption } from "@/components/procurement/edit-po-dialog";
 import { CompanySettingsDialog } from "@/components/procurement/company-settings-dialog";
 import { CreatePoDialog } from "@/components/procurement/create-po-dialog";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
+import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { SuppliersDialog } from "@/components/procurement/suppliers-dialog";
 import { Input } from "@/components/ui/input";
 import { formatNumber } from "@/lib/utils";
@@ -218,6 +220,9 @@ function ProcurementInner() {
     };
   }, [pos, now]);
 
+  const poIds = useMemo(() => pos.map((po) => po.id), [pos]);
+  const poNoteCounts = useStatusUpdateCounts("po", poIds);
+
   const skuQ = skuQuery.trim().toLowerCase();
 
   const lineMatchesSku = (line: PurchaseOrderLine): boolean =>
@@ -317,6 +322,11 @@ function ProcurementInner() {
                     qty_ordered: l.qty_ordered,
                     qty_received: l.qty_received,
                   }))}
+                />
+                <StatusUpdateNotesLink
+                  entityType="po"
+                  entityId={po.id}
+                  count={poNoteCounts.get(po.id)?.count}
                 />
                 <PoRoleBadge role={po.primaryRole} />
               </div>

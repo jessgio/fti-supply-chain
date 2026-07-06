@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PoPaymentsSection } from "@/components/procurement/po-payments-section";
 import { PoShipmentsSection } from "@/components/procurement/po-shipments-section";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { PoExtractDeliveryNotesSection } from "@/components/extract-inbound-delivery-note/po-extract-delivery-notes-section";
 import {
   EditPoDialog,
@@ -226,6 +227,7 @@ export default function PurchaseOrderPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={STATUS_STYLES[po.status]}>{STATUS_LABELS[po.status]}</Badge>
+            <StatusUpdateNotesLink entityType="po" entityId={poId} />
             <Button
               size="sm"
               variant="outline"

@@ -9,6 +9,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ShipmentHoverLink } from "@/components/procurement/shipment-hover-link";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { poDetailHref } from "@/lib/shipments/shipment-navigation";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
@@ -172,11 +173,17 @@ export function PoShipmentsSection({
               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-100 bg-stone-50 px-3 py-2 text-sm"
             >
               <div>
-                <ShipmentHoverLink
-                  shipmentId={shipment.id}
-                  shipmentNumber={shipment.shipment_number}
-                  returnTo={poDetailHref(po.id)}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <ShipmentHoverLink
+                    shipmentId={shipment.id}
+                    shipmentNumber={shipment.shipment_number}
+                    returnTo={poDetailHref(po.id)}
+                  />
+                  <StatusUpdateNotesLink
+                    entityType="shipment"
+                    entityId={shipment.id}
+                  />
+                </div>
                 <p className="text-xs text-stone-500">
                   Departs {formatDisplayDate(shipment.estimated_departure_date)} ·
                   ETA {formatDisplayDate(shipment.expected_delivery_date)}

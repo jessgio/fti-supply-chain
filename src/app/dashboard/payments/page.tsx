@@ -23,6 +23,8 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { StatCard } from "@/components/ui/stat-card";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { PaymentHoverLink } from "@/components/procurement/payment-hover-link";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
+import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
@@ -162,6 +164,17 @@ export default function PaymentsPage() {
         ),
       );
   }, [payments]);
+
+  const poIds = useMemo(
+    () => groupedByPo.map((group) => group.po_id),
+    [groupedByPo],
+  );
+  const paymentIds = useMemo(
+    () => payments.map((payment) => payment.id),
+    [payments],
+  );
+  const poNoteCounts = useStatusUpdateCounts("po", poIds);
+  const paymentNoteCounts = useStatusUpdateCounts("payment", paymentIds);
 
   function togglePo(poId: string) {
     setExpanded((prev) => {
@@ -396,10 +409,17 @@ export default function PaymentsPage() {
                             </button>
                           </td>
                           <td className="py-2 pr-4">
-                            <PoHoverLink
-                              poId={group.po_id}
-                              poNumber={group.po_number}
-                            />
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                              <PoHoverLink
+                                poId={group.po_id}
+                                poNumber={group.po_number}
+                              />
+                              <StatusUpdateNotesLink
+                                entityType="po"
+                                entityId={group.po_id}
+                                count={poNoteCounts.get(group.po_id)?.count}
+                              />
+                            </span>
                           </td>
                           <td className="py-2 pr-4 text-stone-600">
                             {group.supplier_name ?? "—"}
@@ -422,11 +442,18 @@ export default function PaymentsPage() {
                                 {payment.payment_date}
                               </td>
                               <td className="py-2 pr-4">
-                                <PaymentHoverLink
-                                  paymentId={payment.id}
-                                  poId={payment.po_id}
-                                  label={payment.payment_request_number}
-                                />
+                                <span className="inline-flex flex-wrap items-center gap-1.5">
+                                  <PaymentHoverLink
+                                    paymentId={payment.id}
+                                    poId={payment.po_id}
+                                    label={payment.payment_request_number}
+                                  />
+                                  <StatusUpdateNotesLink
+                                    entityType="payment"
+                                    entityId={payment.id}
+                                    count={paymentNoteCounts.get(payment.id)?.count}
+                                  />
+                                </span>
                               </td>
                               <td className="py-2 pr-4 text-stone-700">
                                 {payment.purpose}

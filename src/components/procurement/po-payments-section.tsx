@@ -21,6 +21,8 @@ import {
   previewPaymentIdr,
 } from "@/lib/procurement/po-payment-status";
 import type { PoPayment, PurchaseOrder } from "@/types/database";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
+import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 
 interface PaymentFormState {
   paymentDate: string;
@@ -91,6 +93,12 @@ export function PoPaymentsSection({
       ),
     [po.payments],
   );
+
+  const paymentIds = useMemo(
+    () => payments.map((payment) => payment.id),
+    [payments],
+  );
+  const paymentNoteCounts = useStatusUpdateCounts("payment", paymentIds);
 
   const summary = useMemo(() => computePoPaymentSummary(po), [po]);
   const fmt = (value: number, currency = summary.poCurrency) =>
@@ -273,7 +281,14 @@ export function PoPaymentsSection({
                 <tr key={payment.id} className="border-b border-stone-100">
                   <td className="px-3 py-2 text-stone-700">{payment.payment_date}</td>
                   <td className="px-3 py-2 font-medium text-stone-900">
-                    {payment.payment_request_number}
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                      {payment.payment_request_number}
+                      <StatusUpdateNotesLink
+                        entityType="payment"
+                        entityId={payment.id}
+                        count={paymentNoteCounts.get(payment.id)?.count}
+                      />
+                    </span>
                   </td>
                   <td className="px-3 py-2 text-stone-700">{payment.purpose}</td>
                   <td className="px-3 py-2 text-right font-medium text-stone-900">

@@ -28,6 +28,8 @@ import { Badge } from "@/components/ui/badge";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { ShipmentHoverLink } from "@/components/procurement/shipment-hover-link";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
+import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
@@ -307,6 +309,23 @@ function ShipmentsInner() {
       }))
       .sort((a, b) => compareGroupsByExpectedDelivery(a, b, deliverySortDir));
   }, [visibleShipments, skus, packagingLinks, deliverySortDir]);
+
+  const shipmentIds = useMemo(
+    () => visibleShipments.map((shipment) => shipment.id),
+    [visibleShipments],
+  );
+  const shipmentPoIds = useMemo(
+    () => [
+      ...new Set(
+        groupedBySku.flatMap((group) =>
+          group.entries.map((entry) => entry.po_id),
+        ),
+      ),
+    ],
+    [groupedBySku],
+  );
+  const shipmentNoteCounts = useStatusUpdateCounts("shipment", shipmentIds);
+  const poNoteCounts = useStatusUpdateCounts("po", shipmentPoIds);
 
   useEffect(() => {
     if (highlightShipmentId) {
@@ -604,10 +623,20 @@ function ShipmentsInner() {
                                     shipmentId={shipment.id}
                                     shipmentNumber={shipment.shipment_number}
                                   />
+                                  <StatusUpdateNotesLink
+                                    entityType="shipment"
+                                    entityId={shipment.id}
+                                    count={shipmentNoteCounts.get(shipment.id)?.count}
+                                  />
                                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                                   <PoHoverLink
                                     poId={entry.po_id}
                                     poNumber={entry.po_number}
+                                  />
+                                  <StatusUpdateNotesLink
+                                    entityType="po"
+                                    entityId={entry.po_id}
+                                    count={poNoteCounts.get(entry.po_id)?.count}
                                   />
                                 </span>
                               </td>

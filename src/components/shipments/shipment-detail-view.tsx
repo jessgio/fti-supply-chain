@@ -14,6 +14,7 @@ import {
 import { PageShell } from "@/components/dashboard/page-shell";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { ShipmentDocumentsPanel } from "@/components/shipments/shipment-documents-panel";
+import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { ShipmentEditDialog } from "@/components/shipments/shipment-edit-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -143,6 +144,7 @@ export function ShipmentDetailView({
             <Badge className={SHIPMENT_STATUS_STYLES[shipment.status as ShipmentStatus]}>
               {SHIPMENT_STATUS_LABELS[shipment.status as ShipmentStatus]}
             </Badge>
+            <StatusUpdateNotesLink entityType="shipment" entityId={shipment.id} />
           </div>
           <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-stone-500">
             <Icon className="h-4 w-4" />

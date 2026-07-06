@@ -886,6 +886,110 @@ export interface PdCycleNote {
   updated_at: string;
 }
 
+export type StatusUpdateEntityType =
+  | "po"
+  | "payment"
+  | "shipment"
+  | "inbound"
+  | "delivery_note"
+  | "extract_delivery_note";
+
+export interface StatusUpdatePoProduct {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  qty_ordered: number;
+}
+
+export interface StatusUpdateScopedSku {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+}
+
+export interface StatusUpdateEntityRef {
+  entity_type: StatusUpdateEntityType;
+  entity_id: string;
+  entity_label?: string | null;
+}
+
+export interface StatusUpdate {
+  id: string;
+  sku_id: string;
+  entity_type: StatusUpdateEntityType;
+  entity_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  author_id: string;
+  author_name?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  reply_count?: number;
+  entity_label?: string | null;
+  connected_refs?: StatusUpdateEntityRef[];
+  applies_to_all_po_products?: boolean;
+  scoped_skus?: StatusUpdateScopedSku[];
+  /** Products this note applies to (resolved for display). */
+  associated_products?: StatusUpdateScopedSku[];
+}
+
+export interface StatusUpdateReply {
+  id: string;
+  status_update_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  author_id: string;
+  author_name?: string | null;
+  created_at: string;
+}
+
+export interface StatusUpdateSkuSummary {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  franchise_name: string | null;
+  update_count: number;
+  latest_at: string;
+  latest_preview: string | null;
+}
+
+export interface StatusUpdateSkuGroup {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  franchise_name: string | null;
+  latest_at: string;
+  updates: StatusUpdate[];
+}
+
+export interface StatusUpdatePoGroup {
+  po_id: string;
+  po_number: string;
+  supplier_name: string | null;
+  latest_at: string;
+  products: StatusUpdateScopedSku[];
+  updates: StatusUpdate[];
+}
+
+export interface StatusUpdateRelatedEntity {
+  id: string;
+  entity_type: StatusUpdateEntityType;
+  label: string;
+  sublabel?: string | null;
+  status?: string | null;
+  date?: string | null;
+  /** Parent PO when this record is connected to a purchase order. */
+  po_id?: string | null;
+}
+
+export interface StatusUpdateEntityCount {
+  entity_id: string;
+  count: number;
+  latest_at: string | null;
+}
+
+export type StatusUpdateRecordEntityType = "po" | "payment" | "shipment";
+
 export interface PdPhaseInput {
   id?: string;
   /** Client-side id used to wire dependencies before rows exist in the DB. */

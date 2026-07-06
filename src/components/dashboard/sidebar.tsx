@@ -18,6 +18,7 @@ import {
   LogOut,
   Banknote,
   FileText,
+  MessageSquareText,
   Package,
   PackageCheck,
   PanelLeft,
@@ -99,6 +100,12 @@ const links: NavItem[] = [
         href: "/dashboard/inbound",
         label: "Inbound Receives",
         icon: PackageCheck,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/status-updates",
+        label: "Status Updates",
+        icon: MessageSquareText,
         roles: ["admin", "supply_chain"],
       },
       {
