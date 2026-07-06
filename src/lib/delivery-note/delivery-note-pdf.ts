@@ -35,6 +35,30 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(value);
 }
 
+function measureTextHeight(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  width: number,
+): number {
+  doc.font("Helvetica").fontSize(7);
+  return doc.heightOfString(text, { width });
+}
+
+function measureRowHeight(
+  doc: PDFKit.PDFDocument,
+  values: string[],
+  colWidths: number[],
+  minHeight: number,
+  verticalPadding: number,
+): number {
+  let maxTextHeight = 0;
+  values.forEach((value, idx) => {
+    const textHeight = measureTextHeight(doc, value, colWidths[idx] - 8);
+    maxTextHeight = Math.max(maxTextHeight, textHeight);
+  });
+  return Math.max(minHeight, maxTextHeight + verticalPadding);
+}
+
 function drawSectionBar(
   doc: PDFKit.PDFDocument,
   left: number,
@@ -186,7 +210,19 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
     cursorY = Math.max(leftBottom, rightBottom) + 12;
 
     const tableTop = cursorY;
-    const colWidths = [78, 72, 148, 52, 52, 52];
+    const poColWidth = 72;
+    const codeColWidth = 68;
+    const numericColWidth = 44;
+    const descColWidth =
+      pageWidth - poColWidth - codeColWidth - numericColWidth * 3;
+    const colWidths = [
+      poColWidth,
+      codeColWidth,
+      descColWidth,
+      numericColWidth,
+      numericColWidth,
+      numericColWidth,
+    ];
     const headers = [
       "Nomor PO Cosmax",
       "Kode Barang",
@@ -195,7 +231,8 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
       "Jumlah/Karton",
       "Jumlah Total",
     ];
-    const rowHeight = 20;
+    const minRowHeight = 20;
+    const rowPadding = 12;
     const headerHeight = 22;
 
     doc.rect(left, tableTop, pageWidth, headerHeight).fill("#111111");
@@ -217,7 +254,18 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
     let totalPcs = 0;
 
     for (const line of lines) {
-      if (rowY > doc.page.height - 180) {
+      const values = [
+        note.po_number,
+        line.item_code,
+        line.product_name,
+        formatNumber(line.cartons),
+        formatNumber(line.pcs_per_carton),
+        formatNumber(line.total_pcs),
+      ];
+
+      const rowHeight = measureRowHeight(doc, values, colWidths, minRowHeight, rowPadding);
+
+      if (rowY + rowHeight > doc.page.height - 180) {
         doc.addPage();
         rowY = doc.page.margins.top;
       }
@@ -227,15 +275,6 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
         .strokeColor("#dddddd")
         .lineWidth(0.5)
         .stroke();
-
-      const values = [
-        note.po_number,
-        line.item_code,
-        line.product_name,
-        formatNumber(line.cartons),
-        formatNumber(line.pcs_per_carton),
-        formatNumber(line.total_pcs),
-      ];
 
       colX = left;
       values.forEach((value, idx) => {
@@ -255,7 +294,7 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
       rowY += rowHeight;
     }
 
-    doc.rect(left, rowY, pageWidth, rowHeight).fill("#f5f5f5");
+    doc.rect(left, rowY, pageWidth, minRowHeight).fill("#f5f5f5");
     colX = left;
     const totals = ["", "", "TOTAL", formatNumber(totalCartons), "", formatNumber(totalPcs)];
     totals.forEach((value, idx) => {
@@ -270,7 +309,7 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
       colX += colWidths[idx];
     });
 
-    rowY += rowHeight + 14;
+    rowY += minRowHeight + 14;
     rowY = drawSectionBar(doc, left, rowY, pageWidth, "NOTES");
 
     doc
