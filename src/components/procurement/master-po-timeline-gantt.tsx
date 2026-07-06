@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -67,16 +69,48 @@ function formatStatusLabel(status: string): string {
   );
 }
 
+function poTimelineEntryMatchesSearch(
+  po: PoTimelineEntry,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  if (po.po_number.toLowerCase().includes(q)) return true;
+  if ((po.supplier_name ?? "").toLowerCase().includes(q)) return true;
+
+  const lineMatches = (line: { sku_code: string; sku_name: string | null }) =>
+    line.sku_code.toLowerCase().includes(q) ||
+    (line.sku_name ?? "").toLowerCase().includes(q);
+
+  if (po.line_items.some(lineMatches)) return true;
+  if (po.shipments.some((shipment) => shipment.line_items.some(lineMatches))) {
+    return true;
+  }
+
+  return false;
+}
+
 export function MasterPoTimelineGantt({
   purchaseOrders,
   currentUserId = null,
   currentUserRole = null,
 }: MasterPoTimelineGanttProps) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const searchQ = searchQuery.trim().toLowerCase();
+
+  const filteredPurchaseOrders = useMemo(() => {
+    if (!searchQ) return purchaseOrders;
+    return purchaseOrders.filter((po) =>
+      poTimelineEntryMatchesSearch(po, searchQ),
+    );
+  }, [purchaseOrders, searchQ]);
 
   const poIds = useMemo(
-    () => purchaseOrders.map((po) => po.id),
-    [purchaseOrders],
+    () => filteredPurchaseOrders.map((po) => po.id),
+    [filteredPurchaseOrders],
   );
   const poNoteCounts = useStatusUpdateCounts("po", poIds);
 
@@ -99,18 +133,18 @@ export function MasterPoTimelineGantt({
   }, []);
 
   const chart = useMemo(
-    () => buildMasterGanttChart(purchaseOrders.map(toMasterInput)),
-    [purchaseOrders],
+    () => buildMasterGanttChart(filteredPurchaseOrders.map(toMasterInput)),
+    [filteredPurchaseOrders],
   );
   const scheduledCount =
     chart?.groups.filter((group) => group.bars.length > 0).length ?? 0;
-  const unscheduledCount = purchaseOrders.length - scheduledCount;
+  const unscheduledCount = filteredPurchaseOrders.length - scheduledCount;
   const poById = useMemo(
-    () => new Map(purchaseOrders.map((po) => [po.id, po])),
-    [purchaseOrders],
+    () => new Map(filteredPurchaseOrders.map((po) => [po.id, po])),
+    [filteredPurchaseOrders],
   );
 
-  if (!chart) {
+  if (purchaseOrders.length === 0) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-stone-500">
@@ -121,11 +155,9 @@ export function MasterPoTimelineGantt({
     );
   }
 
-  const todayPosition = getPoGanttPosition(
-    chart.today,
-    chart.rangeStart,
-    chart.rangeEnd,
-  );
+  const todayPosition = chart
+    ? getPoGanttPosition(chart.today, chart.rangeStart, chart.rangeEnd)
+    : null;
 
   return (
     <Card>
@@ -134,20 +166,52 @@ export function MasterPoTimelineGantt({
           <div>
             <CardTitle className="text-base">Master timeline</CardTitle>
             <p className="mt-1 text-sm text-stone-500">
-              {purchaseOrders.length} ongoing PO
-              {purchaseOrders.length === 1 ? "" : "s"}
-              {scheduledCount > 0
+              {searchQ
+                ? `${filteredPurchaseOrders.length} ongoing PO${
+                    filteredPurchaseOrders.length === 1 ? "" : "s"
+                  } match “${searchQuery.trim()}”`
+                : `${purchaseOrders.length} ongoing PO${
+                    purchaseOrders.length === 1 ? "" : "s"
+                  }`}
+              {chart && scheduledCount > 0
                 ? ` · ${scheduledCount} with production or shipping schedules`
                 : ""}
-              {unscheduledCount > 0
+              {chart && unscheduledCount > 0
                 ? ` · ${unscheduledCount} awaiting dates`
                 : ""}
             </p>
           </div>
-          <GanttLegend />
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+              <Input
+                className="pl-8 pr-8"
+                placeholder="Find POs by number, supplier, SKU, or name…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <GanttLegend />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {!chart ? (
+          <p className="py-8 text-center text-sm text-stone-500">
+            No purchase orders match “{searchQuery.trim()}”.
+          </p>
+        ) : (
+          <>
         <GanttAxis
           ticks={chart.ticks}
           rangeStart={chart.rangeStart}
@@ -234,6 +298,8 @@ export function MasterPoTimelineGantt({
             range.
           </p>
         ) : null}
+          </>
+        )}
       </CardContent>
     </Card>
   );
