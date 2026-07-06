@@ -106,8 +106,8 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const left = doc.page.margins.left;
     const headerTop = 50;
-    const logoMaxWidth = 200;
-    const logoMaxHeight = 64;
+    const logoMaxWidth = 260;
+    const logoMaxHeight = 84;
     const titleFontSize = 20;
     const headerBandHeight = logo ? logoMaxHeight : titleFontSize + 4;
     const titleY = headerTop + (headerBandHeight - titleFontSize) / 2;

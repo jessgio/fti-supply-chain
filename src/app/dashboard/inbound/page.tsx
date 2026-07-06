@@ -41,6 +41,14 @@ function newBatchEntry(qty = 0): LineBatchEntry {
   };
 }
 
+function formatInboundShipmentOption(shipment: Shipment): string {
+  const poNumbers = (shipment.purchase_orders ?? [])
+    .map((po) => po.po_number)
+    .filter(Boolean);
+  const poLabel = poNumbers.length > 0 ? ` · ${poNumbers.join(", ")}` : "";
+  return `${shipment.shipment_number}${poLabel} — delivery ${formatDisplayDate(shipment.expected_delivery_date)}`;
+}
+
 export default function InboundPage() {
   const [receives, setReceives] = useState<InboundReceive[]>([]);
   const [openShipments, setOpenShipments] = useState<Shipment[]>([]);
@@ -388,8 +396,7 @@ export default function InboundPage() {
                 <option value="">Select a shipment…</option>
                 {openShipments.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.shipment_number} — delivery{" "}
-                    {formatDisplayDate(s.expected_delivery_date)}
+                    {formatInboundShipmentOption(s)}
                   </option>
                 ))}
               </select>

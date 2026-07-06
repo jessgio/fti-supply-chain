@@ -1,11 +1,31 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { Suspense } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { ShipmentDetailView } from "@/components/shipments/shipment-detail-view";
+import { shipmentReturnLabel, parseShipmentReturnTo } from "@/lib/shipments/shipment-navigation";
 
 export default function ShipmentPage() {
-  const params = useParams();
-  const shipmentId = params.id as string;
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-stone-500">Loading…</div>}>
+      <ShipmentPageInner />
+    </Suspense>
+  );
+}
 
-  return <ShipmentDetailView shipmentId={shipmentId} />;
+function ShipmentPageInner() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const shipmentId = params.id as string;
+  const returnTo = parseShipmentReturnTo(searchParams.get("returnTo"));
+
+  return (
+    <ShipmentDetailView
+      shipmentId={shipmentId}
+      backHref={returnTo ?? "/dashboard/shipments"}
+      backLabel={
+        returnTo ? shipmentReturnLabel(returnTo) : "Back to shipments"
+      }
+    />
+  );
 }

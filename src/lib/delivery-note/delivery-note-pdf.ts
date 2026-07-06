@@ -134,8 +134,8 @@ export function generateDeliveryNotePdf(data: DeliveryNotePdfData): Promise<Buff
     const rightColX = left + pageWidth / 2 + 8;
     const colWidth = pageWidth / 2 - 8;
     const headerTop = 40;
-    const logoMaxWidth = 180;
-    const logoMaxHeight = 56;
+    const logoMaxWidth = 260;
+    const logoMaxHeight = 84;
 
     if (logo) {
       doc.image(logo, left, headerTop, { fit: [logoMaxWidth, logoMaxHeight] });

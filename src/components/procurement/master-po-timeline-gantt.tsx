@@ -19,6 +19,10 @@ import {
   type MasterGanttPoInput,
 } from "@/lib/procurement/po-timeline-gantt";
 import { GanttAxis, GanttLegend, GanttRow } from "@/components/procurement/gantt-chart-parts";
+import {
+  poDetailHref,
+  shipmentDetailHref,
+} from "@/lib/shipments/shipment-navigation";
 import { PoTimelinePoLink } from "@/components/procurement/po-timeline-po-link";
 import type { PoTimelineEntry } from "@/types/database";
 
@@ -165,7 +169,7 @@ export function MasterPoTimelineGantt({
                       dateWidth="11rem"
                       shipmentHref={
                         bar.phase === "shipping"
-                          ? `/dashboard/shipments?highlight=${bar.id}`
+                          ? shipmentDetailHref(bar.id, poDetailHref(group.po_id))
                           : undefined
                       }
                     />

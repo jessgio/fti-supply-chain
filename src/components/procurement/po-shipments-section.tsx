@@ -9,6 +9,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ShipmentHoverLink } from "@/components/procurement/shipment-hover-link";
+import { poDetailHref } from "@/lib/shipments/shipment-navigation";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
   DEFAULT_TRANSIT_DAYS,
@@ -174,6 +175,7 @@ export function PoShipmentsSection({
                 <ShipmentHoverLink
                   shipmentId={shipment.id}
                   shipmentNumber={shipment.shipment_number}
+                  returnTo={poDetailHref(po.id)}
                 />
                 <p className="text-xs text-stone-500">
                   Departs {formatDisplayDate(shipment.estimated_departure_date)} ·

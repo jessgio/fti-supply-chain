@@ -67,6 +67,7 @@ function ShipmentsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const highlightShipmentId = searchParams.get("shipment");
+  const returnTo = searchParams.get("returnTo");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [openPos, setOpenPos] = useState<PurchaseOrder[]>([]);
   const [skus, setSkus] = useState<PoSkuOption[]>([]);
@@ -211,9 +212,14 @@ function ShipmentsInner() {
 
   useEffect(() => {
     if (highlightShipmentId) {
-      router.replace(`/dashboard/shipments/${highlightShipmentId}`);
+      const params = new URLSearchParams();
+      if (returnTo) params.set("returnTo", returnTo);
+      const query = params.toString();
+      router.replace(
+        `/dashboard/shipments/${highlightShipmentId}${query ? `?${query}` : ""}`,
+      );
     }
-  }, [highlightShipmentId, router]);
+  }, [highlightShipmentId, returnTo, router]);
 
   const summary = useMemo(() => {
     return {

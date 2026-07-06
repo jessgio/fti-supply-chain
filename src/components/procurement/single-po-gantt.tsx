@@ -18,6 +18,10 @@ import {
   getPoGanttPosition,
 } from "@/lib/procurement/po-timeline-gantt";
 import { GanttAxis, GanttLegend, GanttRow } from "@/components/procurement/gantt-chart-parts";
+import {
+  poDetailHref,
+  shipmentDetailHref,
+} from "@/lib/shipments/shipment-navigation";
 import type { PoTimelineEntry } from "@/types/database";
 
 interface SinglePoGanttProps {
@@ -142,7 +146,7 @@ export function SinglePoGantt({ entry }: SinglePoGanttProps) {
                 dateWidth="11rem"
                 shipmentHref={
                   bar.phase === "shipping"
-                    ? `/dashboard/shipments?shipment=${bar.id}`
+                    ? shipmentDetailHref(bar.id, poDetailHref(entry.id))
                     : undefined
                 }
               />
