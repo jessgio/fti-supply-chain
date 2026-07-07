@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { FileDown, FlaskConical, Loader2, Plus, Trash2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FileDown, FlaskConical, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,11 @@ import {
   type ExtractSearchOption,
 } from "@/components/extract-inbound-delivery-note/extract-search-input";
 import { formatNumber } from "@/lib/utils";
-import type { ExtractInboundDeliveryNote, ExtractInboundPoOption } from "@/types/database";
+import type {
+  ExtractInboundDeliveryNote,
+  ExtractInboundDeliveryNoteLine,
+  ExtractInboundPoOption,
+} from "@/types/database";
 
 interface LineDraft {
   key: string;
@@ -26,6 +30,11 @@ interface BootstrapData {
   pos: ExtractInboundPoOption[];
   extractCodes: ExtractSearchOption[];
   defaultRecipient: string;
+}
+
+interface ExtractInboundDnWorkspaceProps {
+  initialEditNoteId?: string;
+  returnTo?: string;
 }
 
 function emptyLine(): LineDraft {
@@ -42,7 +51,49 @@ function todayIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function ExtractInboundDnWorkspace() {
+function resetFormState(defaultRecipient: string): {
+  poId: string;
+  deliveryDate: string;
+  recipientName: string;
+  specialInstruction: string;
+  lines: LineDraft[];
+} {
+  return {
+    poId: "",
+    deliveryDate: todayIso(),
+    recipientName: defaultRecipient,
+    specialInstruction: "",
+    lines: [emptyLine()],
+  };
+}
+
+function lineDraftFromNoteLine(
+  line: ExtractInboundDeliveryNoteLine,
+  extractCodes: ExtractSearchOption[],
+): LineDraft {
+  const item =
+    extractCodes.find((option) => option.id === line.extract_code_id) ??
+    (line.extract_code_id
+      ? {
+          id: line.extract_code_id,
+          item_code: line.item_code,
+          extract_name: line.extract_name,
+        }
+      : null);
+
+  return {
+    key: crypto.randomUUID(),
+    item,
+    quantity: String(line.quantity),
+    uomKg: String(line.uom_kg),
+  };
+}
+
+export function ExtractInboundDnWorkspace({
+  initialEditNoteId,
+  returnTo,
+}: ExtractInboundDnWorkspaceProps = {}) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedPoId = searchParams.get("po") ?? "";
 
@@ -58,6 +109,11 @@ export function ExtractInboundDnWorkspace() {
   const [recipientName, setRecipientName] = useState("");
   const [specialInstruction, setSpecialInstruction] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteNumber, setEditingNoteNumber] = useState<string | null>(null);
+  const [loadingNoteId, setLoadingNoteId] = useState<string | null>(null);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const initialEditHandled = useRef(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -74,7 +130,7 @@ export function ExtractInboundDnWorkspace() {
       setBootstrap(bootstrapJson);
       setNotes(notesJson.notes ?? []);
       setRecipientName((prev) => prev || bootstrapJson.defaultRecipient || "");
-      if (preselectedPoId) {
+      if (preselectedPoId && !initialEditNoteId) {
         setPoId(preselectedPoId);
       }
     } catch (err) {
@@ -82,12 +138,49 @@ export function ExtractInboundDnWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [preselectedPoId]);
+  }, [preselectedPoId, initialEditNoteId]);
 
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (initialEditHandled.current || loading || !bootstrap || !initialEditNoteId) {
+      return;
+    }
+    initialEditHandled.current = true;
+    void startEdit(initialEditNoteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, bootstrap, initialEditNoteId]);
+
+  const poOptions = useMemo(() => {
+    if (!bootstrap) return [];
+    const options = [...bootstrap.pos];
+    if (poId && !options.some((po) => po.id === poId)) {
+      const note = notes.find((entry) => entry.po_id === poId);
+      if (note?.po_number) {
+        options.unshift({
+          id: poId,
+          po_number: note.po_number,
+          status: "received",
+          order_date: note.delivery_date,
+          sku_names: [],
+        });
+      }
+    }
+    return options;
+  }, [bootstrap, notes, poId]);
+
+  const extractCodeOptions = useMemo(() => {
+    if (!bootstrap) return [];
+    const options = [...bootstrap.extractCodes];
+    for (const line of lines) {
+      if (!line.item || options.some((option) => option.id === line.item!.id)) continue;
+      options.push(line.item);
+    }
+    return options;
+  }, [bootstrap, lines]);
 
   const lineTotals = useMemo(
     () =>
@@ -101,6 +194,80 @@ export function ExtractInboundDnWorkspace() {
       }),
     [lines],
   );
+
+  function cancelEdit() {
+    const reset = resetFormState(bootstrap?.defaultRecipient ?? "");
+    setEditingNoteId(null);
+    setEditingNoteNumber(null);
+    setPoId(reset.poId);
+    setDeliveryDate(reset.deliveryDate);
+    setRecipientName(reset.recipientName);
+    setSpecialInstruction(reset.specialInstruction);
+    setLines(reset.lines);
+    setError(null);
+    setSuccess(null);
+    if (returnTo) {
+      router.push(returnTo);
+    }
+  }
+
+  async function startEdit(noteId: string) {
+    setLoadingNoteId(noteId);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`/api/extract-inbound-delivery-notes/${noteId}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to load delivery note.");
+
+      const note = json.note as ExtractInboundDeliveryNote;
+      if (!note.lines?.length) {
+        throw new Error("This delivery note has no line items to edit.");
+      }
+
+      setEditingNoteId(note.id);
+      setEditingNoteNumber(note.dn_number);
+      setPoId(note.po_id ?? "");
+      setDeliveryDate(note.delivery_date);
+      setRecipientName(note.recipient_name);
+      setSpecialInstruction(note.special_instruction ?? "");
+      setLines(
+        note.lines.map((line) => lineDraftFromNoteLine(line, bootstrap?.extractCodes ?? [])),
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load delivery note.");
+    } finally {
+      setLoadingNoteId(null);
+    }
+  }
+
+  async function handleDelete(noteId: string, dnNumber: string) {
+    if (!confirm(`Delete delivery note ${dnNumber}? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingNoteId(noteId);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`/api/extract-inbound-delivery-notes/${noteId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to delete delivery note.");
+
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+      if (editingNoteId === noteId) {
+        cancelEdit();
+      }
+      setSuccess(`Delivery note ${dnNumber} deleted.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete delivery note.");
+    } finally {
+      setDeletingNoteId(null);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -126,21 +293,37 @@ export function ExtractInboundDnWorkspace() {
           })),
       };
 
-      const res = await fetch("/api/extract-inbound-delivery-notes", {
-        method: "POST",
+      const url = editingNoteId
+        ? `/api/extract-inbound-delivery-notes/${editingNoteId}`
+        : "/api/extract-inbound-delivery-notes";
+      const res = await fetch(url, {
+        method: editingNoteId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to save delivery note.");
 
-      setNotes((prev) => [json.note, ...prev]);
-      setPoId("");
-      setDeliveryDate(todayIso());
-      setRecipientName(bootstrap?.defaultRecipient ?? "");
-      setSpecialInstruction("");
-      setLines([emptyLine()]);
-      setSuccess(`Delivery note ${json.note.dn_number} created. You can download the PDF below.`);
+      if (editingNoteId) {
+        setNotes((prev) =>
+          prev.map((note) => (note.id === editingNoteId ? json.note : note)),
+        );
+        if (returnTo) {
+          router.push(returnTo);
+          return;
+        }
+        cancelEdit();
+        setSuccess(`Delivery note ${json.note.dn_number} updated. You can download the PDF below.`);
+      } else {
+        setNotes((prev) => [json.note, ...prev]);
+        const reset = resetFormState(bootstrap?.defaultRecipient ?? "");
+        setPoId(reset.poId);
+        setDeliveryDate(reset.deliveryDate);
+        setRecipientName(reset.recipientName);
+        setSpecialInstruction(reset.specialInstruction);
+        setLines(reset.lines);
+        setSuccess(`Delivery note ${json.note.dn_number} created. You can download the PDF below.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save delivery note.");
     } finally {
@@ -173,10 +356,20 @@ export function ExtractInboundDnWorkspace() {
 
   return (
     <div className="flex flex-col gap-6">
+      {editingNoteId && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {editingNoteNumber
+            ? `Editing ${editingNoteNumber}. Update the form below and save your changes.`
+            : "Editing delivery note. Update the form below and save your changes."}
+        </p>
+      )}
+
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>New extract inbound delivery note</CardTitle>
+            <CardTitle>
+              {editingNoteId ? "Edit extract inbound delivery note" : "New extract inbound delivery note"}
+            </CardTitle>
             <CardDescription>
               Ship extract from FTI to the manufacturer. Select the related PO, enter extract
               details, and generate a PDF for signing.
@@ -185,11 +378,7 @@ export function ExtractInboundDnWorkspace() {
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-stone-700">Purchase order</span>
-              <PoSelectInput
-                options={bootstrap.pos}
-                value={poId}
-                onChange={setPoId}
-              />
+              <PoSelectInput options={poOptions} value={poId} onChange={setPoId} />
             </label>
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-stone-700">Delivery date</span>
@@ -228,7 +417,7 @@ export function ExtractInboundDnWorkspace() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {bootstrap.extractCodes.length === 0 && (
+            {extractCodeOptions.length === 0 && (
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 No extract codes loaded.{" "}
                 <Link
@@ -249,10 +438,10 @@ export function ExtractInboundDnWorkspace() {
                 <label className="flex flex-col gap-1.5 text-sm">
                   <span className="font-medium text-stone-700">Extract name</span>
                   <ExtractSearchInput
-                    options={bootstrap.extractCodes}
+                    options={extractCodeOptions}
                     value={line.item}
                     onChange={(item) => updateLine(line.key, { item })}
-                    disabled={bootstrap.extractCodes.length === 0}
+                    disabled={extractCodeOptions.length === 0}
                   />
                 </label>
                 <div className="flex flex-col gap-1.5 text-sm">
@@ -327,13 +516,20 @@ export function ExtractInboundDnWorkspace() {
         {error && <p className="text-sm text-red-600">{error}</p>}
         {success && <p className="text-sm text-emerald-700">{success}</p>}
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={saving || bootstrap.extractCodes.length === 0}>
+        <div className="flex flex-wrap justify-end gap-2">
+          {editingNoteId && (
+            <Button type="button" variant="outline" onClick={cancelEdit}>
+              Cancel edit
+            </Button>
+          )}
+          <Button type="submit" disabled={saving || extractCodeOptions.length === 0}>
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Saving…
               </>
+            ) : editingNoteId ? (
+              "Save changes"
             ) : (
               "Create delivery note"
             )}
@@ -341,63 +537,94 @@ export function ExtractInboundDnWorkspace() {
         </div>
       </form>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>History</CardTitle>
-          <CardDescription>
-            Previously created extract inbound delivery notes. Download the PDF as needed.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {notes.length === 0 ? (
-            <p className="text-sm text-stone-500">No delivery notes yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 text-stone-500">
-                    <th className="py-2 pr-4 font-medium">DN number</th>
-                    <th className="py-2 pr-4 font-medium">PO</th>
-                    <th className="py-2 pr-4 font-medium">Delivery date</th>
-                    <th className="py-2 pr-4 font-medium">Penerima</th>
-                    <th className="py-2 font-medium">PDF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {notes.map((note) => (
-                    <tr key={note.id} className="border-b border-stone-100">
-                      <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
-                      <td className="py-3 pr-4">
-                        {note.po_id ? (
-                          <Link
-                            href={`/dashboard/procurement/${note.po_id}`}
-                            className="text-emerald-700 hover:underline"
-                          >
-                            {note.po_number}
-                          </Link>
-                        ) : (
-                          note.po_number
-                        )}
-                      </td>
-                      <td className="py-3 pr-4">{note.delivery_date}</td>
-                      <td className="py-3 pr-4">{note.recipient_name}</td>
-                      <td className="py-3">
-                        <a
-                          href={`/api/extract-inbound-delivery-notes/${note.id}/pdf`}
-                          className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
-                        >
-                          <FileDown className="h-4 w-4" />
-                          Download
-                        </a>
-                      </td>
+      {!initialEditNoteId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>History</CardTitle>
+            <CardDescription>
+              Previously created extract inbound delivery notes. Edit, delete, or download the PDF
+              as needed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {notes.length === 0 ? (
+              <p className="text-sm text-stone-500">No delivery notes yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[840px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-200 text-stone-500">
+                      <th className="py-2 pr-4 font-medium">DN number</th>
+                      <th className="py-2 pr-4 font-medium">PO</th>
+                      <th className="py-2 pr-4 font-medium">Delivery date</th>
+                      <th className="py-2 pr-4 font-medium">Penerima</th>
+                      <th className="py-2 font-medium">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  </thead>
+                  <tbody>
+                    {notes.map((note) => (
+                      <tr key={note.id} className="border-b border-stone-100">
+                        <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
+                        <td className="py-3 pr-4">
+                          {note.po_id ? (
+                            <Link
+                              href={`/dashboard/procurement/${note.po_id}`}
+                              className="text-emerald-700 hover:underline"
+                            >
+                              {note.po_number}
+                            </Link>
+                          ) : (
+                            note.po_number
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">{note.delivery_date}</td>
+                        <td className="py-3 pr-4">{note.recipient_name}</td>
+                        <td className="py-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => void startEdit(note.id)}
+                              disabled={loadingNoteId === note.id}
+                              className="inline-flex items-center gap-1 text-stone-700 hover:underline disabled:opacity-50"
+                            >
+                              {loadingNoteId === note.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Pencil className="h-4 w-4" />
+                              )}
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(note.id, note.dn_number)}
+                              disabled={deletingNoteId === note.id}
+                              className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
+                            >
+                              {deletingNoteId === note.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                              Delete
+                            </button>
+                            <a
+                              href={`/api/extract-inbound-delivery-notes/${note.id}/pdf`}
+                              className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                            >
+                              <FileDown className="h-4 w-4" />
+                              Download
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

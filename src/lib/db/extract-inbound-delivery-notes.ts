@@ -34,6 +34,89 @@ export interface CreateExtractInboundDeliveryNoteInput {
   lines: ExtractInboundLineInput[];
 }
 
+export type UpdateExtractInboundDeliveryNoteInput = CreateExtractInboundDeliveryNoteInput;
+
+interface ValidateExtractInboundOptions {
+  allowClosedPoId?: string;
+  allowInactiveCodeIds?: string[];
+}
+
+interface ValidatedExtractInboundInput {
+  po: { id: string; po_number: string };
+  lineRows: Array<{
+    extract_code_id: string;
+    item_code: string;
+    extract_name: string;
+    quantity: number;
+    uom_kg: number;
+    total_kg: number;
+  }>;
+}
+
+async function validateExtractInboundDeliveryNoteInput(
+  supabase: SupabaseClient,
+  input: CreateExtractInboundDeliveryNoteInput,
+  options: ValidateExtractInboundOptions = {},
+): Promise<ValidatedExtractInboundInput> {
+  const { data: po, error: poError } = await supabase
+    .from("purchase_orders")
+    .select("id, po_number, status")
+    .eq("id", input.po_id)
+    .maybeSingle();
+  if (poError) throw poError;
+  if (!po) throw new Error("Purchase order not found.");
+  if (po.status === "received" || po.status === "cancelled") {
+    if (!options.allowClosedPoId || po.id !== options.allowClosedPoId) {
+      throw new Error("Selected PO is closed.");
+    }
+  }
+  if (input.lines.length === 0) {
+    throw new Error("Add at least one line item.");
+  }
+
+  const codeIds = input.lines.map((l) => l.extract_code_id);
+  const { data: codeRows, error: codeError } = await supabase
+    .from("extract_codes")
+    .select("id, item_code, extract_name, is_active")
+    .in("id", codeIds);
+  if (codeError) throw codeError;
+
+  const codeById = new Map((codeRows ?? []).map((row) => [row.id as string, row]));
+  const allowedInactive = new Set(options.allowInactiveCodeIds ?? []);
+
+  const lineRows = input.lines.map((line) => {
+    const item = codeById.get(line.extract_code_id);
+    if (!item) {
+      throw new Error("One or more extract codes are invalid.");
+    }
+    if (!item.is_active && !allowedInactive.has(line.extract_code_id)) {
+      throw new Error("One or more extract codes are invalid.");
+    }
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+      throw new Error("Quantity must be a positive number.");
+    }
+    if (!Number.isFinite(line.uom_kg) || line.uom_kg <= 0) {
+      throw new Error("UOM (kg) must be a positive number.");
+    }
+
+    const quantity = line.quantity;
+    const uom_kg = line.uom_kg;
+    return {
+      extract_code_id: line.extract_code_id,
+      item_code: item.item_code as string,
+      extract_name: item.extract_name as string,
+      quantity,
+      uom_kg,
+      total_kg: quantity * uom_kg,
+    };
+  });
+
+  return {
+    po: { id: po.id as string, po_number: po.po_number as string },
+    lineRows,
+  };
+}
+
 function generateDnNumber(): string {
   const date = new Date();
   const stamp =
@@ -320,41 +403,7 @@ export async function createExtractInboundDeliveryNote(
   supabase: SupabaseClient,
   input: CreateExtractInboundDeliveryNoteInput,
 ): Promise<ExtractInboundDeliveryNote> {
-  const { data: po, error: poError } = await supabase
-    .from("purchase_orders")
-    .select("id, po_number, status")
-    .eq("id", input.po_id)
-    .maybeSingle();
-  if (poError) throw poError;
-  if (!po) throw new Error("Purchase order not found.");
-  if (po.status === "received" || po.status === "cancelled") {
-    throw new Error("Selected PO is closed.");
-  }
-  if (input.lines.length === 0) {
-    throw new Error("Add at least one line item.");
-  }
-
-  const codeIds = input.lines.map((l) => l.extract_code_id);
-  const { data: codeRows, error: codeError } = await supabase
-    .from("extract_codes")
-    .select("id, item_code, extract_name, is_active")
-    .in("id", codeIds);
-  if (codeError) throw codeError;
-
-  const codeById = new Map((codeRows ?? []).map((row) => [row.id as string, row]));
-
-  for (const line of input.lines) {
-    const item = codeById.get(line.extract_code_id);
-    if (!item || !item.is_active) {
-      throw new Error("One or more extract codes are invalid.");
-    }
-    if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
-      throw new Error("Quantity must be a positive number.");
-    }
-    if (!Number.isFinite(line.uom_kg) || line.uom_kg <= 0) {
-      throw new Error("UOM (kg) must be a positive number.");
-    }
-  }
+  const { po, lineRows } = await validateExtractInboundDeliveryNoteInput(supabase, input);
 
   const dnNumber = generateDnNumber();
   const { data: note, error: noteError } = await supabase
@@ -371,24 +420,14 @@ export async function createExtractInboundDeliveryNote(
     .single();
   if (noteError) throw noteError;
 
-  const lineRows = input.lines.map((line) => {
-    const item = codeById.get(line.extract_code_id)!;
-    const quantity = line.quantity;
-    const uom_kg = line.uom_kg;
-    return {
-      delivery_note_id: note.id,
-      extract_code_id: line.extract_code_id,
-      item_code: item.item_code as string,
-      extract_name: item.extract_name as string,
-      quantity,
-      uom_kg,
-      total_kg: quantity * uom_kg,
-    };
-  });
-
   const { data: lines, error: linesError } = await supabase
     .from("extract_inbound_delivery_note_lines")
-    .insert(lineRows)
+    .insert(
+      lineRows.map((line) => ({
+        delivery_note_id: note.id,
+        ...line,
+      })),
+    )
     .select(LINE_SELECT);
   if (linesError) throw linesError;
 
@@ -396,4 +435,73 @@ export async function createExtractInboundDeliveryNote(
     ...(note as ExtractInboundDeliveryNote),
     lines: (lines ?? []) as ExtractInboundDeliveryNoteLine[],
   };
+}
+
+export async function updateExtractInboundDeliveryNote(
+  supabase: SupabaseClient,
+  id: string,
+  input: UpdateExtractInboundDeliveryNoteInput,
+): Promise<ExtractInboundDeliveryNote> {
+  const existing = await getExtractInboundDeliveryNote(supabase, id);
+  if (!existing) {
+    throw new Error("Delivery note not found.");
+  }
+
+  const allowInactiveCodeIds = (existing.lines ?? [])
+    .map((line) => line.extract_code_id)
+    .filter((extractCodeId): extractCodeId is string => Boolean(extractCodeId));
+
+  const { po, lineRows } = await validateExtractInboundDeliveryNoteInput(supabase, input, {
+    allowClosedPoId: existing.po_id ?? undefined,
+    allowInactiveCodeIds,
+  });
+
+  const { data: note, error: noteError } = await supabase
+    .from("extract_inbound_delivery_notes")
+    .update({
+      po_id: po.id,
+      po_number: po.po_number,
+      delivery_date: input.delivery_date,
+      recipient_name: input.recipient_name.trim(),
+      special_instruction: input.special_instruction?.trim() || null,
+    })
+    .eq("id", id)
+    .select(NOTE_SELECT)
+    .single();
+  if (noteError) throw noteError;
+
+  const { error: deleteLinesError } = await supabase
+    .from("extract_inbound_delivery_note_lines")
+    .delete()
+    .eq("delivery_note_id", id);
+  if (deleteLinesError) throw deleteLinesError;
+
+  const { data: lines, error: linesError } = await supabase
+    .from("extract_inbound_delivery_note_lines")
+    .insert(
+      lineRows.map((line) => ({
+        delivery_note_id: id,
+        ...line,
+      })),
+    )
+    .select(LINE_SELECT);
+  if (linesError) throw linesError;
+
+  return {
+    ...(note as ExtractInboundDeliveryNote),
+    lines: (lines ?? []) as ExtractInboundDeliveryNoteLine[],
+  };
+}
+
+export async function deleteExtractInboundDeliveryNote(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<void> {
+  const existing = await getExtractInboundDeliveryNote(supabase, id);
+  if (!existing) {
+    throw new Error("Delivery note not found.");
+  }
+
+  const { error } = await supabase.from("extract_inbound_delivery_notes").delete().eq("id", id);
+  if (error) throw error;
 }
