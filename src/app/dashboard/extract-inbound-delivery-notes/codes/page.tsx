@@ -187,8 +187,9 @@ export default function ExtractCodesCatalogPage() {
           <CardTitle>Import from CSV</CardTitle>
           <CardDescription>
             Upload a CSV with headers <strong>Item No</strong> (or Kode Barang) and{" "}
-            <strong>Extract Name</strong> (or Deskripsi). Existing codes are updated; new codes
-            are added. Excel (.xlsx) is also accepted.
+            <strong>Extract Name</strong> (or Deskripsi / Nama). Existing codes are updated;
+            new codes are added. Excel (.xlsx) is also accepted — long numeric codes are read
+            correctly even when Excel displays them in scientific notation.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
