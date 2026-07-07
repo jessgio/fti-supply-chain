@@ -282,8 +282,8 @@ export default function ExtractCodesCatalogPage() {
         <CardHeader>
           <CardTitle>Add extract code</CardTitle>
           <CardDescription>
-            Add a single item code and extract name directly. New codes are active immediately and
-            appear in the extract inbound delivery note form.
+            Add a single item code and extract name directly. The same item code (e.g. &ldquo;-&rdquo;)
+            can be used for multiple extracts as long as each extract name is different.
           </CardDescription>
         </CardHeader>
         <CardContent>

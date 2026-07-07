@@ -173,6 +173,19 @@ export async function createExtractCode(
   if (!item_code) throw new Error("Item code is required.");
   if (!extract_name) throw new Error("Extract name is required.");
 
+  const { data: existing, error: existingError } = await supabase
+    .from("extract_codes")
+    .select("id")
+    .eq("item_code", item_code)
+    .eq("extract_name", extract_name)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) {
+    throw new Error(
+      `"${extract_name}" with item code "${item_code}" is already in the catalog.`,
+    );
+  }
+
   const { data, error } = await supabase
     .from("extract_codes")
     .insert({ item_code, extract_name, is_active: true })
@@ -190,14 +203,15 @@ export async function importExtractCodes(
     throw new Error("No valid rows to import.");
   }
 
-  const codes = rows.map((row) => row.item_code);
+  const pairKey = (row: ExtractCodeImportRow) => `${row.item_code}\0${row.extract_name}`;
   const { data: existing, error: existingError } = await supabase
     .from("extract_codes")
-    .select("item_code")
-    .in("item_code", codes);
+    .select("item_code, extract_name");
   if (existingError) throw existingError;
 
-  const existingCodes = new Set((existing ?? []).map((row) => row.item_code as string));
+  const existingPairs = new Set(
+    (existing ?? []).map((row) => `${row.item_code as string}\0${row.extract_name as string}`),
+  );
 
   const { error } = await supabase.from("extract_codes").upsert(
     rows.map((row) => ({
@@ -205,14 +219,14 @@ export async function importExtractCodes(
       extract_name: row.extract_name,
       is_active: true,
     })),
-    { onConflict: "item_code" },
+    { onConflict: "item_code,extract_name" },
   );
   if (error) throw error;
 
   let inserted = 0;
   let updated = 0;
   for (const row of rows) {
-    if (existingCodes.has(row.item_code)) updated += 1;
+    if (existingPairs.has(pairKey(row))) updated += 1;
     else inserted += 1;
   }
 

@@ -159,7 +159,7 @@ export function parseExtractCodesFile(buffer: ArrayBuffer): ExtractCodeParseResu
   }
 
   const errors: ExtractCodeParseError[] = [];
-  const byCode = new Map<string, ExtractCodeCsvRow>();
+  const byPair = new Map<string, ExtractCodeCsvRow>();
 
   rawRows.forEach(({ excelRow, cells }) => {
     const itemNo = pickString(cells, ITEM_CODE_ALIASES);
@@ -182,17 +182,17 @@ export function parseExtractCodesFile(buffer: ArrayBuffer): ExtractCodeParseResu
       return;
     }
 
-    if (byCode.has(item_code)) {
+    if (byPair.has(`${item_code}\0${name}`)) {
       errors.push({
         row: excelRow,
-        message: `Duplicate item code "${item_code}" in file; keeping this row's extract name.`,
+        message: `Duplicate row for item code "${item_code}" and extract name "${name}" in file; keeping the last occurrence.`,
       });
     }
 
-    byCode.set(item_code, { item_code, extract_name: name });
+    byPair.set(`${item_code}\0${name}`, { item_code, extract_name: name });
   });
 
-  if (byCode.size === 0 && errors.length === 0) {
+  if (byPair.size === 0 && errors.length === 0) {
     errors.push({
       row: 1,
       message:
@@ -201,7 +201,11 @@ export function parseExtractCodesFile(buffer: ArrayBuffer): ExtractCodeParseResu
   }
 
   return {
-    rows: [...byCode.values()].sort((a, b) => a.item_code.localeCompare(b.item_code)),
+    rows: [...byPair.values()].sort(
+      (a, b) =>
+        a.extract_name.localeCompare(b.extract_name) ||
+        a.item_code.localeCompare(b.item_code),
+    ),
     errors,
   };
 }

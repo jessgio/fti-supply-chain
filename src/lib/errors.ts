@@ -12,6 +12,9 @@ export function errorMessage(error: unknown): string {
     if (details.includes("po_number")) {
       return "That PO number is already in use.";
     }
+    if (details.includes("item_code") || details.includes("extract_codes")) {
+      return "That item code and extract name combination is already in the catalog.";
+    }
     return "A record with that value already exists.";
   }
   if (error instanceof Error) return error.message;
