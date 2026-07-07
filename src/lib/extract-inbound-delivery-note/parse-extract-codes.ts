@@ -25,7 +25,7 @@ function pickString(row: Record<string, unknown>, aliases: string[]): string {
     const normalized = normalizeKey(alias);
     for (const [key, value] of Object.entries(row)) {
       if (normalizeKey(key) !== normalized) continue;
-      if (value == null || value === "") return "";
+      if (value == null || value === "") continue;
       if (typeof value === "number" && Number.isFinite(value)) {
         return Number.isInteger(value)
           ? String(value)
