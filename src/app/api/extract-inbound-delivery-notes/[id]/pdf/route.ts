@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCompanySettings, downloadCompanyLogo } from "@/lib/db/company-settings";
 import { getExtractInboundDeliveryNote, getExtractInboundDnSettings } from "@/lib/db/extract-inbound-delivery-notes";
-import { generateExtractInboundDnPdf } from "@/lib/extract-inbound-delivery-note/extract-inbound-dn-pdf";
+import { generateExtractInboundDnPdf, extractInboundDnPdfFilename } from "@/lib/extract-inbound-delivery-note/extract-inbound-dn-pdf";
 import { requireReadRole } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 
@@ -41,11 +41,13 @@ export async function GET(
       logo,
     });
 
+    const filename = extractInboundDnPdfFilename(note.delivery_date, note.po_number);
+
     return new NextResponse(new Uint8Array(pdf), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${note.dn_number}.pdf"`,
+        "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
     });

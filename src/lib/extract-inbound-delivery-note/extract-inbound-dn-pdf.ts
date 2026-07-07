@@ -37,6 +37,14 @@ function formatKg(value: number): string {
   return `${formatQty(value)} Kg`;
 }
 
+export function extractInboundDnPdfFilename(
+  deliveryDate: string,
+  poNumber: string,
+): string {
+  const datePart = deliveryDate.replace(/-/g, "");
+  return `DN-${datePart}-${poNumber.trim()}.pdf`;
+}
+
 function drawSectionBar(
   doc: PDFKit.PDFDocument,
   left: number,
@@ -320,23 +328,23 @@ export function generateExtractInboundDnPdf(data: ExtractInboundDnPdfData): Prom
       .lineWidth(0.5)
       .stroke();
 
+    const sigColWidth = pageWidth / 3;
+
     doc
       .font("Helvetica")
       .fontSize(9)
       .fillColor("#333333")
       .text(`Delivery Date\nJakarta, ${formatDateLong(note.delivery_date)}`, left, signatureY + 10, {
-        width: colWidth,
+        width: sigColWidth,
       });
 
-    doc.text(
-      `Pengirim : ${company.pic_name ?? "—"}`,
-      left + colWidth,
-      signatureY + 10,
-      { width: colWidth, align: "center" },
-    );
+    doc.text(`Pengirim : ${company.pic_name ?? "—"}`, left + sigColWidth, signatureY + 10, {
+      width: sigColWidth,
+      align: "center",
+    });
 
-    doc.text(`Penerima : ${note.recipient_name}`, rightColX, signatureY + 10, {
-      width: colWidth,
+    doc.text(`Penerima : ${note.recipient_name}`, left + sigColWidth * 2, signatureY + 10, {
+      width: sigColWidth,
       align: "right",
     });
 
