@@ -26,8 +26,10 @@ export default function ExtractCodesCatalogPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
+  const [newItem, setNewItem] = useState<DraftRow>({ item_code: "", extract_name: "" });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
@@ -119,6 +121,37 @@ export default function ExtractCodesCatalogPage() {
       setError(err instanceof Error ? err.message : "Failed to update item.");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function handleCreate(event: React.FormEvent) {
+    event.preventDefault();
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/extract-inbound-delivery-notes/codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newItem),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add item.");
+      const created = data.item as ExtractCode;
+      setItems((prev) =>
+        [...prev, created].sort((a, b) => a.extract_name.localeCompare(b.extract_name)),
+      );
+      setDrafts((prev) => ({
+        ...prev,
+        [created.id]: {
+          item_code: created.item_code,
+          extract_name: created.extract_name,
+        },
+      }));
+      setNewItem({ item_code: "", extract_name: "" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add item.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -242,6 +275,56 @@ export default function ExtractCodesCatalogPage() {
               )}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add extract code</CardTitle>
+          <CardDescription>
+            Add a single item code and extract name directly. New codes are active immediately and
+            appear in the extract inbound delivery note form.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            onSubmit={handleCreate}
+            className="grid gap-3 md:grid-cols-[160px_1fr_auto] md:items-end"
+          >
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium text-stone-700">Kode barang</span>
+              <Input
+                value={newItem.item_code}
+                onChange={(e) =>
+                  setNewItem((prev) => ({ ...prev, item_code: e.target.value }))
+                }
+                placeholder="Item code"
+                className="font-mono text-xs"
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium text-stone-700">Extract name</span>
+              <Input
+                value={newItem.extract_name}
+                onChange={(e) =>
+                  setNewItem((prev) => ({ ...prev, extract_name: e.target.value }))
+                }
+                placeholder="Extract name"
+                required
+              />
+            </label>
+            <Button type="submit" disabled={creating}>
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add
+                </>
+              )}
+            </Button>
+          </form>
         </CardContent>
       </Card>
 

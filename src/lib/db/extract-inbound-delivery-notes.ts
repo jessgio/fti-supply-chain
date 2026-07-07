@@ -159,6 +159,29 @@ export interface ExtractCodeImportResult {
   total: number;
 }
 
+export interface CreateExtractCodeInput {
+  item_code: string;
+  extract_name: string;
+}
+
+export async function createExtractCode(
+  supabase: SupabaseClient,
+  input: CreateExtractCodeInput,
+): Promise<ExtractCode> {
+  const item_code = input.item_code.trim();
+  const extract_name = fixUtf8Mojibake(input.extract_name.trim());
+  if (!item_code) throw new Error("Item code is required.");
+  if (!extract_name) throw new Error("Extract name is required.");
+
+  const { data, error } = await supabase
+    .from("extract_codes")
+    .insert({ item_code, extract_name, is_active: true })
+    .select(CODE_SELECT)
+    .single();
+  if (error) throw error;
+  return data as ExtractCode;
+}
+
 export async function importExtractCodes(
   supabase: SupabaseClient,
   rows: ExtractCodeImportRow[],
