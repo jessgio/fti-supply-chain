@@ -34,6 +34,26 @@ async function countCatalogRowsWithItemCode(
   return count ?? 0;
 }
 
+async function loadSharedItemCodeCounts(
+  supabase: SupabaseClient,
+  itemCodes: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (itemCodes.length === 0) return counts;
+
+  const { data, error } = await supabase
+    .from("extract_codes")
+    .select("item_code")
+    .in("item_code", itemCodes);
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const code = row.item_code as string;
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return counts;
+}
+
 async function ensureItemNameMapping(
   supabase: SupabaseClient,
   extractId: string,
@@ -90,13 +110,15 @@ async function updateExtractRecord(
 export async function syncExtractFromCatalogCode(
   supabase: SupabaseClient,
   code: CatalogCodeRow,
+  sharedItemCodeCount?: number,
 ): Promise<string> {
   const item_code = code.item_code.trim();
   const extract_name = fixUtf8Mojibake(code.extract_name.trim());
   if (!item_code) throw new Error("Item code is required.");
   if (!extract_name) throw new Error("Extract name is required.");
 
-  const sharedCount = await countCatalogRowsWithItemCode(supabase, item_code);
+  const sharedCount =
+    sharedItemCodeCount ?? (await countCatalogRowsWithItemCode(supabase, item_code));
   const itemNo = catalogLedgerItemNo(item_code, extract_name, sharedCount);
 
   let extractId = code.extract_id ?? null;
@@ -149,18 +171,26 @@ export async function syncExtractFromCatalogCode(
   return extractId;
 }
 
-/** Sync every active catalog row into the extracts ledger catalog. */
-export async function syncAllActiveCatalogExtracts(
+/** Backfill ledger links for catalog rows that are not linked yet. */
+export async function syncUnlinkedCatalogExtracts(
   supabase: SupabaseClient,
 ): Promise<void> {
   const { data, error } = await supabase
     .from("extract_codes")
     .select("id, item_code, extract_name, extract_id")
     .eq("is_active", true)
-    .order("extract_name");
+    .is("extract_id", null);
   if (error) throw error;
+  if (!data?.length) return;
 
-  for (const row of data ?? []) {
-    await syncExtractFromCatalogCode(supabase, row as CatalogCodeRow);
+  const itemCodes = [...new Set(data.map((row) => row.item_code as string))];
+  const sharedCounts = await loadSharedItemCodeCounts(supabase, itemCodes);
+
+  for (const row of data) {
+    await syncExtractFromCatalogCode(
+      supabase,
+      row as CatalogCodeRow,
+      sharedCounts.get(row.item_code as string) ?? 1,
+    );
   }
 }

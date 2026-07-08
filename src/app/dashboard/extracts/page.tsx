@@ -76,9 +76,15 @@ export default function ExtractsPage() {
   const [extracts, setExtracts] = useState<ExtractSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearchInputDebounced] = useState("");
   const [sortKey, setSortKey] = useState<ExtractSortKey>("item_no");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchInputDebounced(searchInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   const loadExtracts = useCallback(async () => {
     setLoading(true);
@@ -181,9 +187,9 @@ export default function ExtractsPage() {
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-stone-400" />
             <Input
               className="pl-9"
-              placeholder="Search item no or manufacturer name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search item no or extract name…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
 

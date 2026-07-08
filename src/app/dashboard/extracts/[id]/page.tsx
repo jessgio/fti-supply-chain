@@ -9,6 +9,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Pencil,
+  RefreshCw,
   Search,
   Trash2,
 } from "lucide-react";
@@ -83,39 +84,53 @@ export default function ExtractDetailPage() {
 
   const [detail, setDetail] = useState<ExtractDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [category, setCategory] = useState<ExtractCategory | "">("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearchDebounced] = useState("");
   const [sortKey, setSortKey] = useState<ExtractTxnSortKey>("txn_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [deleting, setDeleting] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const [editingTransaction, setEditingTransaction] =
     useState<ExtractTransaction | null>(null);
 
-  const loadDetail = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const qs = new URLSearchParams();
-      if (from) qs.set("from", from);
-      if (to) qs.set("to", to);
-      if (category) qs.set("category", category);
-      if (search.trim()) qs.set("search", search.trim());
-      qs.set("sort", sortKey);
-      qs.set("sort_dir", sortDir);
-      const res = await fetch(`/api/extracts/${id}?${qs.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load extract");
-      setDetail(data.detail as ExtractDetail);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, [id, from, to, category, search, sortKey, sortDir]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchDebounced(searchInput), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const loadDetail = useCallback(
+    async (options: { soft?: boolean } = {}) => {
+      const soft = options.soft ?? false;
+      if (soft) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const qs = new URLSearchParams();
+        if (from) qs.set("from", from);
+        if (to) qs.set("to", to);
+        if (category) qs.set("category", category);
+        if (search.trim()) qs.set("search", search.trim());
+        qs.set("sort", sortKey);
+        qs.set("sort_dir", sortDir);
+        const res = await fetch(`/api/extracts/${id}?${qs.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to load extract");
+        setDetail(data.detail as ExtractDetail);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (soft) setRefreshing(false);
+        else setLoading(false);
+      }
+    },
+    [id, from, to, category, search, sortKey, sortDir],
+  );
 
   useEffect(() => {
     loadDetail();
@@ -134,7 +149,7 @@ export default function ExtractDetailPage() {
     setFrom("");
     setTo("");
     setCategory("");
-    setSearch("");
+    setSearchInput("");
   }
 
   async function handleDelete() {
@@ -157,11 +172,45 @@ export default function ExtractDetailPage() {
     }
   }
 
+  async function handleRecalculate() {
+    if (
+      !confirm(
+        "Re-sort all ledger rows by date and recalculate running balances? Stored balances will be overwritten.",
+      )
+    ) {
+      return;
+    }
+    setRecalculating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/extracts/${id}/recalculate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to recalculate");
+      setSortKey("txn_date");
+      setSortDir("asc");
+      await loadDetail({ soft: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to recalculate");
+    } finally {
+      setRecalculating(false);
+    }
+  }
+
+  function handleLedgerSaved() {
+    setSortKey("txn_date");
+    setSortDir("asc");
+    loadDetail({ soft: true });
+  }
+
   const unit = detail?.unit ?? "kg";
   const netChange = detail
     ? detail.ending_balance - detail.starting_balance
     : 0;
-  const hasFilters = from || to || category || search.trim();
+  const hasFilters = from || to || category || searchInput.trim();
 
   return (
     <PageShell wide>
@@ -182,15 +231,28 @@ export default function ExtractDetailPage() {
             </p>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="text-rose-600 hover:bg-rose-50"
-        >
-          <Trash2 className="h-4 w-4" /> {deleting ? "Deleting…" : "Delete"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRecalculate}
+            disabled={recalculating || deleting || loading}
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", recalculating && "animate-spin")}
+            />
+            {recalculating ? "Recalculating…" : "Recalculate ledger"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleting || recalculating}
+            className="text-rose-600 hover:bg-rose-50"
+          >
+            <Trash2 className="h-4 w-4" /> {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -253,8 +315,8 @@ export default function ExtractDetailPage() {
                 <Input
                   className="pl-9"
                   placeholder="Order no, lot, FROM/TO, remark…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
                 />
               </div>
             </div>
@@ -356,9 +418,10 @@ export default function ExtractDetailPage() {
         <CardHeader>
           <CardTitle className="text-lg">Ledger</CardTitle>
           <CardDescription>
-            {detail ? `${detail.transactions.length} rows` : ""} — click a row
-            to edit. New entries added from the extracts page are inserted by
-            date.
+            {detail ? `${detail.transactions.length} rows` : ""}
+            {refreshing ? " — updating…" : ""} — edit any row to change date or
+            quantities. Saving re-sorts by date and recalculates running
+            balances. Use Recalculate ledger to repair the full chain.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -434,7 +497,11 @@ export default function ExtractDetailPage() {
                 </thead>
                 <tbody>
                   {detail.transactions.map((t) => (
-                    <tr key={t.id} className="border-b border-stone-100">
+                    <tr
+                      key={t.id}
+                      className="cursor-pointer border-b border-stone-100 hover:bg-stone-50"
+                      onClick={() => setEditingTransaction(t)}
+                    >
                       <td className="whitespace-nowrap py-2 pr-4 text-stone-700">
                         {t.txn_date}
                       </td>
@@ -475,7 +542,10 @@ export default function ExtractDetailPage() {
                       <td className="py-2 pr-2">
                         <button
                           type="button"
-                          onClick={() => setEditingTransaction(t)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTransaction(t);
+                          }}
                           className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
                           aria-label="Edit row"
                         >
@@ -497,7 +567,7 @@ export default function ExtractDetailPage() {
           transaction={editingTransaction}
           open={Boolean(editingTransaction)}
           onClose={() => setEditingTransaction(null)}
-          onSaved={loadDetail}
+          onSaved={handleLedgerSaved}
         />
       )}
     </PageShell>

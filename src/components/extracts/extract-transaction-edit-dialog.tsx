@@ -161,7 +161,7 @@ export function ExtractTransactionEditDialog({
       open={open}
       onClose={onClose}
       title="Edit ledger row"
-      description="Changes are merged into the master ledger by date. Running balances are recalculated automatically."
+      description="If you change the date, this row is reinserted chronologically and all running balances are recalculated to match."
     >
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">

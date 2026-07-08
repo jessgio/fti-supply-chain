@@ -18,7 +18,7 @@ import {
   loadActionCodeMappings,
   loadManufacturerNamesByExtractId,
 } from "@/lib/db/extract-mappings";
-import { syncAllActiveCatalogExtracts } from "@/lib/db/sync-extract-catalog";
+import { syncUnlinkedCatalogExtracts } from "@/lib/db/sync-extract-catalog";
 import type {
   ExtractCategory,
   ExtractCategoryRule,
@@ -120,6 +120,52 @@ type LedgerPersistRow = {
   source_path?: string | null;
 };
 
+async function runInParallelChunks<T>(
+  items: T[],
+  chunkSize: number,
+  fn: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += chunkSize) {
+    await Promise.all(
+      items.slice(i, i + chunkSize).map((item, j) => fn(item, i + j)),
+    );
+  }
+}
+
+function ledgerPersistRowChanged(
+  original: Pick<
+    ExtractTransaction,
+    | "txn_date"
+    | "seq"
+    | "received"
+    | "issued"
+    | "balance"
+    | "order_no"
+    | "tran_code"
+    | "from_to"
+    | "lot_no"
+    | "category"
+    | "remark"
+    | "status"
+  >,
+  next: LedgerPersistRow,
+): boolean {
+  return (
+    original.txn_date !== next.txn_date ||
+    original.seq !== next.seq ||
+    original.received !== next.received ||
+    original.issued !== next.issued ||
+    (original.balance ?? 0) !== next.balance ||
+    original.order_no !== next.order_no ||
+    original.tran_code !== next.tran_code ||
+    original.from_to !== next.from_to ||
+    original.lot_no !== next.lot_no ||
+    original.category !== next.category ||
+    original.remark !== next.remark ||
+    original.status !== next.status
+  );
+}
+
 async function persistLedgerRows(
   supabase: SupabaseClient,
   rows: LedgerPersistRow[],
@@ -127,8 +173,20 @@ async function persistLedgerRows(
   const now = new Date().toISOString();
   const inserts = rows.filter((row) => !row.id);
   const updates = rows.filter((row) => row.id);
+  const PARALLEL = 25;
 
-  for (const row of updates) {
+  await runInParallelChunks(updates, PARALLEL, async (row, i) => {
+    const { error } = await supabase
+      .from("extract_transactions")
+      .update({
+        signature: `__ledger_rewrite__:${row.id}:${i}:${now}`,
+        updated_at: now,
+      })
+      .eq("id", row.id as string);
+    if (error) throw error;
+  });
+
+  await runInParallelChunks(updates, PARALLEL, async (row) => {
     const { error } = await supabase
       .from("extract_transactions")
       .update({
@@ -152,7 +210,7 @@ async function persistLedgerRows(
       })
       .eq("id", row.id as string);
     if (error) throw error;
-  }
+  });
 
   if (inserts.length > 0) {
     const WRITE = 500;
@@ -219,11 +277,25 @@ async function recomputeAndPersistLedger(
   sourceFilename: string | null,
   sourcePath?: string | null,
 ): Promise<number> {
+  const originalById = new Map(
+    orderTransactions(rows)
+      .filter((row) => row.id)
+      .map((row) => [row.id, row]),
+  );
+
   const ordered = orderTransactions(rows);
   const recomputed = recomputeLedgerChain(ordered, openingBalance);
-  const persistRows = recomputed.map((row) =>
-    toLedgerPersistRow(row, extractId, sourceFilename, sourcePath),
-  );
+  const persistRows = recomputed
+    .map((row) => toLedgerPersistRow(row, extractId, sourceFilename, sourcePath))
+    .filter((row) => {
+      if (!row.id) return true;
+      const original = originalById.get(row.id);
+      if (!original) return true;
+      return ledgerPersistRowChanged(original, row);
+    });
+
+  if (persistRows.length === 0) return 0;
+
   await persistLedgerRows(supabase, persistRows);
   return persistRows.filter((row) => row.id).length;
 }
@@ -250,7 +322,8 @@ export async function listExtracts(
   supabase: SupabaseClient,
   params: ListExtractsParams = {},
 ): Promise<ExtractSummary[]> {
-  await syncAllActiveCatalogExtracts(supabase);
+  // Only link new catalog rows — skip re-syncing the full catalog on every list.
+  await syncUnlinkedCatalogExtracts(supabase);
 
   const [{ data: catalogCodes, error }, statsRes] = await Promise.all([
     supabase
@@ -749,7 +822,8 @@ export async function updateExtractTransaction(
   let category = current.category;
   if (patch.tran_code !== undefined) {
     const fromCode = resolveActionCodeCategory(tranCode, actionMappings);
-    category = fromCode !== "uncategorized" ? fromCode : categorize(fromTo, rules);
+    category =
+      fromCode !== "uncategorized" ? fromCode : categorize(fromTo, rules);
   }
 
   let txnDate = current.txn_date;
@@ -759,9 +833,13 @@ export async function updateExtractTransaction(
     txnDate = normalized;
   }
 
+  const dateChanged = txnDate !== current.txn_date;
   const updated: ExtractTransaction = {
     ...current,
     txn_date: txnDate,
+    // When date moves, place the row after existing same-day rows so it
+    // inserts chronologically instead of keeping its old seq position.
+    seq: dateChanged ? Number.MAX_SAFE_INTEGER : current.seq,
     tran_code: tranCode,
     from_to: fromTo,
     category,
@@ -772,12 +850,19 @@ export async function updateExtractTransaction(
     lot_no:
       patch.lot_no !== undefined ? patch.lot_no?.trim() || null : current.lot_no,
     received:
-      patch.received !== undefined ? Number(patch.received) || 0 : current.received,
-    issued: patch.issued !== undefined ? Number(patch.issued) || 0 : current.issued,
+      patch.received !== undefined
+        ? Number(patch.received) || 0
+        : current.received,
+    issued:
+      patch.issued !== undefined ? Number(patch.issued) || 0 : current.issued,
     remark:
-      patch.remark !== undefined ? patch.remark?.trim() || null : current.remark,
+      patch.remark !== undefined
+        ? patch.remark?.trim() || null
+        : current.remark,
     status:
-      patch.status !== undefined ? patch.status?.trim() || null : current.status,
+      patch.status !== undefined
+        ? patch.status?.trim() || null
+        : current.status,
     source_filename: "manual-edit",
   };
 
@@ -826,4 +911,52 @@ export async function deleteExtractTransaction(
     openingBalance,
     "manual-edit",
   );
+}
+
+/**
+ * Re-sort every ledger row by date and recompute running balances from the
+ * opening balance. Use this to repair out-of-order or mismatched balances.
+ */
+export async function recalculateExtractLedger(
+  supabase: SupabaseClient,
+  extractId: string,
+  openingBalanceOverride?: number,
+): Promise<{ txn_count: number; opening_balance: number; ending_balance: number }> {
+  const { data: extract, error: extractError } = await supabase
+    .from("extracts")
+    .select("id")
+    .eq("id", extractId)
+    .maybeSingle();
+  if (extractError) throw extractError;
+  if (!extract) throw new Error("Extract not found");
+
+  const ledger = await loadExtractTransactions(supabase, extractId);
+  if (ledger.length === 0) {
+    return { txn_count: 0, opening_balance: 0, ending_balance: 0 };
+  }
+
+  const openingBalance =
+    openingBalanceOverride !== undefined && Number.isFinite(openingBalanceOverride)
+      ? Number(openingBalanceOverride)
+      : deriveOpeningBalance(ledger);
+
+  const ordered = orderTransactions(ledger);
+  await recomputeAndPersistLedger(
+    supabase,
+    extractId,
+    ordered,
+    openingBalance,
+    "ledger-recalculate",
+  );
+
+  const endingBalance = ordered.reduce(
+    (balance, row) => Number((balance + row.received - row.issued).toFixed(5)),
+    openingBalance,
+  );
+
+  return {
+    txn_count: ordered.length,
+    opening_balance: openingBalance,
+    ending_balance: endingBalance,
+  };
 }
