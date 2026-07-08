@@ -6,6 +6,7 @@ import {
 } from "@/lib/extracts/categories";
 import { resolveActionCodeCategory } from "@/lib/extracts/mappings";
 import {
+  annualizeIssuedUsage,
   computeLedgerStats,
   deriveOpeningBalance,
   mergeLedgerByDate,
@@ -365,6 +366,10 @@ export async function listExtracts(
       const wastePct = denom > 0 ? (wasteIssued / denom) * 100 : null;
       const extractName = code.extract_name as string;
 
+      const totalIssued = Number(stats?.total_issued ?? 0);
+      const firstDate = stats?.first_date ?? null;
+      const lastDate = stats?.last_date ?? null;
+
       return {
         id: extractId,
         item_no: code.item_code as string,
@@ -372,14 +377,19 @@ export async function listExtracts(
         manufacturer_name: extractName,
         unit: "kg",
         txn_count: Number(stats?.txn_count ?? 0),
-        first_date: stats?.first_date ?? null,
-        last_date: stats?.last_date ?? null,
+        first_date: firstDate,
+        last_date: lastDate,
         starting_balance: starting,
         ending_balance: Number(stats?.ending_balance ?? 0),
         total_received: totalReceived,
-        total_issued: Number(stats?.total_issued ?? 0),
+        total_issued: totalIssued,
         waste_issued: wasteIssued,
         waste_pct: wastePct === null ? null : Number(wastePct.toFixed(2)),
+        usage_kg_per_year: annualizeIssuedUsage(
+          totalIssued,
+          firstDate,
+          lastDate,
+        ),
       } satisfies ExtractSummary;
     });
 
@@ -502,6 +512,7 @@ export async function getExtractDetail(
     total_issued: stats.total_issued,
     waste_issued: stats.waste_issued,
     waste_pct: stats.waste_pct,
+    usage_kg_per_year: stats.usage_kg_per_year,
     category_totals: stats.category_totals,
     transactions: display,
   };

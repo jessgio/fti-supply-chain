@@ -18,6 +18,7 @@ import { PoPaymentsSection } from "@/components/procurement/po-payments-section"
 import { PoShipmentsSection } from "@/components/procurement/po-shipments-section";
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { PoExtractDeliveryNotesSection } from "@/components/extract-inbound-delivery-note/po-extract-delivery-notes-section";
+import { PoProductionReportsSection } from "@/components/procurement/po-production-reports-section";
 import {
   EditPoDialog,
   type PoSkuOption,
@@ -351,6 +352,8 @@ export default function PurchaseOrderPage() {
           <PoShipmentsSection po={po} onChanged={loadPo} />
 
           <PoExtractDeliveryNotesSection poId={po.id} />
+
+          {po && <PoProductionReportsSection po={po} />}
         </div>
 
         <aside className="space-y-4">

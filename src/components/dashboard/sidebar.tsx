@@ -6,6 +6,7 @@ import {
   BarChart3,
   Beaker,
   Boxes,
+  Calculator,
   FlaskConical,
   FolderKanban,
   GanttChart,
@@ -186,6 +187,12 @@ const links: NavItem[] = [
         href: "/dashboard/mappings/cogs",
         label: "COGS",
         icon: Banknote,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/extracts/formulas",
+        label: "Extract Formulas",
+        icon: Calculator,
         roles: ["admin", "supply_chain"],
       },
       {

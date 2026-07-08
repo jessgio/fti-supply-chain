@@ -68,10 +68,34 @@ export interface LedgerStats {
   total_issued: number;
   waste_issued: number;
   waste_pct: number | null;
+  /** Outbound in the window, scaled to a 365.25-day year. */
+  usage_kg_per_year: number | null;
   txn_count: number;
   first_date: string | null;
   last_date: string | null;
   category_totals: ExtractCategoryTotal[];
+}
+
+const MS_PER_DAY = 86_400_000;
+const DAYS_PER_YEAR = 365.25;
+
+function daysInclusive(start: string, end: string): number {
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
+  return Math.max(1, Math.round((endMs - startMs) / MS_PER_DAY) + 1);
+}
+
+/** Annualize outbound usage from a date span and total issued in that span. */
+export function annualizeIssuedUsage(
+  totalIssued: number,
+  firstDate: string | null,
+  lastDate: string | null,
+): number | null {
+  if (totalIssued <= 0 || !firstDate || !lastDate) return null;
+  const days = daysInclusive(firstDate, lastDate);
+  if (days <= 0) return null;
+  return round5(totalIssued * (DAYS_PER_YEAR / days));
 }
 
 /**
@@ -116,6 +140,8 @@ export function computeLedgerStats(
 
   const denom = starting + totalReceived;
   const wastePct = denom > 0 ? (wasteIssued / denom) * 100 : null;
+  const firstDate = windowRows[0]?.txn_date ?? null;
+  const lastDate = windowRows[windowRows.length - 1]?.txn_date ?? null;
 
   return {
     starting_balance: round5(starting),
@@ -124,9 +150,10 @@ export function computeLedgerStats(
     total_issued: round5(totalIssued),
     waste_issued: round5(wasteIssued),
     waste_pct: wastePct === null ? null : Number(wastePct.toFixed(2)),
+    usage_kg_per_year: annualizeIssuedUsage(totalIssued, firstDate, lastDate),
     txn_count: windowRows.length,
-    first_date: windowRows[0]?.txn_date ?? null,
-    last_date: windowRows[windowRows.length - 1]?.txn_date ?? null,
+    first_date: firstDate,
+    last_date: lastDate,
     category_totals: [...byCategory.values()].sort(
       (a, b) => b.issued + b.received - (a.issued + a.received),
     ),

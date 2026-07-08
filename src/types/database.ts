@@ -455,6 +455,8 @@ export interface ExtractSummary {
   waste_issued: number;
   /** waste_issued / (starting_balance + total_received), as a percentage. */
   waste_pct: number | null;
+  /** Outbound in the window, scaled to kg per year from the observation span. */
+  usage_kg_per_year: number | null;
 }
 
 /** Extract detail payload: summary + filtered ledger + category breakdown. */
@@ -1305,5 +1307,120 @@ export interface ExtractInboundPoOption {
   status: string;
   order_date: string;
   sku_names: string[];
+}
+
+export interface ProductExtractFormula {
+  id: string;
+  product_sku_id: string;
+  product_sku_code: string;
+  product_name: string | null;
+  extract_id: string;
+  extract_item_no: string;
+  extract_name: string | null;
+  extract_kg_per_unit: number;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductExtractFormulaInput {
+  product_sku_id: string;
+  extract_id: string;
+  extract_kg_per_unit: number;
+  notes?: string | null;
+}
+
+export interface ManufacturerProductionReport {
+  id: string;
+  po_id: string;
+  po_number: string;
+  manufacturer: string;
+  invoice_number: string | null;
+  report_date: string;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ManufacturerProductionReportLine {
+  id: string;
+  report_id: string;
+  po_line_id: string | null;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string | null;
+  qty_produced: number;
+  uom: string;
+  created_at?: string;
+}
+
+export interface ProductionExtractAllocation {
+  id: string;
+  report_id: string;
+  extract_transaction_id: string;
+  allocated_kg: number;
+  extract_id: string;
+  extract_item_no: string;
+  extract_name: string | null;
+  txn_date: string;
+  order_no: string | null;
+  issued_kg: number;
+  created_at?: string;
+}
+
+export interface ProductionReconciliationRow {
+  extract_id: string;
+  actual_kg: number;
+  expected_kg: number;
+  variance_kg: number;
+  variance_pct: number | null;
+  total_pcs: number;
+  actual_kg_per_unit: number | null;
+  expected_kg_per_unit: number | null;
+}
+
+export interface ProductionReconciliationSkuRow {
+  sku_id: string;
+  qty_produced: number;
+  extract_id: string;
+  extract_kg_per_unit: number;
+  expected_kg: number;
+}
+
+export interface ManufacturerProductionReportDetail
+  extends ManufacturerProductionReport {
+  lines: ManufacturerProductionReportLine[];
+  allocations: ProductionExtractAllocation[];
+  reconciliation: ProductionReconciliationRow[];
+  reconciliation_by_sku: ProductionReconciliationSkuRow[];
+}
+
+export interface ManufacturerProductionReportLineInput {
+  po_line_id?: string | null;
+  sku_id: string;
+  qty_produced: number;
+  uom?: string;
+}
+
+export interface ManufacturerProductionReportInput {
+  po_id: string;
+  po_number: string;
+  manufacturer?: string;
+  invoice_number?: string | null;
+  report_date: string;
+  notes?: string | null;
+  lines: ManufacturerProductionReportLineInput[];
+}
+
+export interface SuggestedProductionTransaction {
+  id: string;
+  extract_id: string;
+  extract_item_no: string;
+  extract_name: string | null;
+  txn_date: string;
+  order_no: string | null;
+  issued_kg: number;
+  remark: string | null;
+  already_allocated: boolean;
 }
 

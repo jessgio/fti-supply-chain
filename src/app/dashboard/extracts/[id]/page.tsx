@@ -329,7 +329,7 @@ export default function ExtractDetailPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           label={`Starting balance (${unit})`}
           value={formatNumber(detail?.starting_balance ?? 0, 3)}
@@ -347,6 +347,19 @@ export default function ExtractDetailPage() {
         <StatCard
           label={`Outbound (${unit})`}
           value={formatNumber(detail?.total_issued ?? 0, 3)}
+        />
+        <StatCard
+          label={`Usage (${unit}/yr)`}
+          value={
+            detail?.usage_kg_per_year == null
+              ? "—"
+              : formatNumber(detail.usage_kg_per_year, 3)
+          }
+          hint={
+            detail?.first_date && detail?.last_date
+              ? `From ${formatNumber(detail.total_issued, 3)} ${unit} over ${detail.first_date} – ${detail.last_date}`
+              : undefined
+          }
         />
         <StatCard
           label="Waste %"

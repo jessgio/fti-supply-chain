@@ -376,16 +376,18 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
         <div className="overflow-auto rounded-lg border border-stone-200">
           <table className="w-full table-fixed text-left text-xs">
             <colgroup>
-              <col className="w-36" />
               <col className="w-32" />
+              <col className="w-28" />
+              <col className="w-28" />
               <col />
-              <col className="w-28" />
-              <col className="w-28" />
+              <col className="w-24" />
+              <col className="w-24" />
               <col className="w-10" />
             </colgroup>
             <thead className="bg-stone-50">
               <tr className="border-b border-stone-200 text-stone-500">
                 <th className="px-2 py-2 font-medium">Date</th>
+                <th className="px-2 py-2 font-medium">Order No</th>
                 <th className="px-2 py-2 font-medium">Action code</th>
                 <th className="px-2 py-2 font-medium">Category</th>
                 <th className="px-2 py-2 text-right font-medium">Inbound (kg)</th>
@@ -409,6 +411,19 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
                         value={row.txn_date}
                         onChange={(e) =>
                           updateRow(index, { txn_date: e.target.value })
+                        }
+                        disabled={committing || !selectedId}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <Input
+                        className="h-8 w-full px-2 text-xs"
+                        value={row.order_no ?? ""}
+                        placeholder="PO FTI-28-…"
+                        onChange={(e) =>
+                          updateRow(index, {
+                            order_no: e.target.value.trim() || null,
+                          })
                         }
                         disabled={committing || !selectedId}
                       />
