@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowUp,
   ArrowUpDown,
+  Pencil,
   Search,
   Trash2,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { ExtractTransactionEditDialog } from "@/components/extracts/extract-transaction-edit-dialog";
 import {
   EXTRACT_CATEGORIES,
   EXTRACT_CATEGORY_LABELS,
@@ -32,6 +34,7 @@ import { cn, formatNumber } from "@/lib/utils";
 import type {
   ExtractCategory,
   ExtractDetail,
+  ExtractTransaction,
   ExtractTxnSortKey,
 } from "@/types/database";
 
@@ -89,6 +92,8 @@ export default function ExtractDetailPage() {
   const [sortKey, setSortKey] = useState<ExtractTxnSortKey>("txn_date");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [deleting, setDeleting] = useState(false);
+  const [editingTransaction, setEditingTransaction] =
+    useState<ExtractTransaction | null>(null);
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -351,8 +356,9 @@ export default function ExtractDetailPage() {
         <CardHeader>
           <CardTitle className="text-lg">Ledger</CardTitle>
           <CardDescription>
-            {detail ? `${detail.transactions.length} rows` : ""} — sortable
-            transaction history.
+            {detail ? `${detail.transactions.length} rows` : ""} — click a row
+            to edit. New entries added from the extracts page are inserted by
+            date.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -421,6 +427,9 @@ export default function ExtractDetailPage() {
                     <th className="py-2 pr-4 font-medium text-stone-500">
                       Status
                     </th>
+                    <th className="py-2 pr-2 font-medium text-stone-500">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -463,6 +472,16 @@ export default function ExtractDetailPage() {
                       <td className="py-2 pr-4 text-stone-500">
                         {t.status ?? "—"}
                       </td>
+                      <td className="py-2 pr-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingTransaction(t)}
+                          className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                          aria-label="Edit row"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -471,6 +490,16 @@ export default function ExtractDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {editingTransaction && (
+        <ExtractTransactionEditDialog
+          extractId={id}
+          transaction={editingTransaction}
+          open={Boolean(editingTransaction)}
+          onClose={() => setEditingTransaction(null)}
+          onSaved={loadDetail}
+        />
+      )}
     </PageShell>
   );
 }

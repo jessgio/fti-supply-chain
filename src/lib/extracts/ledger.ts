@@ -1,4 +1,5 @@
 import { isWasteCategory } from "@/lib/extracts/categories";
+import { transactionSignature } from "@/lib/extracts/signature";
 import type {
   ExtractCategory,
   ExtractCategoryTotal,
@@ -132,6 +133,86 @@ export function computeLedgerStats(
   };
 }
 
-function round5(value: number): number {
+export function round5(value: number): number {
   return Number(value.toFixed(5));
+}
+
+/** Opening balance implied by the first row with a recorded balance. */
+export function deriveOpeningBalance(ordered: LedgerRow[]): number {
+  return balanceBefore(ordered);
+}
+
+export type LedgerSignatureFields = {
+  txn_date: string;
+  order_no: string | null;
+  from_to: string | null;
+  lot_no: string | null;
+  received: number;
+  issued: number;
+};
+
+export type LedgerChainRow = LedgerSignatureFields & {
+  id?: string;
+  seq: number;
+  balance?: number | null;
+};
+
+export type RecomputedLedgerRow<T extends LedgerChainRow = LedgerChainRow> =
+  T & {
+    seq: number;
+    balance: number;
+    signature: string;
+  };
+
+/** Reassign seq and recompute running balances + signatures for an ordered ledger. */
+export function recomputeLedgerChain<T extends LedgerChainRow>(
+  rows: T[],
+  openingBalance: number,
+): RecomputedLedgerRow<T>[] {
+  let balance = openingBalance;
+  return rows.map((row, index) => {
+    balance = round5(balance + row.received - row.issued);
+    const signature = transactionSignature({
+      txn_date: row.txn_date,
+      order_no: row.order_no,
+      from_to: row.from_to,
+      lot_no: row.lot_no,
+      received: row.received,
+      issued: row.issued,
+      balance,
+    });
+    return { ...row, seq: index, balance, signature };
+  });
+}
+
+type MergeExisting = { id: string; txn_date: string; seq: number };
+type MergeIncoming = { txn_date: string; formIndex: number };
+
+/** Insert incoming rows into the master ledger sorted by date. */
+export function mergeLedgerByDate<
+  TExisting extends MergeExisting,
+  TIncoming extends MergeIncoming,
+>(existing: TExisting[], incoming: TIncoming[]): Array<TExisting | TIncoming> {
+  type Tagged =
+    | (TExisting & { _tag: "existing" })
+    | (TIncoming & { _tag: "incoming" });
+
+  const tagged: Tagged[] = [
+    ...existing.map((row) => ({ ...row, _tag: "existing" as const })),
+    ...incoming.map((row) => ({ ...row, _tag: "incoming" as const })),
+  ];
+
+  tagged.sort((a, b) => {
+    const dateCmp = a.txn_date.localeCompare(b.txn_date);
+    if (dateCmp !== 0) return dateCmp;
+    if (a._tag === "existing" && b._tag === "existing") return a.seq - b.seq;
+    if (a._tag === "existing") return -1;
+    if (b._tag === "existing") return 1;
+    return a.formIndex - b.formIndex;
+  });
+
+  return tagged.map((row) => {
+    const { _tag: _ignored, ...rest } = row;
+    return rest as unknown as TExisting | TIncoming;
+  });
 }

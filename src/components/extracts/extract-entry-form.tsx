@@ -224,6 +224,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
       item_no: selectedExtract.item_no,
       description: selectedExtract.description,
       unit: "kg",
+      opening_balance: openingBalance,
       rows: recomputeBalances(datedRows, openingBalance).map((row) => ({
         ...row,
         received: parseNumeric(row.received),

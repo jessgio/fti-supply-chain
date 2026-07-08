@@ -490,6 +490,8 @@ export interface ParsedExtract {
   rows: ParsedExtractRow[];
   source_path: string | null;
   source_filename: string | null;
+  /** Manual entry only: opening balance when the ledger is empty. */
+  opening_balance?: number;
 }
 
 export type ExtractSortKey =

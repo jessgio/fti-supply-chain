@@ -5,7 +5,13 @@ import {
   DEFAULT_CATEGORY_RULES,
 } from "@/lib/extracts/categories";
 import { resolveActionCodeCategory } from "@/lib/extracts/mappings";
-import { computeLedgerStats, orderTransactions } from "@/lib/extracts/ledger";
+import {
+  computeLedgerStats,
+  deriveOpeningBalance,
+  mergeLedgerByDate,
+  orderTransactions,
+  recomputeLedgerChain,
+} from "@/lib/extracts/ledger";
 import { transactionSignature } from "@/lib/extracts/signature";
 import { normalizeExtractDate } from "@/lib/extracts/parse";
 import {
@@ -75,6 +81,150 @@ function mapTxn(row: TxnRow): ExtractTransaction {
     remark: row.remark,
     source_filename: row.source_filename,
   };
+}
+
+async function loadExtractTransactions(
+  supabase: SupabaseClient,
+  extractId: string,
+): Promise<ExtractTransaction[]> {
+  const rows = await fetchAllRows<TxnRow>(() =>
+    supabase
+      .from("extract_transactions")
+      .select(
+        "id, extract_id, txn_date, seq, order_no, tran_code, from_to, category, lot_no, entered_qty, received, issued, balance, status, remark, source_filename",
+      )
+      .eq("extract_id", extractId),
+  );
+  return orderTransactions(rows.map(mapTxn));
+}
+
+type LedgerPersistRow = {
+  id?: string;
+  extract_id: string;
+  txn_date: string;
+  seq: number;
+  order_no: string | null;
+  tran_code: string | null;
+  from_to: string | null;
+  category: ExtractCategory;
+  lot_no: string | null;
+  entered_qty: number | null;
+  received: number;
+  issued: number;
+  balance: number;
+  status: string | null;
+  remark: string | null;
+  signature: string;
+  source_filename: string | null;
+  source_path?: string | null;
+};
+
+async function persistLedgerRows(
+  supabase: SupabaseClient,
+  rows: LedgerPersistRow[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  const inserts = rows.filter((row) => !row.id);
+  const updates = rows.filter((row) => row.id);
+
+  for (const row of updates) {
+    const { error } = await supabase
+      .from("extract_transactions")
+      .update({
+        txn_date: row.txn_date,
+        seq: row.seq,
+        order_no: row.order_no,
+        tran_code: row.tran_code,
+        from_to: row.from_to,
+        category: row.category,
+        lot_no: row.lot_no,
+        entered_qty: row.entered_qty,
+        received: row.received,
+        issued: row.issued,
+        balance: row.balance,
+        status: row.status,
+        remark: row.remark,
+        signature: row.signature,
+        source_filename: row.source_filename,
+        source_path: row.source_path ?? null,
+        updated_at: now,
+      })
+      .eq("id", row.id as string);
+    if (error) throw error;
+  }
+
+  if (inserts.length > 0) {
+    const WRITE = 500;
+    for (let i = 0; i < inserts.length; i += WRITE) {
+      const chunk = inserts.slice(i, i + WRITE).map((row) => ({
+        extract_id: row.extract_id,
+        txn_date: row.txn_date,
+        seq: row.seq,
+        order_no: row.order_no,
+        tran_code: row.tran_code,
+        from_to: row.from_to,
+        category: row.category,
+        lot_no: row.lot_no,
+        entered_qty: row.entered_qty,
+        received: row.received,
+        issued: row.issued,
+        balance: row.balance,
+        status: row.status,
+        remark: row.remark,
+        signature: row.signature,
+        source_filename: row.source_filename,
+        source_path: row.source_path ?? null,
+        updated_at: now,
+      }));
+      const { error } = await supabase.from("extract_transactions").insert(chunk);
+      if (error) throw error;
+    }
+  }
+}
+
+function toLedgerPersistRow(
+  row: ExtractTransaction & { signature: string },
+  extractId: string,
+  sourceFilename: string | null,
+  sourcePath?: string | null,
+): LedgerPersistRow {
+  return {
+    id: row.id,
+    extract_id: extractId,
+    txn_date: row.txn_date,
+    seq: row.seq,
+    order_no: row.order_no,
+    tran_code: row.tran_code,
+    from_to: row.from_to,
+    category: row.category,
+    lot_no: row.lot_no,
+    entered_qty: row.entered_qty,
+    received: row.received,
+    issued: row.issued,
+    balance: row.balance ?? 0,
+    status: row.status,
+    remark: row.remark,
+    signature: row.signature,
+    source_filename: row.source_filename ?? sourceFilename,
+    source_path: sourcePath ?? null,
+  };
+}
+
+async function recomputeAndPersistLedger(
+  supabase: SupabaseClient,
+  extractId: string,
+  rows: ExtractTransaction[],
+  openingBalance: number,
+  sourceFilename: string | null,
+  sourcePath?: string | null,
+): Promise<number> {
+  const ordered = orderTransactions(rows);
+  const recomputed = recomputeLedgerChain(ordered, openingBalance);
+  const persistRows = recomputed.map((row) =>
+    toLedgerPersistRow(row, extractId, sourceFilename, sourcePath),
+  );
+  await persistLedgerRows(supabase, persistRows);
+  return persistRows.filter((row) => row.id).length;
 }
 
 export async function loadCategoryRules(
@@ -319,9 +469,9 @@ export interface CommitResult {
 }
 
 /**
- * Upsert an extract and its parsed rows. Rows with the same signature as an
- * existing row overwrite it (handles overlapping monthly screenshots). Rows with
- * an unparseable date are skipped.
+ * Upsert an extract and its parsed rows. Manual entries are merged into the
+ * master ledger by date with balances recomputed. Screenshot uploads dedupe by
+ * signature as before.
  */
 export async function commitExtract(
   supabase: SupabaseClient,
@@ -356,6 +506,16 @@ export async function commitExtract(
   if (upsertError) throw upsertError;
   const extractId = extract.id as string;
 
+  if (parsed.source_filename === "manual-entry") {
+    return commitManualExtract(
+      supabase,
+      parsed,
+      extractId,
+      itemNo,
+      resolveCategory,
+    );
+  }
+
   const seen = new Set<string>();
   let skipped = 0;
   const inserts = parsed.rows
@@ -380,7 +540,6 @@ export async function commitExtract(
         issued,
         balance,
       });
-      // De-duplicate identical rows within the same screenshot upload.
       if (seen.has(signature)) {
         skipped++;
         return null;
@@ -447,4 +606,201 @@ export async function commitExtract(
     overwritten,
     skipped,
   };
+}
+
+async function commitManualExtract(
+  supabase: SupabaseClient,
+  parsed: ParsedExtract,
+  extractId: string,
+  itemNo: string,
+  resolveCategory: (row: ParsedExtract["rows"][number]) => ExtractCategory,
+): Promise<CommitResult> {
+  const existing = await loadExtractTransactions(supabase, extractId);
+  const openingBalance =
+    existing.length > 0
+      ? deriveOpeningBalance(existing)
+      : Number(parsed.opening_balance) || 0;
+
+  let skipped = 0;
+  const incoming: Array<
+    Omit<ExtractTransaction, "id" | "extract_id"> & { formIndex: number }
+  > = [];
+
+  parsed.rows.forEach((row, formIndex) => {
+    const date = normalizeExtractDate(row.txn_date);
+    if (!date) {
+      skipped++;
+      return;
+    }
+    incoming.push({
+      txn_date: date,
+      seq: formIndex,
+      order_no: row.order_no?.trim() || null,
+      tran_code: row.tran_code?.trim() || null,
+      from_to: row.from_to?.trim() || row.tran_code?.trim() || null,
+      category: resolveCategory(row),
+      lot_no: row.lot_no?.trim() || null,
+      entered_qty:
+        row.entered_qty === null || row.entered_qty === undefined
+          ? null
+          : Number(row.entered_qty),
+      received: Number(row.received) || 0,
+      issued: Number(row.issued) || 0,
+      balance: null,
+      status: row.status?.trim() || null,
+      remark: row.remark?.trim() || null,
+      source_filename: parsed.source_filename,
+      formIndex,
+    });
+  });
+
+  if (incoming.length === 0) {
+    return {
+      extractId,
+      item_no: itemNo,
+      total: 0,
+      inserted: 0,
+      overwritten: 0,
+      skipped,
+    };
+  }
+
+  const merged = mergeLedgerByDate(existing, incoming) as ExtractTransaction[];
+  const updatedCount = await recomputeAndPersistLedger(
+    supabase,
+    extractId,
+    merged,
+    openingBalance,
+    parsed.source_filename,
+    parsed.source_path,
+  );
+
+  return {
+    extractId,
+    item_no: itemNo,
+    total: incoming.length,
+    inserted: incoming.length,
+    overwritten: Math.max(0, updatedCount - existing.length),
+    skipped,
+  };
+}
+
+export interface UpdateExtractTransactionInput {
+  txn_date?: string;
+  tran_code?: string | null;
+  order_no?: string | null;
+  lot_no?: string | null;
+  received?: number;
+  issued?: number;
+  remark?: string | null;
+  status?: string | null;
+}
+
+export async function updateExtractTransaction(
+  supabase: SupabaseClient,
+  txnId: string,
+  patch: UpdateExtractTransactionInput,
+): Promise<void> {
+  const { data: txn, error: txnError } = await supabase
+    .from("extract_transactions")
+    .select("id, extract_id")
+    .eq("id", txnId)
+    .maybeSingle();
+  if (txnError) throw txnError;
+  if (!txn) throw new Error("Transaction not found");
+
+  const extractId = txn.extract_id as string;
+  const ledger = await loadExtractTransactions(supabase, extractId);
+  const index = ledger.findIndex((row) => row.id === txnId);
+  if (index < 0) throw new Error("Transaction not found");
+
+  const rules = await loadCategoryRules(supabase);
+  const actionMappings = await loadActionCodeMappings(supabase);
+
+  const current = ledger[index];
+  const tranCode =
+    patch.tran_code !== undefined
+      ? patch.tran_code?.trim() || null
+      : current.tran_code;
+  const fromTo = tranCode ?? current.from_to;
+  let category = current.category;
+  if (patch.tran_code !== undefined) {
+    const fromCode = resolveActionCodeCategory(tranCode, actionMappings);
+    category = fromCode !== "uncategorized" ? fromCode : categorize(fromTo, rules);
+  }
+
+  let txnDate = current.txn_date;
+  if (patch.txn_date !== undefined) {
+    const normalized = normalizeExtractDate(patch.txn_date);
+    if (!normalized) throw new Error("Invalid date");
+    txnDate = normalized;
+  }
+
+  const updated: ExtractTransaction = {
+    ...current,
+    txn_date: txnDate,
+    tran_code: tranCode,
+    from_to: fromTo,
+    category,
+    order_no:
+      patch.order_no !== undefined
+        ? patch.order_no?.trim() || null
+        : current.order_no,
+    lot_no:
+      patch.lot_no !== undefined ? patch.lot_no?.trim() || null : current.lot_no,
+    received:
+      patch.received !== undefined ? Number(patch.received) || 0 : current.received,
+    issued: patch.issued !== undefined ? Number(patch.issued) || 0 : current.issued,
+    remark:
+      patch.remark !== undefined ? patch.remark?.trim() || null : current.remark,
+    status:
+      patch.status !== undefined ? patch.status?.trim() || null : current.status,
+    source_filename: "manual-edit",
+  };
+
+  const nextLedger = [...ledger];
+  nextLedger[index] = updated;
+  const ordered = orderTransactions(nextLedger);
+  const openingBalance = deriveOpeningBalance(ledger);
+  await recomputeAndPersistLedger(
+    supabase,
+    extractId,
+    ordered,
+    openingBalance,
+    "manual-edit",
+  );
+}
+
+export async function deleteExtractTransaction(
+  supabase: SupabaseClient,
+  txnId: string,
+): Promise<void> {
+  const { data: txn, error: txnError } = await supabase
+    .from("extract_transactions")
+    .select("id, extract_id")
+    .eq("id", txnId)
+    .maybeSingle();
+  if (txnError) throw txnError;
+  if (!txn) throw new Error("Transaction not found");
+
+  const extractId = txn.extract_id as string;
+  const ledger = await loadExtractTransactions(supabase, extractId);
+  const openingBalance = deriveOpeningBalance(ledger);
+  const remaining = ledger.filter((row) => row.id !== txnId);
+
+  const { error: deleteError } = await supabase
+    .from("extract_transactions")
+    .delete()
+    .eq("id", txnId);
+  if (deleteError) throw deleteError;
+
+  if (remaining.length === 0) return;
+
+  await recomputeAndPersistLedger(
+    supabase,
+    extractId,
+    remaining,
+    openingBalance,
+    "manual-edit",
+  );
 }
