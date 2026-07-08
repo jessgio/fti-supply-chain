@@ -31,7 +31,19 @@ interface ExtractEntryFormProps {
   onCommitted?: () => void;
 }
 
-function createEmptyRow(): ParsedExtractRow {
+type FormExtractRow = Omit<ParsedExtractRow, "received" | "issued"> & {
+  received: string;
+  issued: string;
+};
+
+function parseNumeric(value: string | number | null | undefined): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function createEmptyRow(): FormExtractRow {
   return {
     txn_date: "",
     order_no: null,
@@ -39,8 +51,8 @@ function createEmptyRow(): ParsedExtractRow {
     from_to: null,
     lot_no: null,
     entered_qty: null,
-    received: 0,
-    issued: 0,
+    received: "",
+    issued: "",
     balance: null,
     status: null,
     remark: null,
@@ -49,9 +61,9 @@ function createEmptyRow(): ParsedExtractRow {
 }
 
 function recomputeBalances(
-  rows: ParsedExtractRow[],
+  rows: FormExtractRow[],
   openingBalance: number,
-): ParsedExtractRow[] {
+): FormExtractRow[] {
   const indexed = rows.map((row, index) => ({ row, index }));
   indexed.sort(
     (a, b) =>
@@ -62,8 +74,8 @@ function recomputeBalances(
   const balanceByIndex = new Map<number, number>();
   for (const { row, index } of indexed) {
     if (!row.txn_date.trim()) continue;
-    const received = Number(row.received) || 0;
-    const issued = Number(row.issued) || 0;
+    const received = parseNumeric(row.received);
+    const issued = parseNumeric(row.issued);
     balance = Number((balance + received - issued).toFixed(5));
     balanceByIndex.set(index, balance);
   }
@@ -81,8 +93,8 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
   );
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
-  const [openingBalance, setOpeningBalance] = useState(0);
-  const [rows, setRows] = useState<ParsedExtractRow[]>([createEmptyRow()]);
+  const [openingBalanceInput, setOpeningBalanceInput] = useState("");
+  const [rows, setRows] = useState<FormExtractRow[]>([createEmptyRow()]);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -123,6 +135,11 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
     [actionCodes],
   );
 
+  const openingBalance = useMemo(
+    () => parseNumeric(openingBalanceInput),
+    [openingBalanceInput],
+  );
+
   function handleSelectExtract(id: string) {
     setSelectedId(id);
     setError(null);
@@ -130,15 +147,21 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
 
     const ex = extracts.find((e) => e.id === id);
     if (!ex) {
-      setOpeningBalance(0);
+      setOpeningBalanceInput("");
       setRows([createEmptyRow()]);
       return;
     }
-    setOpeningBalance(ex.ending_balance);
+    const balanceStr = String(ex.ending_balance);
+    setOpeningBalanceInput(balanceStr);
     setRows(recomputeBalances([createEmptyRow()], ex.ending_balance));
   }
 
-  function updateRow(index: number, patch: Partial<ParsedExtractRow>) {
+  function handleOpeningBalanceChange(value: string) {
+    setOpeningBalanceInput(value);
+    setRows((prev) => recomputeBalances(prev, parseNumeric(value)));
+  }
+
+  function updateRow(index: number, patch: Partial<FormExtractRow>) {
     setRows((prev) => {
       const next = prev.map((row, i) => {
         if (i !== index) return row;
@@ -173,7 +196,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
 
   function resetForm() {
     setSelectedId("");
-    setOpeningBalance(0);
+    setOpeningBalanceInput("");
     setRows([createEmptyRow()]);
     setError(null);
     setStatus(null);
@@ -203,6 +226,8 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
       unit: "kg",
       rows: recomputeBalances(datedRows, openingBalance).map((row) => ({
         ...row,
+        received: parseNumeric(row.received),
+        issued: parseNumeric(row.issued),
         category: resolveActionCodeCategory(row.tran_code, actionCodes),
       })),
       source_path: null,
@@ -238,8 +263,8 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
   const totals = useMemo(() => {
     const dated = rows.filter((r) => r.txn_date.trim());
     return {
-      received: dated.reduce((s, r) => s + (Number(r.received) || 0), 0),
-      issued: dated.reduce((s, r) => s + (Number(r.issued) || 0), 0),
+      received: dated.reduce((s, r) => s + parseNumeric(r.received), 0),
+      issued: dated.reduce((s, r) => s + parseNumeric(r.issued), 0),
     };
   }, [rows]);
 
@@ -300,13 +325,30 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
         </div>
 
         {selectedExtract && (
-          <p className="text-xs text-stone-500">
-            Current balance:{" "}
-            <span className="font-medium text-stone-700">
-              {formatNumber(selectedExtract.ending_balance, 3)} kg
-            </span>
-            . New rows continue from this balance.
-          </p>
+          <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-stone-500">
+                Starting balance (kg)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                className="text-right"
+                value={openingBalanceInput}
+                placeholder="0"
+                onChange={(e) => handleOpeningBalanceChange(e.target.value)}
+                disabled={committing}
+              />
+            </div>
+            <p className="text-xs text-stone-500">
+              Ledger ending balance:{" "}
+              <span className="font-medium text-stone-700">
+                {formatNumber(selectedExtract.ending_balance, 3)} kg
+              </span>
+              . Adjust starting balance if needed before adding movements.
+            </p>
+          </div>
         )}
 
         <div className="flex items-center justify-between gap-2">
@@ -410,12 +452,10 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
                         min="0"
                         step="any"
                         className="h-8 w-full px-2 text-right text-xs"
-                        value={row.received || ""}
+                        value={row.received}
                         placeholder="0"
                         onChange={(e) =>
-                          updateRow(index, {
-                            received: Number(e.target.value) || 0,
-                          })
+                          updateRow(index, { received: e.target.value })
                         }
                         disabled={committing || !selectedId}
                       />
@@ -426,12 +466,10 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
                         min="0"
                         step="any"
                         className="h-8 w-full px-2 text-right text-xs"
-                        value={row.issued || ""}
+                        value={row.issued}
                         placeholder="0"
                         onChange={(e) =>
-                          updateRow(index, {
-                            issued: Number(e.target.value) || 0,
-                          })
+                          updateRow(index, { issued: e.target.value })
                         }
                         disabled={committing || !selectedId}
                       />
