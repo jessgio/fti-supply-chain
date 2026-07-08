@@ -18,6 +18,7 @@ import {
   loadActionCodeMappings,
   loadManufacturerNamesByExtractId,
 } from "@/lib/db/extract-mappings";
+import { syncAllActiveCatalogExtracts } from "@/lib/db/sync-extract-catalog";
 import type {
   ExtractCategory,
   ExtractCategoryRule,
@@ -249,12 +250,16 @@ export async function listExtracts(
   supabase: SupabaseClient,
   params: ListExtractsParams = {},
 ): Promise<ExtractSummary[]> {
-  const [{ data: extracts, error }, manufacturerNames, statsRes] =
-    await Promise.all([
-      supabase.from("extracts").select("id, item_no, description, unit"),
-      loadManufacturerNamesByExtractId(supabase),
-      supabase.rpc("get_extract_summaries"),
-    ]);
+  await syncAllActiveCatalogExtracts(supabase);
+
+  const [{ data: catalogCodes, error }, statsRes] = await Promise.all([
+    supabase
+      .from("extract_codes")
+      .select("id, item_code, extract_name, extract_id, is_active")
+      .eq("is_active", true)
+      .order("extract_name"),
+    supabase.rpc("get_extract_summaries"),
+  ]);
   if (error) throw error;
   if (statsRes.error) throw statsRes.error;
 
@@ -275,38 +280,43 @@ export async function listExtracts(
     statsByExtract.set(row.extract_id, row);
   }
 
-  let summaries: ExtractSummary[] = (extracts ?? []).map((ex) => {
-    const stats = statsByExtract.get(ex.id);
-    const starting = Number(stats?.starting_balance ?? 0);
-    const totalReceived = Number(stats?.total_received ?? 0);
-    const wasteIssued = Number(stats?.waste_issued ?? 0);
-    const denom = starting + totalReceived;
-    const wastePct = denom > 0 ? (wasteIssued / denom) * 100 : null;
+  let summaries: ExtractSummary[] = (catalogCodes ?? [])
+    .filter((code) => code.extract_id)
+    .map((code) => {
+      const extractId = code.extract_id as string;
+      const stats = statsByExtract.get(extractId);
+      const starting = Number(stats?.starting_balance ?? 0);
+      const totalReceived = Number(stats?.total_received ?? 0);
+      const wasteIssued = Number(stats?.waste_issued ?? 0);
+      const denom = starting + totalReceived;
+      const wastePct = denom > 0 ? (wasteIssued / denom) * 100 : null;
+      const extractName = code.extract_name as string;
 
-    return {
-      id: ex.id,
-      item_no: ex.item_no,
-      description: ex.description,
-      manufacturer_name: manufacturerNames.get(ex.id) ?? null,
-      unit: ex.unit,
-      txn_count: Number(stats?.txn_count ?? 0),
-      first_date: stats?.first_date ?? null,
-      last_date: stats?.last_date ?? null,
-      starting_balance: starting,
-      ending_balance: Number(stats?.ending_balance ?? 0),
-      total_received: totalReceived,
-      total_issued: Number(stats?.total_issued ?? 0),
-      waste_issued: wasteIssued,
-      waste_pct: wastePct === null ? null : Number(wastePct.toFixed(2)),
-    } satisfies ExtractSummary;
-  });
+      return {
+        id: extractId,
+        item_no: code.item_code as string,
+        description: extractName,
+        manufacturer_name: extractName,
+        unit: "kg",
+        txn_count: Number(stats?.txn_count ?? 0),
+        first_date: stats?.first_date ?? null,
+        last_date: stats?.last_date ?? null,
+        starting_balance: starting,
+        ending_balance: Number(stats?.ending_balance ?? 0),
+        total_received: totalReceived,
+        total_issued: Number(stats?.total_issued ?? 0),
+        waste_issued: wasteIssued,
+        waste_pct: wastePct === null ? null : Number(wastePct.toFixed(2)),
+      } satisfies ExtractSummary;
+    });
 
   const q = params.search?.trim().toLowerCase();
   if (q) {
     summaries = summaries.filter(
       (s) =>
         s.item_no.toLowerCase().includes(q) ||
-        (s.manufacturer_name?.toLowerCase().includes(q) ?? false),
+        (s.manufacturer_name?.toLowerCase().includes(q) ?? false) ||
+        (s.description?.toLowerCase().includes(q) ?? false),
     );
   }
 
@@ -490,21 +500,34 @@ export async function commitExtract(
     return categorize(row.from_to, rules);
   }
 
-  const { data: extract, error: upsertError } = await supabase
-    .from("extracts")
-    .upsert(
-      {
-        item_no: itemNo,
-        description: parsed.description?.trim() || null,
-        unit: parsed.unit?.trim() || "kg",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "item_no" },
-    )
-    .select("id")
-    .single();
-  if (upsertError) throw upsertError;
-  const extractId = extract.id as string;
+  let extractId: string;
+
+  if (parsed.source_filename === "manual-entry" && parsed.extract_id) {
+    const { data, error } = await supabase
+      .from("extracts")
+      .select("id")
+      .eq("id", parsed.extract_id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("Extract not found");
+    extractId = data.id as string;
+  } else {
+    const { data, error } = await supabase
+      .from("extracts")
+      .upsert(
+        {
+          item_no: itemNo,
+          description: parsed.description?.trim() || null,
+          unit: parsed.unit?.trim() || "kg",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "item_no" },
+      )
+      .select("id")
+      .single();
+    if (error) throw error;
+    extractId = data.id as string;
+  }
 
   if (parsed.source_filename === "manual-entry") {
     return commitManualExtract(

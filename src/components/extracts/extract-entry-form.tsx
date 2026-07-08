@@ -224,6 +224,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
       item_no: selectedExtract.item_no,
       description: selectedExtract.description,
       unit: "kg",
+      extract_id: selectedExtract.id,
       opening_balance: openingBalance,
       rows: recomputeBalances(datedRows, openingBalance).map((row) => ({
         ...row,
@@ -303,24 +304,27 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
               {loading
                 ? "Loading extracts…"
                 : extracts.length === 0
-                  ? "No extracts — add mappings first"
+                  ? "No extracts — update the DN catalog first"
                   : "Select item number…"}
             </option>
             {extracts.map((ex) => (
               <option key={ex.id} value={ex.id}>
-                {ex.item_no}
+                {ex.item_no === ex.description
+                  ? ex.item_no
+                  : `${ex.item_no} — ${ex.description}`}
               </option>
             ))}
           </Select>
           {!loading && extracts.length === 0 && (
             <p className="mt-1.5 text-xs text-stone-500">
-              Add an item name mapping to create your first extract.{" "}
+              Add extracts in the{" "}
               <Link
-                href="/dashboard/extracts/mappings"
+                href="/dashboard/extract-inbound-delivery-notes/codes"
                 className="text-emerald-700 hover:underline"
               >
-                Open mappings
+                Extract Code DN catalog
               </Link>
+              .
             </p>
           )}
         </div>

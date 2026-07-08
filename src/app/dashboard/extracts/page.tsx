@@ -171,8 +171,9 @@ export default function ExtractsPage() {
         <CardHeader>
           <CardTitle className="text-lg">Extract ledger summary</CardTitle>
           <CardDescription>
-            Search by item number or manufacturer name. Click an extract for the
-            full ledger, date-range balances, and category breakdown.
+            Search by item number or extract name. Click an extract for the
+            full ledger, date-range balances, and category breakdown. The list
+            follows the Extract Code DN catalog.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -192,7 +193,14 @@ export default function ExtractsPage() {
             <p className="text-sm text-stone-500">Loading extracts…</p>
           ) : extracts.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No extracts yet. Add an item name mapping, then enter movements above.
+              No extracts in the DN catalog yet. Add items in the{" "}
+              <Link
+                href="/dashboard/extract-inbound-delivery-notes/codes"
+                className="text-emerald-700 hover:underline"
+              >
+                Extract Code DN catalog
+              </Link>
+              , then enter movements above.
             </p>
           ) : (
             <div className="overflow-x-auto">

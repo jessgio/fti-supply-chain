@@ -7,6 +7,7 @@ import type {
   ExtractInboundPoOption,
 } from "@/types/database";
 import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
+import { syncExtractFromCatalogCode } from "@/lib/db/sync-extract-catalog";
 import { EXTRACT_INBOUND_DN_SETTINGS_ID } from "@/lib/extract-inbound-delivery-note/constants";
 
 const NOTE_SELECT =
@@ -15,7 +16,7 @@ const NOTE_SELECT =
 const LINE_SELECT =
   "id, delivery_note_id, extract_code_id, item_code, extract_name, quantity, uom_kg, total_kg";
 
-const CODE_SELECT = "id, item_code, extract_name, is_active, created_at";
+const CODE_SELECT = "id, item_code, extract_name, is_active, extract_id, created_at";
 
 const SETTINGS_SELECT =
   "id, recipient_company, recipient_address, recipient_pic_name, recipient_phone, recipient_email, updated_at";
@@ -275,7 +276,15 @@ export async function createExtractCode(
     .select(CODE_SELECT)
     .single();
   if (error) throw error;
-  return data as ExtractCode;
+  const created = data as ExtractCode;
+  await syncExtractFromCatalogCode(supabase, created);
+  const { data: linked, error: reloadError } = await supabase
+    .from("extract_codes")
+    .select(CODE_SELECT)
+    .eq("id", created.id)
+    .single();
+  if (reloadError) throw reloadError;
+  return linked as ExtractCode;
 }
 
 export async function importExtractCodes(
@@ -313,6 +322,28 @@ export async function importExtractCodes(
     else inserted += 1;
   }
 
+  const { data: imported, error: reloadError } = await supabase
+    .from("extract_codes")
+    .select("id, item_code, extract_name, extract_id")
+    .in(
+      "item_code",
+      [...new Set(rows.map((row) => row.item_code))],
+    );
+  if (reloadError) throw reloadError;
+
+  const importedByPair = new Map(
+    (imported ?? []).map((row) => [
+      `${row.item_code as string}\0${row.extract_name as string}`,
+      row,
+    ]),
+  );
+  for (const row of rows) {
+    const code = importedByPair.get(pairKey(row));
+    if (code) {
+      await syncExtractFromCatalogCode(supabase, code);
+    }
+  }
+
   return { inserted, updated, total: rows.length };
 }
 
@@ -347,7 +378,18 @@ export async function updateExtractCode(
     .select(CODE_SELECT)
     .single();
   if (error) throw error;
-  return data as ExtractCode;
+  const updated = data as ExtractCode;
+  if (updated.is_active) {
+    await syncExtractFromCatalogCode(supabase, updated);
+    const { data: linked, error: reloadError } = await supabase
+      .from("extract_codes")
+      .select(CODE_SELECT)
+      .eq("id", id)
+      .single();
+    if (reloadError) throw reloadError;
+    return linked as ExtractCode;
+  }
+  return updated;
 }
 
 export async function listExtractInboundDeliveryNotes(

@@ -492,6 +492,8 @@ export interface ParsedExtract {
   source_filename: string | null;
   /** Manual entry only: opening balance when the ledger is empty. */
   opening_balance?: number;
+  /** Manual entry only: linked ledger extract when known. */
+  extract_id?: string;
 }
 
 export type ExtractSortKey =
@@ -1260,6 +1262,7 @@ export interface ExtractCode {
   item_code: string;
   extract_name: string;
   is_active: boolean;
+  extract_id?: string | null;
   created_at?: string;
 }
 
