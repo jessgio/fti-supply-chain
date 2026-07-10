@@ -12,6 +12,11 @@ export interface CurrentProfile {
 const WRITE_ROLES: UserRole[] = ["admin", "supply_chain"];
 const SUPPLY_CHAIN_ROLES: UserRole[] = ["admin", "supply_chain"];
 
+/** Admin-only: Lark user directory management. */
+export function canManageLarkUsers(role: UserRole | null | undefined): boolean {
+  return role === "admin";
+}
+
 function authConfigured(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&

@@ -29,6 +29,7 @@ import {
   TrendingUp,
   Truck,
   Upload,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -177,6 +178,12 @@ const links: NavItem[] = [
     label: "Data Uploads",
     icon: Upload,
     roles: ["admin", "supply_chain"],
+  },
+  {
+    href: "/dashboard/lark-users",
+    label: "Lark users",
+    icon: Users,
+    roles: ["admin"],
   },
   {
     href: "/dashboard/mappings",

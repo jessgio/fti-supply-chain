@@ -19,6 +19,7 @@ import { PoShipmentsSection } from "@/components/procurement/po-shipments-sectio
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { PoExtractDeliveryNotesSection } from "@/components/extract-inbound-delivery-note/po-extract-delivery-notes-section";
 import { PoProductionReportsSection } from "@/components/procurement/po-production-reports-section";
+import { LarkApSubmissionPanel } from "@/components/lark/lark-ap-submission-panel";
 import {
   EditPoDialog,
   type PoSkuOption,
@@ -38,6 +39,10 @@ import {
   nextStatus,
   downloadPoPdf,
 } from "@/lib/procurement/po-status";
+import {
+  formatLarkApprovalStatus,
+  larkApprovalStatusBadgeClass,
+} from "@/lib/lark/ap-form";
 import { formatNumber, formatDate } from "@/lib/utils";
 import type {
   PoStatus,
@@ -228,6 +233,14 @@ export default function PurchaseOrderPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={STATUS_STYLES[po.status]}>{STATUS_LABELS[po.status]}</Badge>
+            {po.lark_instance_code ? (
+              <Badge
+                className={`border ${larkApprovalStatusBadgeClass(po.lark_approval_status)}`}
+              >
+                AP: {formatLarkApprovalStatus(po.lark_approval_status)}
+                {po.lark_serial_number ? ` · ${po.lark_serial_number}` : ""}
+              </Badge>
+            ) : null}
             <StatusUpdateNotesLink entityType="po" entityId={poId} />
             <Button
               size="sm"
@@ -346,6 +359,18 @@ export default function PurchaseOrderPage() {
             onUpdated={(updated) => {
               setPo(updated);
               void loadPo();
+            }}
+          />
+
+          <LarkApSubmissionPanel
+            po={po}
+            supplier={
+              po.supplier_id
+                ? (suppliers.find((s) => s.id === po.supplier_id) ?? null)
+                : null
+            }
+            onUpdated={(updated) => {
+              setPo(updated);
             }}
           />
 

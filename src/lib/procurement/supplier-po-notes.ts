@@ -98,6 +98,41 @@ export function formatSupplierPoNotes(
   return sections.join("\n\n");
 }
 
+/** Banking / remittance block for Lark AP Form supplier field (matches PO form). */
+export function formatSupplierPaymentDetails(
+  supplier: (SupplierNotesFields & { name?: string | null }) | null | undefined,
+): string {
+  if (!supplier) return "";
+
+  const parts: string[] = [];
+  const name = supplier.name?.trim();
+  if (name) parts.push(name);
+
+  if (hasBankingDetails(supplier)) {
+    const bankLines = [
+      labeledLine("Beneficiary Name", supplier.beneficiary_name),
+      labeledLine(
+        "Beneficiary Account Number",
+        supplier.beneficiary_account_number,
+      ),
+      labeledLine("Swift Code", supplier.swift_code),
+      labeledLine("Country/Region", supplier.beneficiary_country),
+      labeledLine("Beneficiary Address", supplier.beneficiary_address),
+      labeledLine("Beneficiary Bank", supplier.beneficiary_bank),
+      labeledLine(
+        "Beneficiary Bank Address",
+        supplier.beneficiary_bank_address,
+      ),
+      labeledLine("Bank Code", supplier.bank_code),
+      labeledLine("Branch Code", supplier.branch_code),
+    ].filter((l): l is string => l != null);
+
+    if (bankLines.length > 0) parts.push(bankLines.join("\n"));
+  }
+
+  return parts.join("\n\n");
+}
+
 export function composePoPdfNotes(
   poNotes: string | null | undefined,
   supplier: SupplierNotesFields | null | undefined,

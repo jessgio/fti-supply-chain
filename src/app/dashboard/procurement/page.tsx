@@ -45,6 +45,10 @@ import {
   STATUS_STYLES,
   STATUS_FLOW,
 } from "@/lib/procurement/po-status";
+import {
+  formatLarkApprovalStatus,
+  larkApprovalStatusBadgeClass,
+} from "@/lib/lark/ap-form";
 import type {
   PoStatus,
   PurchaseOrder,
@@ -335,6 +339,22 @@ function ProcurementInner() {
             <td className="py-2 pr-4">
               <StatusBadge status={po.status} />
             </td>
+            <td className="py-2 pr-4">
+              {po.lark_instance_code ? (
+                <Badge
+                  className={`border ${larkApprovalStatusBadgeClass(po.lark_approval_status)}`}
+                  title={
+                    po.lark_serial_number
+                      ? `AP ${po.lark_serial_number}`
+                      : undefined
+                  }
+                >
+                  {formatLarkApprovalStatus(po.lark_approval_status)}
+                </Badge>
+              ) : (
+                <span className="text-xs text-stone-400">—</span>
+              )}
+            </td>
             <td className="py-2 pr-4">{lines.length}</td>
             <td className="py-2 pr-4">{formatNumber(poOpenQty(po))}</td>
             <td className="py-2 pr-4">
@@ -354,7 +374,7 @@ function ProcurementInner() {
           {isOpen && (
             <tr className="border-b border-stone-100 bg-stone-50/60">
               <td />
-              <td colSpan={8} className="py-2 pr-4">
+              <td colSpan={9} className="py-2 pr-4">
                 {lines.length === 0 ? (
                   <p className="py-1 text-xs text-stone-500">No line items.</p>
                 ) : (
@@ -587,6 +607,7 @@ function ProcurementInner() {
                         <th className="py-2 pr-4">PO</th>
                         <th className="py-2 pr-4">Supplier</th>
                         <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">AP Form</th>
                         <th className="py-2 pr-4">Lines</th>
                         <th className="py-2 pr-4">Open qty</th>
                         <th className="py-2 pr-4">Value</th>

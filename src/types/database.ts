@@ -311,6 +311,22 @@ export interface PurchaseOrderLine {
   receipts?: PoReceipt[];
 }
 
+export type LarkApprovalStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "CANCELED"
+  | "DELETED";
+
+export interface LarkUserDirectoryEntry {
+  email: string;
+  lark_open_id: string;
+  display_name: string;
+  is_default_approver: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   po_number: string;
@@ -330,6 +346,14 @@ export interface PurchaseOrder {
   pd_project_id: string | null;
   pd_project_name?: string | null;
   pd_project_product_name?: string | null;
+  /** Lark AP Form instance code after submission. */
+  lark_instance_code?: string | null;
+  /** Lark AP Form serial/reference number. */
+  lark_serial_number?: string | null;
+  lark_submitted_at?: string | null;
+  lark_expense_category?: string | null;
+  lark_approval_status?: LarkApprovalStatus | null;
+  lark_status_synced_at?: string | null;
   created_at?: string;
   updated_at?: string;
   lines?: PurchaseOrderLine[];

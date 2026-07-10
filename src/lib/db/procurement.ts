@@ -256,6 +256,12 @@ type PoRow = {
   other_charges: number;
   currency: string;
   notes: string | null;
+  lark_instance_code?: string | null;
+  lark_serial_number?: string | null;
+  lark_submitted_at?: string | null;
+  lark_expense_category?: string | null;
+  lark_approval_status?: string | null;
+  lark_status_synced_at?: string | null;
   created_at: string;
   updated_at: string;
   suppliers: { name: string } | null;
@@ -356,6 +362,12 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     pd_project_id: row.pd_project_id ?? null,
     pd_project_name: pdProject?.name ?? null,
     pd_project_product_name: pdProject?.product_name ?? null,
+    lark_instance_code: row.lark_instance_code ?? null,
+    lark_serial_number: row.lark_serial_number ?? null,
+    lark_submitted_at: row.lark_submitted_at ?? null,
+    lark_expense_category: row.lark_expense_category ?? null,
+    lark_approval_status: (row.lark_approval_status as PurchaseOrder["lark_approval_status"]) ?? null,
+    lark_status_synced_at: row.lark_status_synced_at ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     lines,
@@ -363,13 +375,20 @@ function mapPoRow(row: PoRow): PurchaseOrder {
   };
 }
 
+const PO_LARK_COLS =
+  "lark_instance_code, lark_serial_number, lark_submitted_at, lark_expense_category, lark_approval_status, lark_status_synced_at";
+
 const PO_SELECT =
-  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
+  PO_LARK_COLS +
+  ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging))";
 
 const PO_DETAIL_SELECT =
-  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, created_at, updated_at, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
+  PO_LARK_COLS +
+  ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
