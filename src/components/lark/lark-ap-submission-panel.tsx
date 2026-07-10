@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AP_FORM_BRANDS,
   AP_FORM_EXPENSE_CATEGORIES,
+  AP_PAYMENT_PLAN_SCOPES,
   DEFAULT_AP_BRAND,
   DEFAULT_AP_EXPENSE_CATEGORY,
   buildLarkApprovalDetailUrl,
@@ -16,12 +17,18 @@ import {
   isApFormCurrency,
   larkApprovalStatusBadgeClass,
   localTodayYmd,
+  poHasSplitPaymentPlan,
   type ApBrandValue,
   type ApExpenseCategoryValue,
+  type ApPaymentPlanScope,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
 import { formatPoMoney } from "@/lib/procurement/currencies";
-import type { PurchaseOrder, Supplier } from "@/types/database";
+import type {
+  PurchaseOrder,
+  PurchaseOrderLarkSubmission,
+  Supplier,
+} from "@/types/database";
 
 type Colleague = {
   id: string;
@@ -30,6 +37,28 @@ type Colleague = {
   lark_open_id: string | null;
   is_default_approver?: boolean;
 };
+
+type LarkComment = {
+  id: string;
+  openId: string | null;
+  comment: string;
+  createTime: string | null;
+  authorName: string | null;
+  authorEmail: string | null;
+};
+
+function paymentScopeLabel(scope: string | null | undefined): string {
+  switch (scope) {
+    case "down_payment":
+      return "Down payment only";
+    case "balance":
+      return "Balance only";
+    case "both":
+      return "Down payment + balance";
+    default:
+      return "Payment";
+  }
+}
 
 type Props = {
   po: PurchaseOrder;
@@ -72,13 +101,16 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     defaultApSupplier(po, supplierRecord),
   );
   const [remarks, setRemarks] = useState(() => defaultApRemarks(po));
+  const [paymentPlanScope, setPaymentPlanScope] =
+    useState<ApPaymentPlanScope>("both");
   const [planRows, setPlanRows] = useState<PaymentPlanRow[]>(() => {
     try {
-      return buildPaymentPlanRows(po);
+      return buildPaymentPlanRows(po, "both");
     } catch {
       return [];
     }
   });
+  const hasSplitPlan = poHasSplitPaymentPlan(po);
   const [serialNumber, setSerialNumber] = useState(po.lark_serial_number);
   const [approvalStatus, setApprovalStatus] = useState(
     po.lark_approval_status,
@@ -86,29 +118,35 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const [statusSyncedAt, setStatusSyncedAt] = useState(
     po.lark_status_synced_at,
   );
-  const [comments, setComments] = useState<
-    {
-      id: string;
-      openId: string | null;
-      comment: string;
-      createTime: string | null;
-      authorName: string | null;
-      authorEmail: string | null;
-    }[]
-  >([]);
+  const [comments, setComments] = useState<LarkComment[]>([]);
+  const [submissions, setSubmissions] = useState<PurchaseOrderLarkSubmission[]>(
+    [],
+  );
+  const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(
+    null,
+  );
+  const [showSubmitForm, setShowSubmitForm] = useState(
+    () => !po.lark_instance_code,
+  );
   const [syncingStatus, setSyncingStatus] = useState(false);
   const fileInputId = `lark-ap-files-${po.id}`;
 
-  const alreadySubmitted = !!po.lark_instance_code;
+  const alreadySubmitted = !!po.lark_instance_code || submissions.length > 0;
   const currencyOk = isApFormCurrency(po.currency ?? "IDR");
   const hasMyOpenId = !!me?.lark_open_id;
-  const larkUrl = po.lark_instance_code
-    ? buildLarkApprovalDetailUrl(po.lark_instance_code)
-    : null;
+  const activeSubmission =
+    submissions.find((s) => s.id === activeSubmissionId) ??
+    submissions[0] ??
+    null;
+  const larkUrl = activeSubmission?.lark_instance_code
+    ? buildLarkApprovalDetailUrl(activeSubmission.lark_instance_code)
+    : po.lark_instance_code
+      ? buildLarkApprovalDetailUrl(po.lark_instance_code)
+      : null;
 
   // When supplier banking details load after mount, upgrade a name-only prefill.
   useEffect(() => {
-    if (alreadySubmitted || !supplierRecord) return;
+    if (!showSubmitForm || !supplierRecord) return;
     const next = defaultApSupplier(po, supplierRecord);
     if (!next) return;
     setSupplier((current) => {
@@ -116,7 +154,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       if (!current.trim() || current.trim() === nameOnly) return next;
       return current;
     });
-  }, [alreadySubmitted, po, supplierRecord]);
+  }, [showSubmitForm, po, supplierRecord]);
 
   async function loadPeople() {
     setLoadingPeople(true);
@@ -151,32 +189,37 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   }
 
   useEffect(() => {
-    if (!alreadySubmitted) void loadPeople();
+    if (showSubmitForm) void loadPeople();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alreadySubmitted]);
+  }, [showSubmitForm]);
 
-  async function syncLarkDetails() {
-    if (!po.lark_instance_code) return;
+  async function syncLarkDetails(submissionId?: string | null) {
+    if (!po.lark_instance_code && submissions.length === 0) return;
     setSyncingStatus(true);
     try {
-      const res = await fetch(`/api/procurement/pos/${po.id}/lark-details`);
+      const qs = submissionId
+        ? `?submissionId=${encodeURIComponent(submissionId)}`
+        : "";
+      const res = await fetch(
+        `/api/procurement/pos/${po.id}/lark-details${qs}`,
+      );
       const data = (await res.json()) as {
         error?: string;
         serialNumber?: string | null;
         status?: string | null;
         syncedAt?: string | null;
-        comments?: {
-          id: string;
-          openId: string | null;
-          comment: string;
-          createTime: string | null;
-          authorName: string | null;
-          authorEmail: string | null;
-        }[];
+        comments?: LarkComment[];
+        submissions?: PurchaseOrderLarkSubmission[];
       };
-      if (!res.ok && !data.status && !data.serialNumber) {
+      if (!res.ok && !data.status && !data.serialNumber && !data.submissions?.length) {
         setError(data.error ?? "Failed to refresh Lark status");
         return;
+      }
+      if (Array.isArray(data.submissions)) {
+        setSubmissions(data.submissions);
+        if (!activeSubmissionId && data.submissions[0]) {
+          setActiveSubmissionId(data.submissions[0].id);
+        }
       }
       if (data.serialNumber) setSerialNumber(data.serialNumber);
       if (data.status) {
@@ -212,6 +255,28 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [po.id, po.lark_instance_code]);
 
+  function openAnotherSubmitForm() {
+    const submittedScopes = new Set(submissions.map((s) => s.payment_scope));
+    let nextScope: ApPaymentPlanScope = "both";
+    if (hasSplitPlan) {
+      if (
+        submittedScopes.has("down_payment") &&
+        !submittedScopes.has("balance")
+      ) {
+        nextScope = "balance";
+      } else if (
+        submittedScopes.has("balance") &&
+        !submittedScopes.has("down_payment")
+      ) {
+        nextScope = "down_payment";
+      } else {
+        nextScope = "down_payment";
+      }
+    }
+    applyPaymentPlanScope(nextScope);
+    setShowSubmitForm(true);
+  }
+
   function toggleApprover(openId: string) {
     setSelectedApproverIds((prev) =>
       prev.includes(openId)
@@ -240,6 +305,15 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
 
   function removeExtraFile(index: number) {
     setExtraFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function applyPaymentPlanScope(scope: ApPaymentPlanScope) {
+    setPaymentPlanScope(scope);
+    try {
+      setPlanRows(buildPaymentPlanRows(po, scope));
+    } catch {
+      setPlanRows([]);
+    }
   }
 
   function updatePlanRow(index: number, patch: Partial<PaymentPlanRow>) {
@@ -300,6 +374,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       form.append("project", project);
       form.append("supplier", supplier);
       form.append("remarks", remarks);
+      form.append("paymentScope", paymentPlanScope);
       form.append("planRows", JSON.stringify(planRows));
       form.append("poPdf", pdfBlob, `${po.po_number || "PO"}.pdf`);
       for (const file of extraFiles) {
@@ -330,6 +405,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       setStatusSyncedAt(new Date().toISOString());
       setExtraFiles([]);
       setApproverQuery("");
+      setShowSubmitForm(false);
       if (data.purchaseOrder && onUpdated) {
         onUpdated(data.purchaseOrder);
       } else if (onUpdated) {
@@ -344,6 +420,8 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           lark_expense_category: expenseCategory,
         });
       }
+      // Refresh submission history after a successful submit.
+      void syncLarkDetails();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submit failed");
     } finally {
@@ -351,11 +429,16 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     }
   }
 
-  if (alreadySubmitted) {
-    const statusLabel = formatLarkApprovalStatus(approvalStatus);
-    const statusClass = larkApprovalStatusBadgeClass(approvalStatus);
+  const statusLabel = formatLarkApprovalStatus(
+    activeSubmission?.lark_approval_status ?? approvalStatus,
+  );
+  const statusClass = larkApprovalStatusBadgeClass(
+    activeSubmission?.lark_approval_status ?? approvalStatus,
+  );
 
-    return (
+  return (
+    <div className="space-y-4">
+      {alreadySubmitted ? (
       <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -376,12 +459,21 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => void syncLarkDetails()}
+              onClick={() => void syncLarkDetails(activeSubmission?.id)}
               disabled={syncingStatus}
               className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50 disabled:opacity-60"
             >
               {syncingStatus ? "Refreshing…" : "Refresh status"}
             </button>
+            {!showSubmitForm ? (
+              <button
+                type="button"
+                onClick={openAnotherSubmitForm}
+                className="rounded-md border border-stone-900 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-50"
+              >
+                Submit another
+              </button>
+            ) : null}
             {larkUrl ? (
               <a
                 href={larkUrl}
@@ -395,13 +487,54 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           </div>
         </div>
 
+        {submissions.length > 1 ? (
+          <div className="mt-4">
+            <p className="text-xs font-medium text-stone-600">Submissions</p>
+            <ul className="mt-1.5 space-y-1">
+              {submissions.map((sub) => {
+                const selected = sub.id === (activeSubmission?.id ?? "");
+                return (
+                  <li key={sub.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSubmissionId(sub.id);
+                        void syncLarkDetails(sub.id);
+                      }}
+                      className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm ${
+                        selected
+                          ? "border-emerald-300 bg-white"
+                          : "border-stone-200 bg-white/70 hover:bg-white"
+                      }`}
+                    >
+                      <span className="font-medium text-stone-900">
+                        {paymentScopeLabel(sub.payment_scope)}
+                      </span>
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${larkApprovalStatusBadgeClass(sub.lark_approval_status)}`}
+                      >
+                        {formatLarkApprovalStatus(sub.lark_approval_status)}
+                      </span>
+                      <span className="w-full font-mono text-[11px] text-stone-500 sm:w-auto">
+                        {sub.lark_serial_number || sub.lark_instance_code}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+
         <dl className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
             <dt className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
               AP status
             </dt>
             <dd className="mt-1 text-sm font-semibold text-stone-900">
-              {approvalStatus ? statusLabel : "Syncing…"}
+              {activeSubmission?.lark_approval_status || approvalStatus
+                ? statusLabel
+                : "Syncing…"}
             </dd>
           </div>
           <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
@@ -409,7 +542,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               Reference number
             </dt>
             <dd className="mt-1 font-mono text-sm font-semibold text-stone-900">
-              {serialNumber || "Fetching…"}
+              {activeSubmission?.lark_serial_number ||
+                serialNumber ||
+                "Fetching…"}
             </dd>
           </div>
           <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
@@ -417,12 +552,25 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               Submitted
             </dt>
             <dd className="mt-1 text-sm text-stone-900">
-              {po.lark_submitted_at
-                ? format(new Date(po.lark_submitted_at), "dd/MM/yyyy HH:mm")
+              {activeSubmission?.submitted_at || po.lark_submitted_at
+                ? format(
+                    new Date(
+                      activeSubmission?.submitted_at ||
+                        po.lark_submitted_at ||
+                        "",
+                    ),
+                    "dd/MM/yyyy HH:mm",
+                  )
                 : "—"}
             </dd>
           </div>
         </dl>
+
+        {activeSubmission ? (
+          <p className="mt-2 text-xs text-stone-500">
+            Scope: {paymentScopeLabel(activeSubmission.payment_scope)}
+          </p>
+        ) : null}
 
         <div className="mt-5 border-t border-emerald-200/80 pt-4">
           <div className="flex items-center justify-between gap-2">
@@ -484,27 +632,39 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           . PO fulfillment status is unchanged.
         </p>
 
-        {error ? (
+        {error && !showSubmitForm ? (
           <p className="mt-2 text-sm text-red-700" role="alert">
             {error}
           </p>
         ) : null}
       </section>
-    );
-  }
+      ) : null}
 
-  return (
+      {showSubmitForm ? (
     <section className="rounded-xl border border-stone-200 bg-white p-5 sm:p-6">
       <div className="border-b border-stone-100 pb-4">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
           Lark AP Form
         </p>
         <h2 className="mt-1 text-base font-semibold text-stone-900">
-          Submit payment request
+          {alreadySubmitted
+            ? "Submit another payment request"
+            : "Submit payment request"}
         </h2>
         <p className="mt-1 text-sm text-stone-500">
-          Creates an AP Form (应付单) in Lark with this PO PDF attached.
+          {alreadySubmitted
+            ? "Creates a separate AP Form in Lark — choose down payment or balance only if needed."
+            : "Creates an AP Form (应付单) in Lark with this PO PDF attached."}
         </p>
+        {alreadySubmitted ? (
+          <button
+            type="button"
+            onClick={() => setShowSubmitForm(false)}
+            className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+          >
+            Cancel
+          </button>
+        ) : null}
         {!currencyOk ? (
           <p className="mt-2 text-sm text-amber-800">
             Lark AP Form only supports IDR, USD, or CNY. Change the PO currency
@@ -595,8 +755,31 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               <p className="text-xs font-medium text-stone-600">
                 Payment plan (付款计划)
               </p>
-              <p className="mt-0.5 text-[11px] text-stone-500">
-                Prefills from PO down payment / totals — edit before submit.
+              {hasSplitPlan ? (
+                <label className="mt-1.5 block text-[11px] text-stone-500">
+                  Include in this AP Form
+                  <select
+                    value={paymentPlanScope}
+                    onChange={(e) =>
+                      applyPaymentPlanScope(
+                        e.target.value as ApPaymentPlanScope,
+                      )
+                    }
+                    disabled={!currencyOk}
+                    className={fieldClass}
+                  >
+                    {AP_PAYMENT_PLAN_SCOPES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <p className="mt-1 text-[11px] text-stone-500">
+                {hasSplitPlan
+                  ? "Only the selected payment amount is submitted — other AP fields stay the same."
+                  : "Prefills from PO totals — edit before submit."}
               </p>
               <div className="mt-1.5 space-y-2">
                 {planRows.map((row, index) => (
@@ -865,5 +1048,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         </button>
       </div>
     </section>
+      ) : null}
+    </div>
   );
 }

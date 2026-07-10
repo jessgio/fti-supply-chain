@@ -327,6 +327,20 @@ export interface LarkUserDirectoryEntry {
   updated_at?: string;
 }
 
+export type LarkPaymentPlanScope = "both" | "down_payment" | "balance";
+
+export interface PurchaseOrderLarkSubmission {
+  id: string;
+  purchase_order_id: string;
+  lark_instance_code: string;
+  lark_serial_number: string | null;
+  lark_approval_status: LarkApprovalStatus | null;
+  lark_status_synced_at: string | null;
+  payment_scope: LarkPaymentPlanScope;
+  lark_expense_category: string | null;
+  submitted_at: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   po_number: string;

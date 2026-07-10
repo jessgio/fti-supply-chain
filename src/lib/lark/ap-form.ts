@@ -266,7 +266,31 @@ function buildPaymentPlanRemark(label: string, po: PurchaseOrder): string {
   return segments.join(" - ");
 }
 
-export function buildPaymentPlanRows(po: PurchaseOrder): PaymentPlanRow[] {
+/** Which payment-plan rows to include when submitting an AP Form. */
+export const AP_PAYMENT_PLAN_SCOPES = [
+  { value: "both", label: "Down payment + balance" },
+  { value: "down_payment", label: "Down payment only" },
+  { value: "balance", label: "Balance only" },
+] as const;
+
+export type ApPaymentPlanScope = (typeof AP_PAYMENT_PLAN_SCOPES)[number]["value"];
+
+export function isApPaymentPlanScope(
+  value: string,
+): value is ApPaymentPlanScope {
+  return AP_PAYMENT_PLAN_SCOPES.some((s) => s.value === value);
+}
+
+/** True when the PO has a split down-payment / balance schedule. */
+export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
+  const dpPct = computePoInvoiceTotals(po).downPaymentPct;
+  return dpPct > 0 && dpPct < 100;
+}
+
+export function buildPaymentPlanRows(
+  po: PurchaseOrder,
+  scope: ApPaymentPlanScope = "both",
+): PaymentPlanRow[] {
   const currency = po.currency ?? "IDR";
   if (!isApFormCurrency(currency)) {
     throw new Error(
@@ -282,20 +306,22 @@ export function buildPaymentPlanRows(po: PurchaseOrder): PaymentPlanRow[] {
 
   if (dpPct > 0 && dpPct < 100) {
     const balancePct = 100 - dpPct;
-    return [
-      {
-        dateYmd: dpDate,
-        amount: roundMoney(totals.downPayment, currency),
-        currency,
-        remarks: buildPaymentPlanRemark(`Down payment ${dpPct}%`, po),
-      },
-      {
-        dateYmd: balanceDate,
-        amount: roundMoney(totals.finalPayment, currency),
-        currency,
-        remarks: buildPaymentPlanRemark(`Balance ${balancePct}%`, po),
-      },
-    ];
+    const downPaymentRow: PaymentPlanRow = {
+      dateYmd: dpDate,
+      amount: roundMoney(totals.downPayment, currency),
+      currency,
+      remarks: buildPaymentPlanRemark(`Down payment ${dpPct}%`, po),
+    };
+    const balanceRow: PaymentPlanRow = {
+      dateYmd: balanceDate,
+      amount: roundMoney(totals.finalPayment, currency),
+      currency,
+      remarks: buildPaymentPlanRemark(`Balance ${balancePct}%`, po),
+    };
+
+    if (scope === "down_payment") return [downPaymentRow];
+    if (scope === "balance") return [balanceRow];
+    return [downPaymentRow, balanceRow];
   }
 
   return [

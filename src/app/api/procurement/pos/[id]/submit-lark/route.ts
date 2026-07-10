@@ -7,11 +7,13 @@ import {
   isApBrandValue,
   isApExpenseCategoryValue,
   isApFormCurrency,
+  isApPaymentPlanScope,
   isLarkApprovalStatus,
   buildApFormControls,
   stringifyApForm,
   type ApBrandValue,
   type ApExpenseCategoryValue,
+  type ApPaymentPlanScope,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
 import {
@@ -149,6 +151,12 @@ export async function POST(
 
   const planRows = parsePlanRows(formData.get("planRows"));
 
+  const scopeRaw = formData.get("paymentScope");
+  const paymentScope: ApPaymentPlanScope =
+    typeof scopeRaw === "string" && isApPaymentPlanScope(scopeRaw)
+      ? scopeRaw
+      : "both";
+
   const approverOpenIds = parseApproverOpenIds(formData.get("approverOpenIds"));
   if (approverOpenIds.length === 0) {
     return NextResponse.json(
@@ -218,17 +226,6 @@ export async function POST(
     );
   }
 
-  if (po.lark_instance_code) {
-    return NextResponse.json(
-      {
-        error: "This PO was already submitted to Lark",
-        instanceCode: po.lark_instance_code,
-        submittedAt: po.lark_submitted_at,
-      },
-      { status: 409 },
-    );
-  }
-
   if (!isApFormCurrency(po.currency ?? "IDR")) {
     return NextResponse.json(
       {
@@ -279,7 +276,8 @@ export async function POST(
       approvalCode: getLarkApprovalCode(),
       openId: submitterOpenId,
       form: stringifyApForm(formControls),
-      uuid: po.id,
+      // Unique per submission so DP and balance can both be filed for one PO.
+      uuid: crypto.randomUUID(),
       nodeApproverOpenIdList: [
         { key: AP_FORM_APPROVER_NODE_ID, value: approverOpenIds },
       ],
@@ -292,6 +290,32 @@ export async function POST(
       : "PENDING";
     const syncedAt = new Date().toISOString();
 
+    const { error: insertErr } = await supabase
+      .from("purchase_order_lark_submissions")
+      .insert({
+        purchase_order_id: po.id,
+        lark_instance_code: result.instance_code,
+        lark_serial_number: serialNumber,
+        lark_approval_status: approvalStatus,
+        lark_status_synced_at: syncedAt,
+        payment_scope: paymentScope,
+        lark_expense_category: expenseCategory,
+        submitted_at: syncedAt,
+      });
+
+    if (insertErr) {
+      return NextResponse.json(
+        {
+          error: `Submitted to Lark (${result.instance_code}) but failed to save submission history: ${insertErr.message}`,
+          instanceCode: result.instance_code,
+          serialNumber,
+          status: approvalStatus,
+        },
+        { status: 500 },
+      );
+    }
+
+    // Keep PO columns as the latest submission for list/detail badges.
     const { error: updateErr } = await supabase
       .from("purchase_orders")
       .update({
@@ -324,6 +348,7 @@ export async function POST(
       status: approvalStatus,
       submittedAt: syncedAt,
       expenseCategory,
+      paymentScope,
       brand,
       approverOpenIds,
       attachmentCount: attachmentCodes.length,
