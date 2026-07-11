@@ -17,6 +17,7 @@ import {
   isApFormCurrency,
   larkApprovalStatusBadgeClass,
   localTodayYmd,
+  paymentAmountForApScope,
   poHasSplitPaymentPlan,
   type ApBrandValue,
   type ApExpenseCategoryValue,
@@ -125,9 +126,14 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(
     null,
   );
-  const [showSubmitForm, setShowSubmitForm] = useState(
-    () => !po.lark_instance_code,
-  );
+  const [showSubmitForm, setShowSubmitForm] = useState(false);
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkReference, setLinkReference] = useState("");
+  const [linkPaymentScope, setLinkPaymentScope] =
+    useState<ApPaymentPlanScope>("both");
+  const [linking, setLinking] = useState(false);
+  const [updatingSubmission, setUpdatingSubmission] = useState(false);
+  const [removingLink, setRemovingLink] = useState(false);
   const [syncingStatus, setSyncingStatus] = useState(false);
   const fileInputId = `lark-ap-files-${po.id}`;
 
@@ -250,31 +256,227 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   }
 
   useEffect(() => {
-    if (!po.lark_instance_code) return;
+    if (!po.lark_instance_code && submissions.length === 0) return;
     void syncLarkDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [po.id, po.lark_instance_code]);
 
-  function openAnotherSubmitForm() {
+  function nextPaymentScopeHint(): ApPaymentPlanScope {
     const submittedScopes = new Set(submissions.map((s) => s.payment_scope));
-    let nextScope: ApPaymentPlanScope = "both";
-    if (hasSplitPlan) {
-      if (
-        submittedScopes.has("down_payment") &&
-        !submittedScopes.has("balance")
-      ) {
-        nextScope = "balance";
-      } else if (
-        submittedScopes.has("balance") &&
-        !submittedScopes.has("down_payment")
-      ) {
-        nextScope = "down_payment";
-      } else {
-        nextScope = "down_payment";
-      }
+    if (!hasSplitPlan) return "both";
+    if (
+      submittedScopes.has("down_payment") &&
+      !submittedScopes.has("balance")
+    ) {
+      return "balance";
     }
+    if (
+      submittedScopes.has("balance") &&
+      !submittedScopes.has("down_payment")
+    ) {
+      return "down_payment";
+    }
+    return alreadySubmitted ? "down_payment" : "both";
+  }
+
+  function openAnotherSubmitForm() {
+    const nextScope = nextPaymentScopeHint();
     applyPaymentPlanScope(nextScope);
+    setShowLinkForm(false);
     setShowSubmitForm(true);
+  }
+
+  function openLinkForm() {
+    setLinkPaymentScope(nextPaymentScopeHint());
+    setShowSubmitForm(false);
+    setShowLinkForm(true);
+    setError(null);
+  }
+
+  async function handleLink() {
+    const reference = linkReference.trim();
+    if (!reference) {
+      setError("Enter the AP Form reference number from Lark");
+      return;
+    }
+
+    setLinking(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/pos/${po.id}/link-lark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          referenceNumber: reference,
+          paymentScope: linkPaymentScope,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        instanceCode?: string;
+        serialNumber?: string | null;
+        status?: string | null;
+        syncedAt?: string | null;
+        purchaseOrder?: PurchaseOrder;
+        submission?: PurchaseOrderLarkSubmission;
+        comments?: LarkComment[];
+      };
+      if (!res.ok) {
+        setError(data.error ?? `Link failed (${res.status})`);
+        return;
+      }
+      if (data.serialNumber) setSerialNumber(data.serialNumber);
+      if (data.status) {
+        setApprovalStatus(
+          data.status as PurchaseOrder["lark_approval_status"],
+        );
+      }
+      if (data.syncedAt) setStatusSyncedAt(data.syncedAt);
+      if (Array.isArray(data.comments)) setComments(data.comments);
+      if (data.submission) {
+        setSubmissions((prev) => {
+          const without = prev.filter((s) => s.id !== data.submission!.id);
+          return [data.submission!, ...without];
+        });
+        setActiveSubmissionId(data.submission.id);
+      }
+      setLinkReference("");
+      setShowLinkForm(false);
+      setShowSubmitForm(false);
+      if (data.purchaseOrder && onUpdated) {
+        onUpdated(data.purchaseOrder);
+      } else if (onUpdated) {
+        onUpdated({
+          ...po,
+          lark_instance_code: data.instanceCode ?? po.lark_instance_code,
+          lark_serial_number: data.serialNumber ?? po.lark_serial_number,
+          lark_approval_status:
+            (data.status as PurchaseOrder["lark_approval_status"]) ??
+            po.lark_approval_status,
+          lark_submitted_at: data.syncedAt ?? po.lark_submitted_at,
+          lark_status_synced_at: data.syncedAt ?? po.lark_status_synced_at,
+        });
+      }
+      void syncLarkDetails(data.submission?.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Link failed");
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function updateSubmissionMeta(input: {
+    paymentScope?: ApPaymentPlanScope;
+  }) {
+    const submissionId = activeSubmission?.id;
+    if (!submissionId || submissionId === "legacy") return;
+
+    setUpdatingSubmission(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/procurement/pos/${po.id}/lark-submissions/${submissionId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentScope: input.paymentScope,
+          }),
+        },
+      );
+      const data = (await res.json()) as {
+        error?: string;
+        submission?: PurchaseOrderLarkSubmission;
+      };
+      if (!res.ok) {
+        setError(data.error ?? `Update failed (${res.status})`);
+        return;
+      }
+      if (data.submission) {
+        setSubmissions((prev) =>
+          prev.map((s) => (s.id === data.submission!.id ? data.submission! : s)),
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingSubmission(false);
+    }
+  }
+
+  async function removeSubmissionLink() {
+    const submissionId =
+      activeSubmission?.id && activeSubmission.id !== "legacy"
+        ? activeSubmission.id
+        : po.lark_instance_code
+          ? "legacy"
+          : null;
+    if (!submissionId) return;
+
+    const ref =
+      activeSubmission?.lark_serial_number ||
+      serialNumber ||
+      activeSubmission?.lark_instance_code ||
+      po.lark_instance_code ||
+      "this AP Form";
+    const confirmed = window.confirm(
+      `Remove the link to ${ref} from this PO?\n\nThe AP Form in Lark is not canceled — only the link in this app is removed.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingLink(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/procurement/pos/${po.id}/lark-submissions/${submissionId}`,
+        { method: "DELETE" },
+      );
+      const data = (await res.json()) as {
+        error?: string;
+        submissions?: PurchaseOrderLarkSubmission[];
+        purchaseOrder?: PurchaseOrder;
+      };
+      if (!res.ok) {
+        setError(data.error ?? `Remove failed (${res.status})`);
+        return;
+      }
+
+      const remaining = Array.isArray(data.submissions) ? data.submissions : [];
+      setSubmissions(remaining);
+      setActiveSubmissionId(remaining[0]?.id ?? null);
+      setComments([]);
+
+      if (remaining[0]) {
+        setSerialNumber(remaining[0].lark_serial_number);
+        setApprovalStatus(remaining[0].lark_approval_status);
+        setStatusSyncedAt(remaining[0].lark_status_synced_at);
+        void syncLarkDetails(remaining[0].id);
+      } else {
+        setSerialNumber(null);
+        setApprovalStatus(null);
+        setStatusSyncedAt(null);
+        setShowSubmitForm(false);
+        setShowLinkForm(false);
+      }
+
+      if (data.purchaseOrder && onUpdated) {
+        onUpdated(data.purchaseOrder);
+      } else if (onUpdated) {
+        onUpdated({
+          ...po,
+          lark_instance_code: remaining[0]?.lark_instance_code ?? null,
+          lark_serial_number: remaining[0]?.lark_serial_number ?? null,
+          lark_approval_status: remaining[0]?.lark_approval_status ?? null,
+          lark_status_synced_at: remaining[0]?.lark_status_synced_at ?? null,
+          lark_submitted_at: remaining[0]?.submitted_at ?? null,
+          lark_expense_category: remaining[0]?.lark_expense_category ?? null,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setRemovingLink(false);
+    }
   }
 
   function toggleApprover(openId: string) {
@@ -338,7 +540,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   }, [approverQuery, selectableApprovers]);
 
   async function handleSubmit() {
-    if (alreadySubmitted || !currencyOk) return;
+    if (!showSubmitForm || !currencyOk) return;
     if (!hasMyOpenId) {
       setError(
         "Your email is not in the Lark users directory yet. Ask an admin to add you under Lark users.",
@@ -435,6 +637,12 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const statusClass = larkApprovalStatusBadgeClass(
     activeSubmission?.lark_approval_status ?? approvalStatus,
   );
+  const activePaymentAmount = useMemo(() => {
+    const scope =
+      (activeSubmission?.payment_scope as ApPaymentPlanScope | undefined) ??
+      "both";
+    return paymentAmountForApScope(po, scope);
+  }, [po, activeSubmission?.payment_scope]);
 
   return (
     <div className="space-y-4">
@@ -465,14 +673,23 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             >
               {syncingStatus ? "Refreshing…" : "Refresh status"}
             </button>
-            {!showSubmitForm ? (
-              <button
-                type="button"
-                onClick={openAnotherSubmitForm}
-                className="rounded-md border border-stone-900 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-50"
-              >
-                Submit another
-              </button>
+            {!showSubmitForm && !showLinkForm ? (
+              <>
+                <button
+                  type="button"
+                  onClick={openAnotherSubmitForm}
+                  className="rounded-md border border-stone-900 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-50"
+                >
+                  Submit another
+                </button>
+                <button
+                  type="button"
+                  onClick={openLinkForm}
+                  className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                >
+                  Link existing AP Form
+                </button>
+              </>
             ) : null}
             {larkUrl ? (
               <a
@@ -493,6 +710,10 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             <ul className="mt-1.5 space-y-1">
               {submissions.map((sub) => {
                 const selected = sub.id === (activeSubmission?.id ?? "");
+                const amount = paymentAmountForApScope(
+                  po,
+                  sub.payment_scope as ApPaymentPlanScope,
+                );
                 return (
                   <li key={sub.id}>
                     <button
@@ -509,6 +730,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                     >
                       <span className="font-medium text-stone-900">
                         {paymentScopeLabel(sub.payment_scope)}
+                        {amount
+                          ? ` · ${formatPoMoney(amount.amount, amount.currency)}`
+                          : ""}
                       </span>
                       <span
                         className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${larkApprovalStatusBadgeClass(sub.lark_approval_status)}`}
@@ -526,7 +750,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           </div>
         ) : null}
 
-        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
             <dt className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
               AP status
@@ -535,6 +759,19 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               {activeSubmission?.lark_approval_status || approvalStatus
                 ? statusLabel
                 : "Syncing…"}
+            </dd>
+          </div>
+          <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
+              Payment amount
+            </dt>
+            <dd className="mt-1 text-sm font-semibold text-stone-900">
+              {activePaymentAmount
+                ? formatPoMoney(
+                    activePaymentAmount.amount,
+                    activePaymentAmount.currency,
+                  )
+                : "—"}
             </dd>
           </div>
           <div className="rounded-lg border border-emerald-200/80 bg-white px-3 py-2.5">
@@ -566,10 +803,45 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           </div>
         </dl>
 
-        {activeSubmission ? (
-          <p className="mt-2 text-xs text-stone-500">
-            Scope: {paymentScopeLabel(activeSubmission.payment_scope)}
-          </p>
+        {activeSubmission || po.lark_instance_code ? (
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            {activeSubmission && activeSubmission.id !== "legacy" ? (
+              <label className="block min-w-[12rem] text-xs font-medium text-stone-600">
+                Payment scope
+                <select
+                  value={activeSubmission.payment_scope}
+                  disabled={updatingSubmission || removingLink}
+                  onChange={(e) =>
+                    void updateSubmissionMeta({
+                      paymentScope: e.target.value as ApPaymentPlanScope,
+                    })
+                  }
+                  className={`${fieldClass} max-w-xs`}
+                >
+                  {AP_PAYMENT_PLAN_SCOPES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : activeSubmission ? (
+              <p className="text-xs text-stone-500">
+                Scope: {paymentScopeLabel(activeSubmission.payment_scope)}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void removeSubmissionLink()}
+              disabled={updatingSubmission || removingLink}
+              className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+            >
+              {removingLink ? "Removing…" : "Remove link"}
+            </button>
+            {updatingSubmission ? (
+              <span className="pb-2 text-xs text-stone-500">Saving…</span>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mt-5 border-t border-emerald-200/80 pt-4">
@@ -632,12 +904,144 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           . PO fulfillment status is unchanged.
         </p>
 
-        {error && !showSubmitForm ? (
+        {error && !showSubmitForm && !showLinkForm ? (
           <p className="mt-2 text-sm text-red-700" role="alert">
             {error}
           </p>
         ) : null}
       </section>
+      ) : null}
+
+      {showLinkForm ? (
+        <section className="rounded-xl border border-stone-200 bg-white p-5 sm:p-6">
+          <div className="border-b border-stone-100 pb-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+              Lark AP Form
+            </p>
+            <h2 className="mt-1 text-base font-semibold text-stone-900">
+              {alreadySubmitted
+                ? "Link another existing AP Form"
+                : "Link existing AP Form"}
+            </h2>
+            <p className="mt-1 text-sm text-stone-500">
+              Attach an AP Form already submitted in Lark. Paste the reference
+              number (审批单编号) — status and comments will sync to this PO.
+            </p>
+            {alreadySubmitted ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkForm(false);
+                  setError(null);
+                }}
+                className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkForm(false);
+                  setShowSubmitForm(true);
+                  setError(null);
+                }}
+                className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+              >
+                Submit a new AP Form instead
+              </button>
+            )}
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block text-xs font-medium text-stone-600 sm:col-span-2">
+              Reference number <span className="text-red-600">*</span>
+              <input
+                type="text"
+                value={linkReference}
+                onChange={(e) => setLinkReference(e.target.value)}
+                placeholder="e.g. 202407110001"
+                autoComplete="off"
+                className={`${fieldClass} font-mono`}
+              />
+              <span className="mt-0.5 block text-[11px] font-normal text-stone-500">
+                Visible on the Lark approval. A Lark approval URL also works if
+                you have one.
+              </span>
+            </label>
+
+            {hasSplitPlan || alreadySubmitted ? (
+              <label className="block text-xs font-medium text-stone-600">
+                Payment scope
+                <select
+                  value={linkPaymentScope}
+                  onChange={(e) =>
+                    setLinkPaymentScope(e.target.value as ApPaymentPlanScope)
+                  }
+                  className={fieldClass}
+                >
+                  {AP_PAYMENT_PLAN_SCOPES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+
+          {error ? (
+            <p className="mt-4 text-sm text-red-700" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 pt-4">
+            <button
+              type="button"
+              onClick={() => void handleLink()}
+              disabled={linking || !linkReference.trim()}
+              className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {linking ? "Looking up in Lark…" : "Link to this PO"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!alreadySubmitted && !showSubmitForm && !showLinkForm ? (
+        <section className="rounded-xl border border-stone-200 bg-white p-5 sm:p-6">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+            Lark AP Form
+          </p>
+          <h2 className="mt-1 text-base font-semibold text-stone-900">
+            Payment request
+          </h2>
+          <p className="mt-1 text-sm text-stone-500">
+            Submit a new AP Form to Lark, or link one that was already filed
+            outside this app.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowLinkForm(false);
+                setShowSubmitForm(true);
+                setError(null);
+              }}
+              className="rounded-md bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+            >
+              Submit new AP Form
+            </button>
+            <button
+              type="button"
+              onClick={openLinkForm}
+              className="rounded-md border border-stone-900 bg-white px-4 py-2.5 text-sm font-medium text-stone-900 hover:bg-stone-50"
+            >
+              Link existing AP Form
+            </button>
+          </div>
+        </section>
       ) : null}
 
       {showSubmitForm ? (
@@ -664,7 +1068,27 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           >
             Cancel
           </button>
-        ) : null}
+        ) : (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowSubmitForm(false);
+                setError(null);
+              }}
+              className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={openLinkForm}
+              className="rounded-md border border-stone-900 bg-white px-3 py-1.5 text-xs font-medium text-stone-900 hover:bg-stone-50"
+            >
+              Link existing AP Form instead
+            </button>
+          </div>
+        )}
         {!currencyOk ? (
           <p className="mt-2 text-sm text-amber-800">
             Lark AP Form only supports IDR, USD, or CNY. Change the PO currency

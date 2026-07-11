@@ -334,6 +334,21 @@ export function buildPaymentPlanRows(
   ];
 }
 
+/** Total payment amount implied by a PO + AP Form payment scope. */
+export function paymentAmountForApScope(
+  po: PurchaseOrder,
+  scope: ApPaymentPlanScope = "both",
+): { amount: number; currency: string } | null {
+  try {
+    const rows = buildPaymentPlanRows(po, scope);
+    const currency = rows[0]?.currency ?? po.currency ?? "IDR";
+    const amount = rows.reduce((sum, row) => sum + row.amount, 0);
+    return { amount, currency };
+  } catch {
+    return null;
+  }
+}
+
 export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] {
   const {
     po,

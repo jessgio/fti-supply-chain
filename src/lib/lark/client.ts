@@ -376,6 +376,192 @@ export async function getApprovalInstance(
   );
 }
 
+export type ApprovalInstanceSearchHit = {
+  instanceCode: string;
+  serialId: string | null;
+  status: string | null;
+  startTimeMs: string | null;
+  approvalCode: string | null;
+};
+
+/**
+ * Pull an instance_code out of raw user input: bare code, or a Lark URL /
+ * applink that contains `instanceId=...`.
+ */
+export function extractLarkInstanceCode(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const fromQuery = trimmed.match(/[?&]instanceId=([^&]+)/i);
+  if (fromQuery?.[1]) {
+    try {
+      const decoded = decodeURIComponent(fromQuery[1]).trim();
+      if (decoded) return decoded;
+    } catch {
+      const value = fromQuery[1].trim();
+      if (value) return value;
+    }
+  }
+
+  // Applink path= is often URL-encoded: path=...instanceId%3DCODE
+  const fromEncodedPath = trimmed.match(/instanceId%3D([A-Za-z0-9_-]+)/i);
+  if (fromEncodedPath?.[1]) return fromEncodedPath[1];
+
+  // Bare UUID-style instance codes (with or without hyphens).
+  if (
+    /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(
+      trimmed,
+    )
+  ) {
+    return trimmed;
+  }
+  if (/^[0-9A-Fa-f]{32}$/.test(trimmed)) {
+    return [
+      trimmed.slice(0, 8),
+      trimmed.slice(8, 12),
+      trimmed.slice(12, 16),
+      trimmed.slice(16, 20),
+      trimmed.slice(20),
+    ].join("-");
+  }
+
+  return null;
+}
+
+type QueryInstancesPage = {
+  count?: number;
+  instance_list?: {
+    approval?: { code?: string };
+    instance?: {
+      code?: string;
+      serial_id?: string;
+      status?: string;
+      start_time?: string;
+    };
+  }[];
+  page_token?: string;
+  has_more?: boolean;
+};
+
+/** Query Lark approval instances (requires approval:approval.list:readonly). */
+export async function queryApprovalInstances(input: {
+  approvalCode: string;
+  pageSize?: number;
+  pageToken?: string;
+  instanceStatus?: string;
+  startTimeFromMs?: string;
+  startTimeToMs?: string;
+}): Promise<QueryInstancesPage> {
+  const token = await getTenantAccessToken();
+  const params = new URLSearchParams({
+    page_size: String(Math.min(200, Math.max(5, input.pageSize ?? 100))),
+    user_id_type: "open_id",
+  });
+  if (input.pageToken) params.set("page_token", input.pageToken);
+
+  const body: Record<string, unknown> = {
+    approval_code: input.approvalCode,
+    instance_status: input.instanceStatus ?? "ALL",
+  };
+  if (input.startTimeFromMs && input.startTimeToMs) {
+    body.instance_start_time_from = input.startTimeFromMs;
+    body.instance_start_time_to = input.startTimeToMs;
+  }
+
+  return larkFetch<QueryInstancesPage>(
+    `/open-apis/approval/v4/instances/query?${params}`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function normalizeSerial(value: string): string {
+  return value.trim().replace(/\s+/g, "");
+}
+
+function serialsMatch(a: string | null | undefined, b: string): boolean {
+  if (!a) return false;
+  return normalizeSerial(a) === normalizeSerial(b);
+}
+
+/**
+ * Resolve a visible AP Form reference number (serial) to an instance_code by
+ * scanning the configured approval definition. Optionally accepts a pasted
+ * instance code / Lark URL instead.
+ */
+export async function resolveApprovalInstance(input: {
+  referenceOrCode: string;
+  /** Max pages to scan when looking up by serial (page size 100). */
+  maxPages?: number;
+}): Promise<ApprovalInstanceSearchHit> {
+  const raw = input.referenceOrCode.trim();
+  if (!raw) {
+    throw new Error("Enter an AP Form reference number");
+  }
+
+  const asInstanceCode = extractLarkInstanceCode(raw);
+  if (asInstanceCode) {
+    const details = await getApprovalInstance(asInstanceCode);
+    return {
+      instanceCode: asInstanceCode,
+      serialId: details.serial_number?.trim() || null,
+      status: details.status?.trim() || null,
+      startTimeMs: null,
+      approvalCode: null,
+    };
+  }
+
+  const serial = normalizeSerial(raw);
+  const approvalCode = getLarkApprovalCode();
+  const maxPages = input.maxPages ?? 30;
+  let pageToken: string | undefined;
+
+  try {
+    for (let page = 0; page < maxPages; page++) {
+      const data = await queryApprovalInstances({
+        approvalCode,
+        pageSize: 100,
+        pageToken,
+        instanceStatus: "ALL",
+      });
+
+      for (const item of data.instance_list ?? []) {
+        const code = item.instance?.code?.trim();
+        if (!code) continue;
+        if (serialsMatch(item.instance?.serial_id, serial)) {
+          return {
+            instanceCode: code,
+            serialId: item.instance?.serial_id?.trim() || serial,
+            status: item.instance?.status?.trim() || null,
+            startTimeMs: item.instance?.start_time?.trim() || null,
+            approvalCode: item.approval?.code?.trim() || approvalCode,
+          };
+        }
+      }
+
+      if (!data.has_more || !data.page_token) break;
+      pageToken = data.page_token;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/1390001|permission|scope|99991672|99991663/i.test(msg)) {
+      throw new Error(
+        `Could not search Lark by reference number (${msg}). ` +
+          "Ensure the app has the “Query approval list” permission, or paste a Lark approval URL instead.",
+      );
+    }
+    throw err;
+  }
+
+  throw new Error(
+    `No Lark AP Form found with reference number “${serial}”. ` +
+      "Check the number, or paste the Lark approval URL / instance code instead.",
+  );
+}
+
 /**
  * Parse Lark comment payloads. Some tenants return plain text; others return
  * JSON like {"text":"..."} or richer rich-text structures.
