@@ -79,7 +79,7 @@ const links: NavItem[] = [
         href: "/dashboard/po-timeline",
         label: "PO Timeline",
         icon: GanttChart,
-        roles: ["admin", "supply_chain"],
+        roles: ["admin", "supply_chain", "viewer"],
       },
       {
         href: "/dashboard/timeline-adjustment",

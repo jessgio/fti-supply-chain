@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireSupplyChainAccess } from "@/lib/auth";
+import { requireReadRole } from "@/lib/auth";
 import { listOngoingPosForTimeline } from "@/lib/db/inbound";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 
 export async function GET() {
   try {
-    const denied = await requireSupplyChainAccess();
+    const denied = await requireReadRole();
     if (denied) return denied;
 
     const purchase_orders = await listOngoingPosForTimeline(createAdminClient());
