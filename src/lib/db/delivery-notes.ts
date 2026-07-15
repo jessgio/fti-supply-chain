@@ -5,7 +5,7 @@ import type {
   DeliveryNoteLine,
   DeliveryNotePortal,
   DeliveryNoteSettings,
-  PurchaseOrder,
+  ExtractInboundPoOption,
   SecondaryPackagingInboundCosmax,
   Supplier,
 } from "@/types/database";
@@ -333,16 +333,42 @@ export async function getMargasetaSupplier(
 
 export async function listOpenPosForDeliveryNote(
   supabase: SupabaseClient,
-  supplierId: string,
-): Promise<Pick<PurchaseOrder, "id" | "po_number" | "status" | "order_date">[]> {
+): Promise<ExtractInboundPoOption[]> {
   const { data, error } = await supabase
     .from("purchase_orders")
-    .select("id, po_number, status, order_date")
-    .eq("supplier_id", supplierId)
+    .select(
+      "id, po_number, status, order_date, purchase_order_lines ( skus ( name, sku_code ) )",
+    )
     .not("status", "in", '("received","cancelled")')
     .order("order_date", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as Pick<PurchaseOrder, "id" | "po_number" | "status" | "order_date">[];
+
+  return (data ?? []).map((row) => {
+    const lines = (row.purchase_order_lines ?? []) as Array<{
+      skus:
+        | { name: string | null; sku_code: string }
+        | { name: string | null; sku_code: string }[]
+        | null;
+    }>;
+    const skuNames: string[] = [];
+    const seen = new Set<string>();
+    for (const line of lines) {
+      const skus = line.skus;
+      const sku = Array.isArray(skus) ? skus[0] : skus;
+      const label = sku?.name?.trim() || sku?.sku_code?.trim();
+      if (label && !seen.has(label)) {
+        seen.add(label);
+        skuNames.push(label);
+      }
+    }
+    return {
+      id: row.id as string,
+      po_number: row.po_number as string,
+      status: row.status as string,
+      order_date: row.order_date as string,
+      sku_names: skuNames,
+    };
+  });
 }
 
 export async function listDeliveryNotes(
@@ -407,14 +433,11 @@ async function validateDeliveryNoteInput(
 
   const { data: po, error: poError } = await supabase
     .from("purchase_orders")
-    .select("id, po_number, supplier_id, status")
+    .select("id, po_number, status")
     .eq("id", input.po_id)
     .maybeSingle();
   if (poError) throw poError;
   if (!po) throw new Error("Purchase order not found.");
-  if (po.supplier_id !== supplier.id) {
-    throw new Error("Selected PO does not belong to the allowed supplier.");
-  }
   if (po.status === "received" || po.status === "cancelled") {
     if (!options.allowClosedPoId || po.id !== options.allowClosedPoId) {
       throw new Error("Selected PO is closed.");

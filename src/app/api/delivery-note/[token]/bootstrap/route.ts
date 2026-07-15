@@ -30,7 +30,7 @@ export async function GET(
       );
     }
 
-    const pos = await listOpenPosForDeliveryNote(supabase, supplier.id);
+    const pos = await listOpenPosForDeliveryNote(supabase);
 
     return NextResponse.json({
       supplier,

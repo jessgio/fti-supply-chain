@@ -6,13 +6,18 @@ import { FileDown, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import {
   PackagingSearchInput,
   type PackagingSearchOption,
 } from "@/components/delivery-note/packaging-search-input";
+import { PoSelectInput } from "@/components/extract-inbound-delivery-note/po-select-input";
 import { formatNumber } from "@/lib/utils";
-import type { DeliveryNote, DeliveryNoteLine, PurchaseOrder, Supplier } from "@/types/database";
+import type {
+  DeliveryNote,
+  DeliveryNoteLine,
+  ExtractInboundPoOption,
+  Supplier,
+} from "@/types/database";
 
 interface LineDraft {
   key: string;
@@ -23,7 +28,7 @@ interface LineDraft {
 
 interface BootstrapData {
   supplier: Supplier;
-  pos: Pick<PurchaseOrder, "id" | "po_number" | "status" | "order_date">[];
+  pos: ExtractInboundPoOption[];
   packagingItems: PackagingSearchOption[];
 }
 
@@ -162,6 +167,7 @@ export function DeliveryNoteWorkspace({
           po_number: note.po_number,
           status: "received",
           order_date: note.delivery_date,
+          sku_names: [],
         });
       }
     }
@@ -257,6 +263,9 @@ export function DeliveryNoteWorkspace({
     setSuccess(null);
 
     try {
+      if (!poId) {
+        throw new Error("Select a purchase order.");
+      }
       const payload = {
         po_id: poId,
         delivery_date: deliveryDate,
@@ -358,20 +367,14 @@ export function DeliveryNoteWorkspace({
           <CardHeader>
             <CardTitle>Shipment details</CardTitle>
             <CardDescription>
-              Select an open PO, set the delivery date, and name the recipient (Penerima).
+              Search or select an open packaging or filling PO, set the delivery date, and name
+              the recipient (Penerima).
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-3">
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-stone-700">PO number</span>
-              <Select value={poId} onChange={(e) => setPoId(e.target.value)} required>
-                <option value="">Select PO…</option>
-                {poOptions.map((po) => (
-                  <option key={po.id} value={po.id}>
-                    {po.po_number}
-                  </option>
-                ))}
-              </Select>
+              <PoSelectInput options={poOptions} value={poId} onChange={setPoId} />
             </label>
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-stone-700">Delivery date</span>
