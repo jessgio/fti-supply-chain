@@ -11,6 +11,7 @@ import {
   Settings,
   Building2,
   Tags,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,7 @@ import { StatusUpdateNotesLink } from "@/components/status-updates/status-update
 import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { SuppliersDialog } from "@/components/procurement/suppliers-dialog";
 import { Input } from "@/components/ui/input";
-import { formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -40,6 +41,7 @@ import {
   computePoInvoiceTotals,
   poLineOpenQty,
 } from "@/lib/procurement/po-totals";
+import { downloadProcurementXlsx } from "@/lib/procurement/export-pos-xlsx";
 import {
   STATUS_LABELS,
   STATUS_STYLES,
@@ -66,6 +68,43 @@ type SkuOption = PoSkuOption;
 
 function StatusBadge({ status }: { status: PoStatus }) {
   return <Badge className={STATUS_STYLES[status]}>{STATUS_LABELS[status]}</Badge>;
+}
+
+const STATUS_OPTIONS = STATUS_FLOW.concat("cancelled");
+
+function InlinePoStatusSelect({
+  status,
+  disabled,
+  onChange,
+}: {
+  status: PoStatus;
+  disabled?: boolean;
+  onChange: (status: PoStatus) => void;
+}) {
+  const locked = status === "received" || status === "cancelled";
+  if (locked) {
+    return <StatusBadge status={status} />;
+  }
+
+  return (
+    <select
+      value={status}
+      disabled={disabled}
+      aria-label="Change PO status"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => onChange(e.target.value as PoStatus)}
+      className={cn(
+        "h-7 max-w-[9.5rem] cursor-pointer rounded-md border-0 px-2 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-emerald-600 disabled:cursor-wait disabled:opacity-60",
+        STATUS_STYLES[status],
+      )}
+    >
+      {STATUS_OPTIONS.map((s) => (
+        <option key={s} value={s}>
+          {STATUS_LABELS[s]}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function lineTotal(line: PurchaseOrderLine, po?: PurchaseOrder): number {
@@ -117,6 +156,14 @@ function ProcurementInner() {
   const [suppliersOpen, setSuppliersOpen] = useState(false);
   const [skuQuery, setSkuQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<{ sku: string; qty: number } | null>(
+    initialSku
+      ? { sku: initialSku, qty: Number(searchParams.get("qty") ?? 0) }
+      : null,
+  );
+  const [now] = useState(() => Date.now());
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -126,12 +173,58 @@ function ProcurementInner() {
       return next;
     });
   }
-  const [prefill, setPrefill] = useState<{ sku: string; qty: number } | null>(
-    initialSku
-      ? { sku: initialSku, qty: Number(searchParams.get("qty") ?? 0) }
-      : null,
-  );
-  const [now] = useState(() => Date.now());
+
+  async function handleExportXlsx() {
+    setExporting(true);
+    setError(null);
+    try {
+      // Fetch the full list so export is complete regardless of status filter.
+      const res = await fetch("/api/procurement/pos");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load purchase orders");
+      }
+      await downloadProcurementXlsx(data.purchaseOrders ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleInlineStatusChange(poId: string, status: PoStatus) {
+    const current = pos.find((p) => p.id === poId);
+    if (!current || current.status === status) return;
+
+    setStatusUpdatingId(poId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/pos/${poId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update status");
+      const updated = data.purchaseOrder as PurchaseOrder;
+      setPos((prev) =>
+        prev.map((p) =>
+          p.id === poId
+            ? {
+                ...p,
+                ...updated,
+                // Keep list-line payload if PATCH omits nested lines.
+                lines: updated.lines ?? p.lines,
+              }
+            : p,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  }
 
   useEffect(() => {
     if (initialPoId && !poRedirected.current) {
@@ -337,7 +430,11 @@ function ProcurementInner() {
             </td>
             <td className="py-2 pr-4">{po.supplier_name ?? "—"}</td>
             <td className="py-2 pr-4">
-              <StatusBadge status={po.status} />
+              <InlinePoStatusSelect
+                status={po.status}
+                disabled={statusUpdatingId === po.id}
+                onChange={(status) => void handleInlineStatusChange(po.id, status)}
+              />
             </td>
             <td className="py-2 pr-4">
               {po.lark_instance_code ? (
@@ -452,6 +549,14 @@ function ProcurementInner() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={exporting || loading}
+            onClick={() => void handleExportXlsx()}
+          >
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting…" : "Export XLSX"}
+          </Button>
           <Button variant="outline" onClick={() => setSuppliersOpen(true)}>
             <Building2 className="h-4 w-4" />
             Suppliers
