@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { ExtractInboundDnWorkspace } from "@/components/extract-inbound-delivery-note/extract-inbound-dn-workspace";
+import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 
 export const metadata = {
-  title: "Edit Extract Delivery Note | From This Island",
+  title: "Edit Extract Inbound | From This Island",
 };
 
 export default async function EditExtractInboundDeliveryNotePage({
@@ -17,14 +18,12 @@ export default async function EditExtractInboundDeliveryNotePage({
   return (
     <PageShell className="max-w-4xl">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-stone-900">
-            Edit Extract Inbound Delivery Note
-          </h1>
-          <p className="mt-1 text-sm text-stone-600">
-            Update an existing extract delivery note and regenerate the PDF.
-          </p>
-        </div>
+        <DeliveryNoteModuleHeader
+          module="extract"
+          page="edit"
+          title="Edit Extract Inbound"
+          description="Update an existing extract delivery note and regenerate the PDF."
+        />
 
         <Suspense
           fallback={

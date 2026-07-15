@@ -59,7 +59,7 @@ export function PoExtractDeliveryNotesSection({ poId }: PoExtractDeliveryNotesSe
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle className="text-base">Extract inbound delivery notes</CardTitle>
+          <CardTitle className="text-base">Extract Inbound</CardTitle>
           <CardDescription>
             Delivery notes for shipping extract to the manufacturer linked to this PO.
           </CardDescription>

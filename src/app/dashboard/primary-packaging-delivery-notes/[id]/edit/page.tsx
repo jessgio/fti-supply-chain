@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { PrimaryPackagingDnWorkspace } from "@/components/primary-packaging-delivery-note/primary-packaging-dn-workspace";
+import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 
 export const metadata = {
-  title: "Edit Primary Packaging Delivery Note | From This Island",
+  title: "Edit Primary Packaging Inbound | From This Island",
 };
 
 export default async function EditPrimaryPackagingDeliveryNotePage({
@@ -17,14 +18,12 @@ export default async function EditPrimaryPackagingDeliveryNotePage({
   return (
     <PageShell className="max-w-4xl">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-stone-900">
-            Edit Primary Packaging Delivery Note
-          </h1>
-          <p className="mt-1 text-sm text-stone-600">
-            Update an existing primary packaging delivery note and regenerate the PDF.
-          </p>
-        </div>
+        <DeliveryNoteModuleHeader
+          module="primary"
+          page="edit"
+          title="Edit Primary Packaging Inbound"
+          description="Update an existing primary packaging delivery note and regenerate the PDF."
+        />
 
         <Suspense
           fallback={

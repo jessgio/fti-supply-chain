@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Search, Settings, Upload, FileText } from "lucide-react";
+import { Loader2, Plus, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
 import type { ExtractCode } from "@/types/database";
 
 interface DraftRow {
@@ -192,28 +192,12 @@ export default function ExtractCodesCatalogPage() {
   return (
     <PageShell className="max-w-5xl">
       <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-stone-900">Extract Code DN Catalog</h1>
-            <p className="mt-1 text-sm text-stone-600">
-              Map extract names to item codes for extract inbound delivery notes.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/dashboard/extract-inbound-delivery-notes">
-              <Button type="button" variant="outline" size="sm">
-                <FileText className="mr-2 h-4 w-4" />
-                Extract inbound delivery notes
-              </Button>
-            </Link>
-            <Link href="/dashboard/extract-inbound-delivery-notes/settings">
-              <Button type="button" variant="outline" size="sm">
-                <Settings className="mr-2 h-4 w-4" />
-                Cosmax recipient settings
-              </Button>
-            </Link>
-          </div>
-        </div>
+        <DeliveryNoteModuleHeader
+          module="extract"
+          page="catalog"
+          title="Extract Inbound Catalog"
+          description="Map extract names to item codes for extract inbound delivery notes."
+        />
 
         <Card>
         <CardHeader>

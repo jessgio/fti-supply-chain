@@ -204,7 +204,7 @@ export default function ExtractsPage() {
                 href="/dashboard/extract-inbound-delivery-notes/codes"
                 className="text-emerald-700 hover:underline"
               >
-                Extract Code DN catalog
+                Extract Inbound Catalog
               </Link>
               , then enter movements above.
             </p>

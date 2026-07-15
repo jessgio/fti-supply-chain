@@ -369,8 +369,8 @@ export function PrimaryPackagingDnWorkspace({
           <CardHeader>
             <CardTitle>
               {editingNoteId
-                ? "Edit primary packaging delivery note"
-                : "New primary packaging delivery note"}
+                ? "Edit Primary Packaging Inbound"
+                : "New Primary Packaging Inbound"}
             </CardTitle>
             <CardDescription>
               Ship primary packaging to Cosmax. Select the related PO, choose items from the

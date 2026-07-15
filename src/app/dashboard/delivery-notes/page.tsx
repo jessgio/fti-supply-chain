@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
 import type { DeliveryNote, DeliveryNotePortal } from "@/types/database";
 
 export default function DeliveryNotesDashboardPage() {
@@ -120,14 +121,12 @@ export default function DeliveryNotesDashboardPage() {
   return (
     <PageShell className="max-w-4xl">
       <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-stone-900">Secondary Packaging Delivery Notes</h1>
-          <p className="mt-1 text-sm text-stone-600">
-            External delivery note submissions and PDF history for Cosmax inbound shipments.
-          </p>
-        </div>
-      </div>
+      <DeliveryNoteModuleHeader
+        module="secondary"
+        page="notes"
+        title="Secondary Packaging Inbound"
+        description="External delivery note submissions and PDF history for Cosmax inbound shipments."
+      />
 
       <Card>
         <CardHeader>

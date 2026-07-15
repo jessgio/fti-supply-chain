@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, FileDown, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileDown, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -333,28 +332,24 @@ export function DeliveryNoteWorkspace({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      {returnTo && (
-        <Link
-          href={returnTo}
-          className="inline-flex w-fit items-center gap-2 text-sm text-stone-600 hover:text-stone-900"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to delivery notes
-        </Link>
+      {!returnTo && (
+        <div>
+          <h1 className="text-2xl font-semibold text-stone-900">
+            Secondary Packaging Inbound
+          </h1>
+          <p className="mt-1 text-sm text-stone-600">
+            {editingNoteId
+              ? `Editing ${editingNoteNumber}. Update the form below and save your changes.`
+              : `Create a delivery note for shipments from ${bootstrap.supplier.name} to Cosmax.`}
+          </p>
+        </div>
       )}
-
-      <div>
-        <h1 className="text-2xl font-semibold text-stone-900">Delivery Note</h1>
-        <p className="mt-1 text-sm text-stone-600">
-          {editingNoteId
-            ? `Editing ${editingNoteNumber}. Update the form below and save your changes.`
-            : `Create a delivery note for shipments from ${bootstrap.supplier.name} to Cosmax.`}
-        </p>
-      </div>
 
       {editingNoteId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          You are editing an existing delivery note. Saving will update the record and PDF output.
+          {editingNoteNumber
+            ? `Editing ${editingNoteNumber}. Saving will update the record and PDF output.`
+            : "You are editing an existing delivery note. Saving will update the record and PDF output."}
         </div>
       )}
 

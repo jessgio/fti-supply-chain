@@ -1,4 +1,5 @@
 import type { ProductPackagingLink, PurchaseOrder } from "@/types/database";
+import { poLineOpenQty } from "@/lib/procurement/po-totals";
 
 export interface PrimaryGoodSkuMeta {
   id: string;
@@ -233,4 +234,39 @@ export const ACTIVE_PO_STATUSES = new Set([
 
 export function isActivePurchaseOrder(po: PurchaseOrder): boolean {
   return ACTIVE_PO_STATUSES.has(po.status);
+}
+
+/**
+ * Open qty attributable to one primary product within a PO.
+ * Finished/mixed POs: only that finished-good SKU.
+ * Packaging-only POs: only packaging lines mapped to that product.
+ * Uncategorized / PD groups: full PO open qty.
+ */
+export function poOpenQtyForPrimaryGroup(
+  po: PurchaseOrder & { primaryRole?: PoPrimaryRole },
+  primarySkuId: string | null,
+  packagingToProducts: Map<string, string[]>,
+): number {
+  const lines = po.lines ?? [];
+  if (!primarySkuId) {
+    return lines.reduce((sum, line) => sum + poLineOpenQty(line), 0);
+  }
+
+  if (po.primaryRole === "packaging") {
+    return lines
+      .filter((line) =>
+        (packagingToProducts.get(line.sku_id) ?? []).includes(primarySkuId),
+      )
+      .reduce((sum, line) => sum + poLineOpenQty(line), 0);
+  }
+
+  return lines
+    .filter((line) => line.sku_id === primarySkuId)
+    .reduce((sum, line) => sum + poLineOpenQty(line), 0);
+}
+
+export function packagingSkuToProductIds(
+  links: ProductPackagingLink[],
+): Map<string, string[]> {
+  return buildPackagingToProducts(links);
 }

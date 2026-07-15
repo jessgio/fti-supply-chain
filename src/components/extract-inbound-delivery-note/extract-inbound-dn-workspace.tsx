@@ -368,7 +368,7 @@ export function ExtractInboundDnWorkspace({
         <Card>
           <CardHeader>
             <CardTitle>
-              {editingNoteId ? "Edit extract inbound delivery note" : "New extract inbound delivery note"}
+              {editingNoteId ? "Edit Extract Inbound" : "New Extract Inbound"}
             </CardTitle>
             <CardDescription>
               Ship extract from FTI to the manufacturer. Select the related PO, enter extract

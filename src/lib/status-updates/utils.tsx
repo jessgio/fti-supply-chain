@@ -111,9 +111,9 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   payment: "Payment",
   shipment: "Shipment",
   inbound: "Inbound",
-  delivery_note: "Delivery Note",
-  extract_delivery_note: "Extract DN",
-  primary_packaging_delivery_note: "Primary Packaging DN",
+  delivery_note: "Secondary Packaging Inbound",
+  extract_delivery_note: "Extract Inbound",
+  primary_packaging_delivery_note: "Primary Packaging Inbound",
 };
 
 export const ENTITY_TYPE_STYLES: Record<string, string> = {
@@ -147,7 +147,7 @@ export function entityHref(
     case "delivery_note":
       return `/dashboard/delivery-notes/${entityId}/edit`;
     case "extract_delivery_note":
-      return `/dashboard/extract-inbound-delivery-notes`;
+      return `/dashboard/extract-inbound-delivery-notes/${entityId}/edit`;
     case "primary_packaging_delivery_note":
       return `/dashboard/primary-packaging-delivery-notes/${entityId}/edit`;
     default:

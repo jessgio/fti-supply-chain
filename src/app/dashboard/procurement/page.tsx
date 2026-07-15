@@ -60,6 +60,8 @@ import type {
 import {
   groupPurchaseOrdersByPrimaryGood,
   isActivePurchaseOrder,
+  packagingSkuToProductIds,
+  poOpenQtyForPrimaryGroup,
   type PoPrimaryRole,
 } from "@/lib/procurement/po-primary-groups";
 import type { ProductPackagingLink } from "@/types/database";
@@ -369,6 +371,11 @@ function ProcurementInner() {
     return filteredPos.filter(isActivePurchaseOrder);
   }, [filteredPos, statusFilter]);
 
+  const packagingToProducts = useMemo(
+    () => packagingSkuToProductIds(packagingLinks),
+    [packagingLinks],
+  );
+
   const primaryGroups = useMemo(
     () =>
       groupPurchaseOrdersByPrimaryGood(
@@ -387,10 +394,16 @@ function ProcurementInner() {
 
   function renderPoRows(
     poList: Array<PurchaseOrder & { primaryRole?: PoPrimaryRole }>,
+    primarySkuId: string | null,
   ) {
     return poList.map((po) => {
       const isOpen = expanded.has(po.id) || skuQ.length > 0;
       const lines = po.lines ?? [];
+      const productOpenQty = poOpenQtyForPrimaryGroup(
+        po,
+        primarySkuId,
+        packagingToProducts,
+      );
       return (
         <Fragment key={po.id}>
           <tr className="border-b border-stone-100">
@@ -465,7 +478,16 @@ function ProcurementInner() {
               )}
             </td>
             <td className="py-2 pr-4">{lines.length}</td>
-            <td className="py-2 pr-4">{formatNumber(poOpenQty(po))}</td>
+            <td
+              className="py-2 pr-4"
+              title={
+                primarySkuId
+                  ? "Open quantity for this product only (not the full PO)"
+                  : undefined
+              }
+            >
+              {formatNumber(productOpenQty)}
+            </td>
             <td className="py-2 pr-4">
               {formatPoMoney(poInvoiceTotal(po), po.currency)}
             </td>
@@ -726,13 +748,20 @@ function ProcurementInner() {
                         <th className="py-2 pr-4">Status</th>
                         <th className="py-2 pr-4">AP Form</th>
                         <th className="py-2 pr-4">Lines</th>
-                        <th className="py-2 pr-4">Open qty</th>
+                        <th
+                          className="py-2 pr-4"
+                          title="Open quantity for this product only"
+                        >
+                          Open qty
+                        </th>
                         <th className="py-2 pr-4">Value</th>
                         <th className="py-2 pr-4">Expected</th>
                         <th className="py-2" />
                       </tr>
                     </thead>
-                    <tbody>{renderPoRows(group.pos)}</tbody>
+                    <tbody>
+                      {renderPoRows(group.pos, group.primarySkuId)}
+                    </tbody>
                   </table>
                 </section>
               ))}

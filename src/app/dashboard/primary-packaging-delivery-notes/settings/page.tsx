@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
 import type { PrimaryPackagingDnSettings } from "@/types/database";
 
 export default function PrimaryPackagingDnSettingsPage() {
@@ -68,25 +68,16 @@ export default function PrimaryPackagingDnSettingsPage() {
   return (
     <PageShell className="max-w-3xl">
       <div className="flex flex-col gap-6">
-        <div>
-          <Link
-            href="/dashboard/primary-packaging-delivery-notes/catalog"
-            className="mb-2 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-stone-800"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Primary Packaging DN Catalog
-          </Link>
-          <h1 className="text-2xl font-semibold text-stone-900">
-            Primary packaging recipient defaults
-          </h1>
-          <p className="mt-1 text-sm text-stone-600">
-            SHIP TO details for primary packaging delivery note PDFs (Cosmax CDC).
-          </p>
-        </div>
+        <DeliveryNoteModuleHeader
+          module="primary"
+          page="settings"
+          title="Recipient Settings"
+          description="SHIP TO details for primary packaging delivery note PDFs (Cosmax CDC)."
+        />
 
         <Card>
           <CardHeader>
-            <CardTitle>Cosmax CDC recipient</CardTitle>
+            <CardTitle>Recipient details</CardTitle>
             <CardDescription>
               Default recipient block on the PDF. The form&apos;s Penerima field overrides the
               recipient name per delivery note.

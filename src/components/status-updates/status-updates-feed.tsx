@@ -191,10 +191,10 @@ export function StatusUpdatesFeed({
               <option value="payment">Payments only</option>
               <option value="shipment">Shipments only</option>
               <option value="inbound">Inbound only</option>
-              <option value="delivery_note">Delivery notes only</option>
-              <option value="extract_delivery_note">Extract DNs only</option>
+              <option value="delivery_note">Secondary Packaging Inbound only</option>
+              <option value="extract_delivery_note">Extract Inbound only</option>
               <option value="primary_packaging_delivery_note">
-                Primary packaging DNs only
+                Primary Packaging Inbound only
               </option>
             </Select>
           </div>
