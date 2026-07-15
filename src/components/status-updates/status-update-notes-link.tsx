@@ -6,11 +6,16 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type Ref,
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { MessageSquareText } from "lucide-react";
-import type { StatusUpdate, StatusUpdateRecordEntityType } from "@/types/database";
+import { StatusUpdateNotesSnapshot } from "@/components/status-updates/status-update-notes-snapshot";
+import type {
+  StatusUpdate,
+  StatusUpdateRecordEntityType,
+} from "@/types/database";
 import {
   formatStatusUpdateTime,
   formatScopedSkuLabel,
@@ -21,27 +26,50 @@ import { cn } from "@/lib/utils";
 const SHOW_DELAY_MS = 200;
 const HIDE_DELAY_MS = 120;
 
+export interface StatusUpdateNotesSnapshotConfig {
+  poNumber: string;
+  skus: Array<{ id: string; sku_code: string; name?: string | null }>;
+  onCountsMaybeChanged?: () => void;
+}
+
 interface StatusUpdateNotesLinkProps {
   entityType: StatusUpdateRecordEntityType;
   entityId: string;
   count?: number;
+  /** Latest note id for deep-linking into Status Updates. */
+  latestNoteId?: string | null;
   className?: string;
+  /**
+   * When set (PO context), clicking the badge opens an interactive snapshot
+   * window for reading, replying, and posting notes.
+   */
+  snapshot?: StatusUpdateNotesSnapshotConfig;
+}
+
+function noteHref(noteId: string) {
+  return `/dashboard/status-updates?note=${noteId}`;
 }
 
 export function StatusUpdateNotesLink({
   entityType,
   entityId,
   count,
+  latestNoteId,
   className,
+  snapshot,
 }: StatusUpdateNotesLinkProps) {
-  const linkRef = useRef<HTMLAnchorElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [resolvedCount, setResolvedCount] = useState<number | null>(
     count ?? null,
   );
+  const [resolvedLatestId, setResolvedLatestId] = useState<string | null>(
+    latestNoteId ?? null,
+  );
   const [open, setOpen] = useState(false);
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
@@ -50,8 +78,17 @@ export function StatusUpdateNotesLink({
   useEffect(() => {
     if (count !== undefined) {
       setResolvedCount(count);
-      return;
     }
+  }, [count]);
+
+  useEffect(() => {
+    if (latestNoteId !== undefined) {
+      setResolvedLatestId(latestNoteId ?? null);
+    }
+  }, [latestNoteId]);
+
+  useEffect(() => {
+    if (count !== undefined && latestNoteId !== undefined) return;
 
     let active = true;
     async function loadCount() {
@@ -66,9 +103,14 @@ export function StatusUpdateNotesLink({
         const entry = (data.counts ?? []).find(
           (row: { entity_id: string }) => row.entity_id === entityId,
         );
-        setResolvedCount(entry?.count ?? 0);
+        if (count === undefined) {
+          setResolvedCount(entry?.count ?? 0);
+        }
+        if (latestNoteId === undefined) {
+          setResolvedLatestId(entry?.latest_id ?? null);
+        }
       } catch {
-        if (active) setResolvedCount(0);
+        if (active && count === undefined) setResolvedCount(0);
       }
     }
 
@@ -76,7 +118,7 @@ export function StatusUpdateNotesLink({
     return () => {
       active = false;
     };
-  }, [count, entityId, entityType]);
+  }, [count, entityId, entityType, latestNoteId]);
 
   const clearTimers = useCallback(() => {
     if (showTimerRef.current) {
@@ -90,7 +132,7 @@ export function StatusUpdateNotesLink({
   }, []);
 
   const updatePosition = useCallback(() => {
-    const rect = linkRef.current?.getBoundingClientRect();
+    const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
     const panelWidth = panelRef.current?.offsetWidth ?? 320;
@@ -117,8 +159,12 @@ export function StatusUpdateNotesLink({
       const res = await fetch(`/api/status-updates/by-entity?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) return;
-      setUpdates(data.updates ?? []);
-      setTotal(data.total ?? data.updates?.length ?? 0);
+      const nextUpdates = (data.updates ?? []) as StatusUpdate[];
+      setUpdates(nextUpdates);
+      setTotal(data.total ?? nextUpdates.length);
+      if (nextUpdates[0]?.id) {
+        setResolvedLatestId(nextUpdates[0].id);
+      }
     } catch {
       // preview is optional
     } finally {
@@ -127,13 +173,14 @@ export function StatusUpdateNotesLink({
   }, [entityId, entityType]);
 
   const scheduleShow = useCallback(() => {
+    if (snapshotOpen) return;
     clearTimers();
     showTimerRef.current = setTimeout(() => {
       void loadPreview();
       updatePosition();
       setOpen(true);
     }, SHOW_DELAY_MS);
-  }, [clearTimers, loadPreview, updatePosition]);
+  }, [clearTimers, loadPreview, snapshotOpen, updatePosition]);
 
   const scheduleHide = useCallback(() => {
     clearTimers();
@@ -163,36 +210,76 @@ export function StatusUpdateNotesLink({
 
   useEffect(() => clearTimers, [clearTimers]);
 
-  if (!resolvedCount) return null;
+  const hasNotes = (resolvedCount ?? 0) > 0;
+  if (!hasNotes && !snapshot) return null;
 
-  const noteLabel =
-    resolvedCount === 1 ? "1 status note" : `${resolvedCount} status notes`;
+  const noteLabel = !hasNotes
+    ? "Add status note"
+    : resolvedCount === 1
+      ? "1 status note"
+      : `${resolvedCount} status notes`;
 
-  function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+  const feedHref = resolvedLatestId
+    ? noteHref(resolvedLatestId)
+    : "/dashboard/status-updates";
+
+  function handleBadgeClick(event: MouseEvent) {
     event.stopPropagation();
+    if (!snapshot) return;
+    event.preventDefault();
+    clearTimers();
+    setOpen(false);
+    setSnapshotOpen(true);
   }
+
+  const badgeClassName = cn(
+    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+    hasNotes
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+      : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50",
+    className,
+  );
+
+  const setTriggerRef: Ref<HTMLButtonElement | HTMLAnchorElement> = (node) => {
+    triggerRef.current = node;
+  };
 
   return (
     <>
-      <Link
-        ref={linkRef}
-        href="/dashboard/status-updates"
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100",
-          className,
-        )}
-        onMouseEnter={scheduleShow}
-        onMouseLeave={scheduleHide}
-        onFocus={scheduleShow}
-        onBlur={scheduleHide}
-        onClick={handleClick}
-        aria-label={noteLabel}
-      >
-        <MessageSquareText className="h-3 w-3 shrink-0" />
-        <span>{resolvedCount}</span>
-      </Link>
+      {snapshot ? (
+        <button
+          ref={setTriggerRef}
+          type="button"
+          className={badgeClassName}
+          onMouseEnter={hasNotes ? scheduleShow : undefined}
+          onMouseLeave={hasNotes ? scheduleHide : undefined}
+          onFocus={hasNotes ? scheduleShow : undefined}
+          onBlur={hasNotes ? scheduleHide : undefined}
+          onClick={handleBadgeClick}
+          aria-label={noteLabel}
+        >
+          <MessageSquareText className="h-3 w-3 shrink-0" />
+          <span>{hasNotes ? resolvedCount : "+"}</span>
+        </button>
+      ) : (
+        <Link
+          ref={setTriggerRef}
+          href={feedHref}
+          className={badgeClassName}
+          onMouseEnter={scheduleShow}
+          onMouseLeave={scheduleHide}
+          onFocus={scheduleShow}
+          onBlur={scheduleHide}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={noteLabel}
+        >
+          <MessageSquareText className="h-3 w-3 shrink-0" />
+          <span>{resolvedCount}</span>
+        </Link>
+      )}
 
       {open &&
+        hasNotes &&
         typeof document !== "undefined" &&
         createPortal(
           <div
@@ -210,7 +297,7 @@ export function StatusUpdateNotesLink({
               <p className="text-[11px] text-stone-500">
                 {total != null && total > updates.length
                   ? `Latest ${updates.length} of ${total}`
-                  : `Latest ${Math.min(resolvedCount, 5)}`}
+                  : `Latest ${Math.min(resolvedCount ?? 0, 5)}`}
               </p>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
@@ -225,36 +312,70 @@ export function StatusUpdateNotesLink({
                       key={update.id}
                       className="border-b border-stone-100 pb-3 last:border-b-0 last:pb-0"
                     >
-                      <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-stone-500">
-                        <span className="font-medium text-stone-700">
-                          {update.author_name ?? "Unknown"}
-                        </span>
-                        <span>{formatStatusUpdateTime(update.created_at)}</span>
-                      </div>
-                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-stone-800">
-                        {statusUpdateBodyPreview(update.body)}
-                      </p>
-                      {(update.associated_products ?? update.scoped_skus ?? [])
-                        .length > 0 ? (
-                        <p className="mt-1 text-[11px] text-stone-400">
-                      {(update.associated_products ?? update.scoped_skus ?? [])
-                            .map((sku) => formatScopedSkuLabel(sku))
-                            .join(", ")}
+                      <Link
+                        href={noteHref(update.id)}
+                        className="block rounded-md outline-none hover:bg-stone-50 focus-visible:ring-2 focus-visible:ring-emerald-500"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-stone-500">
+                          <span className="font-medium text-stone-700">
+                            {update.author_name ?? "Unknown"}
+                          </span>
+                          <span>{formatStatusUpdateTime(update.created_at)}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap text-xs leading-relaxed text-stone-800">
+                          {statusUpdateBodyPreview(update.body)}
                         </p>
-                      ) : null}
+                        {(update.associated_products ?? update.scoped_skus ?? [])
+                          .length > 0 ? (
+                          <p className="mt-1 text-[11px] text-stone-400">
+                            {(
+                              update.associated_products ??
+                              update.scoped_skus ??
+                              []
+                            )
+                              .map((sku) => formatScopedSkuLabel(sku))
+                              .join(", ")}
+                          </p>
+                        ) : null}
+                      </Link>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
             <div className="shrink-0 border-t border-stone-200 bg-stone-50 px-3 py-2">
-              <p className="text-[11px] text-stone-500">
-                Open Status Updates to view the full thread.
-              </p>
+              {snapshot ? (
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-emerald-700 hover:underline"
+                  onClick={() => {
+                    setOpen(false);
+                    setSnapshotOpen(true);
+                  }}
+                >
+                  Open notes window to reply or post
+                </button>
+              ) : (
+                <p className="text-[11px] text-stone-500">
+                  Click a note to open it in Status Updates.
+                </p>
+              )}
             </div>
           </div>,
           document.body,
         )}
+
+      {snapshot && entityType === "po" ? (
+        <StatusUpdateNotesSnapshot
+          open={snapshotOpen}
+          onClose={() => setSnapshotOpen(false)}
+          poId={entityId}
+          poNumber={snapshot.poNumber}
+          skus={snapshot.skus}
+          onCountsMaybeChanged={snapshot.onCountsMaybeChanged}
+        />
+      ) : null}
     </>
   );
 }

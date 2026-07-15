@@ -936,7 +936,8 @@ export type StatusUpdateEntityType =
   | "shipment"
   | "inbound"
   | "delivery_note"
-  | "extract_delivery_note";
+  | "extract_delivery_note"
+  | "primary_packaging_delivery_note";
 
 export interface StatusUpdatePoProduct {
   sku_id: string;
@@ -1030,6 +1031,7 @@ export interface StatusUpdateEntityCount {
   entity_id: string;
   count: number;
   latest_at: string | null;
+  latest_id: string | null;
 }
 
 export type StatusUpdateRecordEntityType = "po" | "payment" | "shipment";
@@ -1345,6 +1347,46 @@ export interface ExtractInboundPoOption {
   status: string;
   order_date: string;
   sku_names: string[];
+}
+
+export interface PrimaryPackagingInboundCosmax {
+  id: string;
+  item_code: string;
+  product_name: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface PrimaryPackagingDnSettings {
+  id: string;
+  recipient_company: string;
+  recipient_address: string;
+  recipient_pic_name: string | null;
+  recipient_phone: string | null;
+  recipient_email: string | null;
+  updated_at?: string;
+}
+
+export interface PrimaryPackagingDeliveryNoteLine {
+  id: string;
+  delivery_note_id: string;
+  packaging_item_id: string | null;
+  item_code: string;
+  product_name: string;
+  cartons: number;
+  pcs_per_carton: number;
+  total_pcs: number;
+}
+
+export interface PrimaryPackagingDeliveryNote {
+  id: string;
+  dn_number: string;
+  po_id: string | null;
+  po_number: string;
+  delivery_date: string;
+  recipient_name: string;
+  created_at?: string;
+  lines?: PrimaryPackagingDeliveryNoteLine[];
 }
 
 export interface ProductExtractFormula {

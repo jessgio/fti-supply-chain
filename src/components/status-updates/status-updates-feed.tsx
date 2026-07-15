@@ -193,6 +193,9 @@ export function StatusUpdatesFeed({
               <option value="inbound">Inbound only</option>
               <option value="delivery_note">Delivery notes only</option>
               <option value="extract_delivery_note">Extract DNs only</option>
+              <option value="primary_packaging_delivery_note">
+                Primary packaging DNs only
+              </option>
             </Select>
           </div>
         </CardHeader>

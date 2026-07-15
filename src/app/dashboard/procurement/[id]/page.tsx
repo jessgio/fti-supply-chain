@@ -241,7 +241,18 @@ export default function PurchaseOrderPage() {
                 {po.lark_serial_number ? ` · ${po.lark_serial_number}` : ""}
               </Badge>
             ) : null}
-            <StatusUpdateNotesLink entityType="po" entityId={poId} />
+            <StatusUpdateNotesLink
+              entityType="po"
+              entityId={poId}
+              snapshot={{
+                poNumber: po.po_number,
+                skus: (po.lines ?? []).map((line) => ({
+                  id: line.sku_id,
+                  sku_code: line.sku_code ?? "",
+                  name: line.sku_name,
+                })),
+              }}
+            />
             <Button
               size="sm"
               variant="outline"

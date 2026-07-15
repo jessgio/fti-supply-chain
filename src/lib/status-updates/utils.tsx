@@ -113,6 +113,7 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   inbound: "Inbound",
   delivery_note: "Delivery Note",
   extract_delivery_note: "Extract DN",
+  primary_packaging_delivery_note: "Primary Packaging DN",
 };
 
 export const ENTITY_TYPE_STYLES: Record<string, string> = {
@@ -122,6 +123,7 @@ export const ENTITY_TYPE_STYLES: Record<string, string> = {
   inbound: "bg-emerald-100 text-emerald-800",
   delivery_note: "bg-rose-100 text-rose-800",
   extract_delivery_note: "bg-orange-100 text-orange-800",
+  primary_packaging_delivery_note: "bg-amber-100 text-amber-800",
 };
 
 export function entityHref(
@@ -146,6 +148,8 @@ export function entityHref(
       return `/dashboard/delivery-notes/${entityId}/edit`;
     case "extract_delivery_note":
       return `/dashboard/extract-inbound-delivery-notes`;
+    case "primary_packaging_delivery_note":
+      return `/dashboard/primary-packaging-delivery-notes/${entityId}/edit`;
     default:
       return null;
   }

@@ -145,6 +145,19 @@ const links: NavItem[] = [
         roles: ["admin", "supply_chain"],
       },
       {
+        href: "/dashboard/primary-packaging-delivery-notes/catalog",
+        label: "Primary Packaging DN Catalog",
+        icon: Layers,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/primary-packaging-delivery-notes",
+        label: "Primary Packaging DN",
+        icon: FileText,
+        roles: ["admin", "supply_chain"],
+        exact: true,
+      },
+      {
         href: "/dashboard/extract-inbound-delivery-notes/codes",
         label: "Extract Code DN Catalog",
         icon: FlaskConical,

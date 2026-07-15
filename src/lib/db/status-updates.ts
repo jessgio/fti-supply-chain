@@ -805,6 +805,7 @@ const CONNECTED_ENTITY_TYPES = new Set<StatusUpdateEntityType>([
   "inbound",
   "delivery_note",
   "extract_delivery_note",
+  "primary_packaging_delivery_note",
 ]);
 
 export function parseConnectedRefs(
@@ -1029,9 +1030,19 @@ async function resolveEntityLabels(
   const extractDeliveryNoteIds = refs
     .filter((r) => r.entity_type === "extract_delivery_note")
     .map((r) => r.entity_id);
+  const primaryPackagingDnIds = refs
+    .filter((r) => r.entity_type === "primary_packaging_delivery_note")
+    .map((r) => r.entity_id);
 
-  const [pos, payments, shipments, inbound, deliveryNotes, extractDeliveryNotes] =
-    await Promise.all([
+  const [
+    pos,
+    payments,
+    shipments,
+    inbound,
+    deliveryNotes,
+    extractDeliveryNotes,
+    primaryPackagingDns,
+  ] = await Promise.all([
     poIds.length
       ? supabase.from("purchase_orders").select("id, po_number").in("id", poIds)
       : Promise.resolve({ data: [], error: null }),
@@ -1065,6 +1076,12 @@ async function resolveEntityLabels(
           .select("id, dn_number")
           .in("id", extractDeliveryNoteIds)
       : Promise.resolve({ data: [], error: null }),
+    primaryPackagingDnIds.length
+      ? supabase
+          .from("primary_packaging_delivery_notes")
+          .select("id, dn_number")
+          .in("id", primaryPackagingDnIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   for (const row of pos.data ?? []) {
@@ -1087,6 +1104,9 @@ async function resolveEntityLabels(
   }
   for (const row of extractDeliveryNotes.data ?? []) {
     labels.set(`extract_delivery_note:${row.id}`, row.dn_number);
+  }
+  for (const row of primaryPackagingDns.data ?? []) {
+    labels.set(`primary_packaging_delivery_note:${row.id}`, row.dn_number);
   }
 
   return labels;
@@ -1252,6 +1272,23 @@ export async function listRelatedEntitiesForSku(
         entity_type: "extract_delivery_note",
         label: note.dn_number,
         sublabel: "Extract delivery note",
+        date: note.delivery_date,
+        po_id: note.po_id,
+      });
+    }
+
+    const { data: primaryPackagingDns, error: ppdnError } = await supabase
+      .from("primary_packaging_delivery_notes")
+      .select("id, dn_number, delivery_date, po_id")
+      .in("po_id", [...activePoIds])
+      .order("delivery_date", { ascending: false });
+    if (ppdnError) throw ppdnError;
+    for (const note of primaryPackagingDns ?? []) {
+      entities.push({
+        id: note.id,
+        entity_type: "primary_packaging_delivery_note",
+        label: note.dn_number,
+        sublabel: "Primary packaging delivery note",
         date: note.delivery_date,
         po_id: note.po_id,
       });
@@ -1428,18 +1465,21 @@ export async function listStatusUpdateCountsByEntity(
   ];
   if (uniqueIds.length === 0) return [];
 
-  const counts = new Map<string, { count: number; latest_at: string | null }>();
+  const counts = new Map<
+    string,
+    { count: number; latest_at: string | null; latest_id: string | null }
+  >();
 
   if (entityType === "po") {
     const [directRes, linkedRes] = await Promise.all([
       supabase
         .from("status_updates")
-        .select("entity_id, created_at")
+        .select("id, entity_id, created_at")
         .eq("entity_type", "po")
         .in("entity_id", uniqueIds),
       supabase
         .from("status_update_refs")
-        .select("entity_id, status_updates ( created_at )")
+        .select("entity_id, status_updates ( id, created_at )")
         .eq("entity_type", "po")
         .in("entity_id", uniqueIds),
     ]);
@@ -1447,75 +1487,87 @@ export async function listStatusUpdateCountsByEntity(
     if (linkedRes.error) throw linkedRes.error;
 
     for (const row of directRes.data ?? []) {
-      const existing = counts.get(row.entity_id) ?? { count: 0, latest_at: null };
+      const existing = counts.get(row.entity_id) ?? {
+        count: 0,
+        latest_at: null,
+        latest_id: null,
+      };
       existing.count += 1;
       if (
         !existing.latest_at ||
         new Date(row.created_at).getTime() > new Date(existing.latest_at).getTime()
       ) {
         existing.latest_at = row.created_at;
+        existing.latest_id = row.id;
       }
       counts.set(row.entity_id, existing);
     }
 
     for (const row of linkedRes.data ?? []) {
       const update = row.status_updates as unknown as
-        | { created_at: string }
-        | { created_at: string }[]
+        | { id: string; created_at: string }
+        | { id: string; created_at: string }[]
         | null;
-      const createdAt = Array.isArray(update)
-        ? (update[0]?.created_at ?? null)
-        : (update?.created_at ?? null);
-      if (!createdAt) continue;
+      const linked = Array.isArray(update) ? (update[0] ?? null) : update;
+      if (!linked?.created_at) continue;
 
-      const existing = counts.get(row.entity_id) ?? { count: 0, latest_at: null };
+      const existing = counts.get(row.entity_id) ?? {
+        count: 0,
+        latest_at: null,
+        latest_id: null,
+      };
       existing.count += 1;
       if (
         !existing.latest_at ||
-        new Date(createdAt).getTime() > new Date(existing.latest_at).getTime()
+        new Date(linked.created_at).getTime() >
+          new Date(existing.latest_at).getTime()
       ) {
-        existing.latest_at = createdAt;
+        existing.latest_at = linked.created_at;
+        existing.latest_id = linked.id;
       }
       counts.set(row.entity_id, existing);
     }
   } else {
     const { data, error } = await supabase
       .from("status_update_refs")
-      .select("entity_id, status_updates ( created_at )")
+      .select("entity_id, status_updates ( id, created_at )")
       .eq("entity_type", entityType)
       .in("entity_id", uniqueIds);
     if (error) throw error;
 
     for (const row of data ?? []) {
       const update = row.status_updates as unknown as
-        | { created_at: string }
-        | { created_at: string }[]
+        | { id: string; created_at: string }
+        | { id: string; created_at: string }[]
         | null;
-      const createdAt = Array.isArray(update)
-        ? (update[0]?.created_at ?? null)
-        : (update?.created_at ?? null);
-      if (!createdAt) continue;
+      const linked = Array.isArray(update) ? (update[0] ?? null) : update;
+      if (!linked?.created_at) continue;
 
-      const existing = counts.get(row.entity_id) ?? { count: 0, latest_at: null };
+      const existing = counts.get(row.entity_id) ?? {
+        count: 0,
+        latest_at: null,
+        latest_id: null,
+      };
       existing.count += 1;
       if (
         !existing.latest_at ||
-        new Date(createdAt).getTime() > new Date(existing.latest_at).getTime()
+        new Date(linked.created_at).getTime() >
+          new Date(existing.latest_at).getTime()
       ) {
-        existing.latest_at = createdAt;
+        existing.latest_at = linked.created_at;
+        existing.latest_id = linked.id;
       }
       counts.set(row.entity_id, existing);
     }
   }
 
-  return uniqueIds
-    .map((entity_id) => {
-      const entry = counts.get(entity_id);
-      return {
-        entity_id,
-        count: entry?.count ?? 0,
-        latest_at: entry?.latest_at ?? null,
-      };
-    })
-    .filter((entry) => entry.count > 0);
+  return uniqueIds.map((entity_id) => {
+    const entry = counts.get(entity_id);
+    return {
+      entity_id,
+      count: entry?.count ?? 0,
+      latest_at: entry?.latest_at ?? null,
+      latest_id: entry?.latest_id ?? null,
+    };
+  });
 }

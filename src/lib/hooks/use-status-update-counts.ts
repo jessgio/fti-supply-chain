@@ -9,6 +9,7 @@ import type {
 export function useStatusUpdateCounts(
   entityType: StatusUpdateRecordEntityType,
   entityIds: string[],
+  refreshKey = 0,
 ): Map<string, StatusUpdateEntityCount> {
   const idsKey = useMemo(
     () => [...new Set(entityIds.filter(Boolean))].sort().join(","),
@@ -48,7 +49,7 @@ export function useStatusUpdateCounts(
     return () => {
       active = false;
     };
-  }, [entityType, idsKey]);
+  }, [entityType, idsKey, refreshKey]);
 
   return counts;
 }

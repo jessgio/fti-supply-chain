@@ -158,6 +158,7 @@ function ProcurementInner() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [noteCountsKey, setNoteCountsKey] = useState(0);
   const [prefill, setPrefill] = useState<{ sku: string; qty: number } | null>(
     initialSku
       ? { sku: initialSku, qty: Number(searchParams.get("qty") ?? 0) }
@@ -318,7 +319,7 @@ function ProcurementInner() {
   }, [pos, now]);
 
   const poIds = useMemo(() => pos.map((po) => po.id), [pos]);
-  const poNoteCounts = useStatusUpdateCounts("po", poIds);
+  const poNoteCounts = useStatusUpdateCounts("po", poIds, noteCountsKey);
 
   const skuQ = skuQuery.trim().toLowerCase();
 
@@ -424,6 +425,17 @@ function ProcurementInner() {
                   entityType="po"
                   entityId={po.id}
                   count={poNoteCounts.get(po.id)?.count}
+                  latestNoteId={poNoteCounts.get(po.id)?.latest_id}
+                  snapshot={{
+                    poNumber: po.po_number,
+                    skus: (lines ?? []).map((line) => ({
+                      id: line.sku_id,
+                      sku_code: line.sku_code ?? "",
+                      name: line.sku_name,
+                    })),
+                    onCountsMaybeChanged: () =>
+                      setNoteCountsKey((key) => key + 1),
+                  }}
                 />
                 <PoRoleBadge role={po.primaryRole} />
               </div>
