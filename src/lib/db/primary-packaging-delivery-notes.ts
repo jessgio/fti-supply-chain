@@ -5,22 +5,35 @@ import type {
   PrimaryPackagingDnSettings,
   PrimaryPackagingInboundCosmax,
 } from "@/types/database";
-import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
 import { PRIMARY_PACKAGING_DN_SETTINGS_ID } from "@/lib/primary-packaging-delivery-note/constants";
+import {
+  createPackagingCatalogItem,
+  importPackagingCatalogRows,
+  listPackagingCatalogItems,
+  updatePackagingCatalogItem,
+  type CreatePackagingCatalogItemInput,
+  type PackagingCatalogImportResult,
+  type PackagingCatalogImportRow,
+  type UpdatePackagingCatalogItemInput,
+} from "@/lib/packaging-dn/catalog";
+import { generatePackagingDnNumber } from "@/lib/packaging-dn/dn-number";
 import { listOpenPosForPackagingDn } from "@/lib/packaging-dn/open-pos";
+import {
+  getPackagingDnSettings,
+  updatePackagingDnSettings,
+  type UpdatePackagingDnSettingsInput,
+} from "@/lib/packaging-dn/settings";
+import { validatePackagingDnPoAndLines } from "@/lib/packaging-dn/validate-lines";
 
 export { listOpenPosForPackagingDn as listOpenPosForPrimaryPackaging };
+
+const CATALOG_TABLE = "primary_packaging_inbound_cosmax" as const;
 
 const NOTE_SELECT =
   "id, dn_number, po_id, po_number, delivery_date, recipient_name, created_at";
 
 const LINE_SELECT =
   "id, delivery_note_id, packaging_item_id, item_code, product_name, cartons, pcs_per_carton, total_pcs";
-
-const PACKAGING_SELECT = "id, item_code, product_name, is_active, created_at";
-
-const SETTINGS_SELECT =
-  "id, recipient_company, recipient_address, recipient_pic_name, recipient_phone, recipient_email, updated_at";
 
 export interface PrimaryPackagingLineInput {
   packaging_item_id: string;
@@ -43,92 +56,19 @@ interface ValidateOptions {
   allowInactivePackagingIds?: string[];
 }
 
-interface ValidatedInput {
-  po: { id: string; po_number: string };
-  lineRows: Array<{
-    packaging_item_id: string;
-    item_code: string;
-    product_name: string;
-    cartons: number;
-    pcs_per_carton: number;
-    total_pcs: number;
-  }>;
-}
-
-function generateDnNumber(): string {
-  const date = new Date();
-  const stamp =
-    `${date.getFullYear()}` +
-    `${String(date.getMonth() + 1).padStart(2, "0")}` +
-    `${String(date.getDate()).padStart(2, "0")}`;
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `PPDN-${stamp}-${rand}`;
-}
-
-function normalizeItemCode(code: string): string {
-  return code.trim().toUpperCase();
-}
-
 async function validateInput(
   supabase: SupabaseClient,
   input: CreatePrimaryPackagingDeliveryNoteInput,
   options: ValidateOptions = {},
-): Promise<ValidatedInput> {
-  const { data: po, error: poError } = await supabase
-    .from("purchase_orders")
-    .select("id, po_number, status")
-    .eq("id", input.po_id)
-    .maybeSingle();
-  if (poError) throw poError;
-  if (!po) throw new Error("Purchase order not found.");
-  if (po.status === "received" || po.status === "cancelled") {
-    if (!options.allowClosedPoId || po.id !== options.allowClosedPoId) {
-      throw new Error("Selected PO is closed.");
-    }
-  }
-  if (input.lines.length === 0) {
-    throw new Error("Add at least one line item.");
-  }
-
-  const packagingIds = input.lines.map((l) => l.packaging_item_id);
-  const { data: packagingRows, error: packagingError } = await supabase
-    .from("primary_packaging_inbound_cosmax")
-    .select("id, item_code, product_name, is_active")
-    .in("id", packagingIds);
-  if (packagingError) throw packagingError;
-
-  const packagingById = new Map(
-    (packagingRows ?? []).map((row) => [row.id as string, row]),
+) {
+  const { po, lineRows } = await validatePackagingDnPoAndLines(
+    supabase,
+    CATALOG_TABLE,
+    input,
+    options,
   );
-  const allowedInactive = new Set(options.allowInactivePackagingIds ?? []);
-
-  const lineRows = input.lines.map((line) => {
-    const item = packagingById.get(line.packaging_item_id);
-    if (!item) {
-      throw new Error("One or more packaging items are invalid.");
-    }
-    if (!item.is_active && !allowedInactive.has(line.packaging_item_id)) {
-      throw new Error("One or more packaging items are invalid.");
-    }
-    if (!Number.isInteger(line.cartons) || line.cartons <= 0) {
-      throw new Error("Carton count must be a positive whole number.");
-    }
-    if (!Number.isInteger(line.pcs_per_carton) || line.pcs_per_carton <= 0) {
-      throw new Error("Pieces per carton must be a positive whole number.");
-    }
-
-    return {
-      packaging_item_id: line.packaging_item_id,
-      item_code: item.item_code as string,
-      product_name: item.product_name as string,
-      cartons: line.cartons,
-      pcs_per_carton: line.pcs_per_carton,
-      total_pcs: line.cartons * line.pcs_per_carton,
-    };
-  });
-
   return {
-    po: { id: po.id as string, po_number: po.po_number as string },
+    po: { id: po.id, po_number: po.po_number },
     lineRows,
   };
 }
@@ -136,179 +76,74 @@ async function validateInput(
 export async function getPrimaryPackagingDnSettings(
   supabase: SupabaseClient,
 ): Promise<PrimaryPackagingDnSettings> {
-  const { data, error } = await supabase
-    .from("primary_packaging_dn_settings")
-    .select(SETTINGS_SELECT)
-    .eq("id", PRIMARY_PACKAGING_DN_SETTINGS_ID)
-    .single();
-  if (error) throw error;
-  return data as PrimaryPackagingDnSettings;
+  return getPackagingDnSettings(
+    supabase,
+    "primary_packaging_dn_settings",
+    PRIMARY_PACKAGING_DN_SETTINGS_ID,
+  ) as Promise<PrimaryPackagingDnSettings>;
 }
 
-export interface UpdatePrimaryPackagingDnSettingsInput {
-  recipient_company?: string;
-  recipient_address?: string;
-  recipient_pic_name?: string | null;
-  recipient_phone?: string | null;
-  recipient_email?: string | null;
-}
+export type UpdatePrimaryPackagingDnSettingsInput = UpdatePackagingDnSettingsInput;
 
 export async function updatePrimaryPackagingDnSettings(
   supabase: SupabaseClient,
   input: UpdatePrimaryPackagingDnSettingsInput,
 ): Promise<PrimaryPackagingDnSettings> {
-  const patch: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
-  };
-  if (input.recipient_company !== undefined) {
-    patch.recipient_company = input.recipient_company.trim();
-  }
-  if (input.recipient_address !== undefined) {
-    patch.recipient_address = input.recipient_address.trim();
-  }
-  if (input.recipient_pic_name !== undefined) {
-    patch.recipient_pic_name = input.recipient_pic_name?.trim() || null;
-  }
-  if (input.recipient_phone !== undefined) {
-    patch.recipient_phone = input.recipient_phone?.trim() || null;
-  }
-  if (input.recipient_email !== undefined) {
-    patch.recipient_email = input.recipient_email?.trim() || null;
-  }
-
-  const { data, error } = await supabase
-    .from("primary_packaging_dn_settings")
-    .update(patch)
-    .eq("id", PRIMARY_PACKAGING_DN_SETTINGS_ID)
-    .select(SETTINGS_SELECT)
-    .single();
-  if (error) throw error;
-  return data as PrimaryPackagingDnSettings;
+  return updatePackagingDnSettings(
+    supabase,
+    "primary_packaging_dn_settings",
+    PRIMARY_PACKAGING_DN_SETTINGS_ID,
+    input,
+  ) as Promise<PrimaryPackagingDnSettings>;
 }
 
 export async function listPrimaryPackagingItems(
   supabase: SupabaseClient,
   activeOnly = true,
 ): Promise<PrimaryPackagingInboundCosmax[]> {
-  let query = supabase
-    .from("primary_packaging_inbound_cosmax")
-    .select(PACKAGING_SELECT)
-    .order("item_code");
-  if (activeOnly) query = query.eq("is_active", true);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as PrimaryPackagingInboundCosmax[];
+  return listPackagingCatalogItems(
+    supabase,
+    CATALOG_TABLE,
+    activeOnly,
+  ) as Promise<PrimaryPackagingInboundCosmax[]>;
 }
 
-export interface CreatePrimaryPackagingItemInput {
-  item_code: string;
-  product_name: string;
-}
+export type CreatePrimaryPackagingItemInput = CreatePackagingCatalogItemInput;
 
 export async function createPrimaryPackagingItem(
   supabase: SupabaseClient,
   input: CreatePrimaryPackagingItemInput,
 ): Promise<PrimaryPackagingInboundCosmax> {
-  const item_code = normalizeItemCode(input.item_code);
-  const product_name = fixUtf8Mojibake(input.product_name.trim());
-  if (item_code.length !== 12) {
-    throw new Error("Item code must be exactly 12 characters.");
-  }
-  if (!product_name) {
-    throw new Error("Product name is required.");
-  }
-
-  const { data, error } = await supabase
-    .from("primary_packaging_inbound_cosmax")
-    .insert({ item_code, product_name })
-    .select(PACKAGING_SELECT)
-    .single();
-  if (error) throw error;
-  return data as PrimaryPackagingInboundCosmax;
+  return createPackagingCatalogItem(
+    supabase,
+    CATALOG_TABLE,
+    input,
+  ) as Promise<PrimaryPackagingInboundCosmax>;
 }
 
-export interface UpdatePrimaryPackagingItemInput {
-  item_code?: string;
-  product_name?: string;
-  is_active?: boolean;
-}
+export type UpdatePrimaryPackagingItemInput = UpdatePackagingCatalogItemInput;
 
 export async function updatePrimaryPackagingItem(
   supabase: SupabaseClient,
   id: string,
   input: UpdatePrimaryPackagingItemInput,
 ): Promise<PrimaryPackagingInboundCosmax> {
-  const patch: Record<string, unknown> = {};
-  if (input.item_code !== undefined) {
-    const item_code = normalizeItemCode(input.item_code);
-    if (item_code.length !== 12) {
-      throw new Error("Item code must be exactly 12 characters.");
-    }
-    patch.item_code = item_code;
-  }
-  if (input.product_name !== undefined) {
-    const product_name = fixUtf8Mojibake(input.product_name.trim());
-    if (!product_name) throw new Error("Product name is required.");
-    patch.product_name = product_name;
-  }
-  if (input.is_active !== undefined) patch.is_active = input.is_active;
-
-  const { data, error } = await supabase
-    .from("primary_packaging_inbound_cosmax")
-    .update(patch)
-    .eq("id", id)
-    .select(PACKAGING_SELECT)
-    .single();
-  if (error) throw error;
-  return data as PrimaryPackagingInboundCosmax;
+  return updatePackagingCatalogItem(
+    supabase,
+    CATALOG_TABLE,
+    id,
+    input,
+  ) as Promise<PrimaryPackagingInboundCosmax>;
 }
 
-export interface PrimaryPackagingCatalogImportRow {
-  item_code: string;
-  product_name: string;
-}
-
-export interface PrimaryPackagingCatalogImportResult {
-  inserted: number;
-  updated: number;
-  total: number;
-}
+export type PrimaryPackagingCatalogImportRow = PackagingCatalogImportRow;
+export type PrimaryPackagingCatalogImportResult = PackagingCatalogImportResult;
 
 export async function importPrimaryPackagingCatalog(
   supabase: SupabaseClient,
   rows: PrimaryPackagingCatalogImportRow[],
 ): Promise<PrimaryPackagingCatalogImportResult> {
-  if (rows.length === 0) {
-    throw new Error("No valid rows to import.");
-  }
-
-  const codes = rows.map((row) => row.item_code);
-  const { data: existing, error: existingError } = await supabase
-    .from("primary_packaging_inbound_cosmax")
-    .select("item_code")
-    .in("item_code", codes);
-  if (existingError) throw existingError;
-
-  const existingCodes = new Set((existing ?? []).map((row) => row.item_code as string));
-
-  const { error } = await supabase.from("primary_packaging_inbound_cosmax").upsert(
-    rows.map((row) => ({
-      item_code: row.item_code,
-      product_name: row.product_name,
-      is_active: true,
-    })),
-    { onConflict: "item_code" },
-  );
-  if (error) throw error;
-
-  let inserted = 0;
-  let updated = 0;
-  for (const row of rows) {
-    if (existingCodes.has(row.item_code)) updated += 1;
-    else inserted += 1;
-  }
-
-  return { inserted, updated, total: rows.length };
+  return importPackagingCatalogRows(supabase, CATALOG_TABLE, rows);
 }
 
 export async function listPrimaryPackagingDeliveryNotes(
@@ -353,7 +188,7 @@ export async function createPrimaryPackagingDeliveryNote(
 ): Promise<PrimaryPackagingDeliveryNote> {
   const { po, lineRows } = await validateInput(supabase, input);
 
-  const dnNumber = generateDnNumber();
+  const dnNumber = generatePackagingDnNumber("PPDN");
   const { data: note, error: noteError } = await supabase
     .from("primary_packaging_delivery_notes")
     .insert({

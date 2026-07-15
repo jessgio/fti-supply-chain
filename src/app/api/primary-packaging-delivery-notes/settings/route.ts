@@ -4,6 +4,7 @@ import {
   getPrimaryPackagingDnSettings,
   updatePrimaryPackagingDnSettings,
 } from "@/lib/db/primary-packaging-delivery-notes";
+import { packagingDnSettingsPatchError } from "@/lib/packaging-dn/settings";
 import { requireReadRole, requireWriteRole } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 
@@ -26,6 +27,11 @@ export async function PATCH(request: Request) {
     if (denied) return denied;
 
     const body = await request.json();
+    const validationError = packagingDnSettingsPatchError(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
     const supabase = createAdminClient();
     const settings = await updatePrimaryPackagingDnSettings(supabase, {
       recipient_company: body.recipient_company,

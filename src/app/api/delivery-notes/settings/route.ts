@@ -5,6 +5,7 @@ import {
   getDeliveryNoteSettings,
   updateDeliveryNoteSettings,
 } from "@/lib/db/delivery-notes";
+import { packagingDnSettingsPatchError } from "@/lib/packaging-dn/settings";
 import { requireReadRole, requireWriteRole } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 
@@ -27,17 +28,9 @@ export async function PATCH(request: Request) {
     if (denied) return denied;
 
     const body = await request.json();
-    if (body?.recipient_company !== undefined && !String(body.recipient_company).trim()) {
-      return NextResponse.json(
-        { error: "Recipient company is required." },
-        { status: 400 },
-      );
-    }
-    if (body?.recipient_address !== undefined && !String(body.recipient_address).trim()) {
-      return NextResponse.json(
-        { error: "Recipient address is required." },
-        { status: 400 },
-      );
+    const validationError = packagingDnSettingsPatchError(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
     const supabase = createAdminClient();
