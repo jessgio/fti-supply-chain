@@ -44,7 +44,7 @@ export type UpdateDeliveryNoteInput = CreateDeliveryNoteInput;
 
 interface ValidatedDeliveryNoteInput {
   supplier: Supplier;
-  po: { id: string; po_number: string; supplier_id: string; status: string };
+  po: { id: string; po_number: string; status: string };
   lineRows: Array<{
     packaging_item_id: string;
     item_code: string;
