@@ -5,7 +5,6 @@ import type {
   DeliveryNoteLine,
   DeliveryNotePortal,
   DeliveryNoteSettings,
-  ExtractInboundPoOption,
   SecondaryPackagingInboundCosmax,
   Supplier,
 } from "@/types/database";
@@ -14,7 +13,10 @@ import {
   DELIVERY_NOTE_SETTINGS_ID,
   DELIVERY_NOTE_SUPPLIER_NAME,
 } from "@/lib/delivery-note/constants";
+import { listOpenPosForPackagingDn } from "@/lib/packaging-dn/open-pos";
 import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
+
+export { listOpenPosForPackagingDn as listOpenPosForDeliveryNote };
 
 const NOTE_SELECT =
   "id, dn_number, po_id, po_number, supplier_id, delivery_date, recipient_name, created_at";
@@ -329,46 +331,6 @@ export async function getMargasetaSupplier(
     .maybeSingle();
   if (error) throw error;
   return data as Supplier | null;
-}
-
-export async function listOpenPosForDeliveryNote(
-  supabase: SupabaseClient,
-): Promise<ExtractInboundPoOption[]> {
-  const { data, error } = await supabase
-    .from("purchase_orders")
-    .select(
-      "id, po_number, status, order_date, purchase_order_lines ( skus ( name, sku_code ) )",
-    )
-    .not("status", "in", '("received","cancelled")')
-    .order("order_date", { ascending: false });
-  if (error) throw error;
-
-  return (data ?? []).map((row) => {
-    const lines = (row.purchase_order_lines ?? []) as Array<{
-      skus:
-        | { name: string | null; sku_code: string }
-        | { name: string | null; sku_code: string }[]
-        | null;
-    }>;
-    const skuNames: string[] = [];
-    const seen = new Set<string>();
-    for (const line of lines) {
-      const skus = line.skus;
-      const sku = Array.isArray(skus) ? skus[0] : skus;
-      const label = sku?.name?.trim() || sku?.sku_code?.trim();
-      if (label && !seen.has(label)) {
-        seen.add(label);
-        skuNames.push(label);
-      }
-    }
-    return {
-      id: row.id as string,
-      po_number: row.po_number as string,
-      status: row.status as string,
-      order_date: row.order_date as string,
-      sku_names: skuNames,
-    };
-  });
 }
 
 export async function listDeliveryNotes(

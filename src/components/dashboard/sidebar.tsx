@@ -125,11 +125,29 @@ const links: NavItem[] = [
         exact: true,
       },
       {
+        href: "/dashboard/extracts/formulas",
+        label: "Extract Formulas",
+        icon: Calculator,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/extracts/mappings",
+        label: "Extract Action Codes",
+        icon: Link2,
+        roles: ["admin", "supply_chain"],
+      },
+      {
         href: "/dashboard/packaging",
         label: "Packaging",
         icon: Layers,
         roles: ["admin", "supply_chain"],
         exact: true,
+      },
+      {
+        href: "/dashboard/packaging/links",
+        label: "Packaging BOM",
+        icon: Link2,
+        roles: ["admin", "supply_chain"],
       },
     ],
   },
@@ -143,6 +161,13 @@ const links: NavItem[] = [
       {
         href: "/dashboard/extract-inbound-delivery-notes",
         label: "Extract Inbound",
+        icon: FlaskConical,
+        roles: ["admin", "supply_chain"],
+        exact: true,
+      },
+      {
+        href: "/dashboard/extract-inbound-delivery-notes/codes",
+        label: "Extract Catalog",
         icon: FlaskConical,
         roles: ["admin", "supply_chain"],
       },
@@ -195,31 +220,20 @@ const links: NavItem[] = [
   },
   {
     href: "/dashboard/mappings",
-    label: "SKU Mappings",
+    label: "Master Data",
     icon: Boxes,
+    exact: true,
     children: [
+      {
+        href: "/dashboard/mappings",
+        label: "SKUs & Franchises",
+        icon: Boxes,
+        exact: true,
+      },
       {
         href: "/dashboard/mappings/cogs",
         label: "COGS",
         icon: Banknote,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/extracts/formulas",
-        label: "Extract Formulas",
-        icon: Calculator,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/extracts/mappings",
-        label: "Extract Mappings",
-        icon: Link2,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/packaging/links",
-        label: "Packaging BOM",
-        icon: Link2,
         roles: ["admin", "supply_chain"],
       },
     ],

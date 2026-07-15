@@ -289,13 +289,15 @@ export default function MappingsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-8">
       <div>
-        <h1 className="text-2xl font-semibold text-stone-900">SKU mappings</h1>
+        <h1 className="text-2xl font-semibold text-stone-900">
+          SKUs & Franchises
+        </h1>
         <p className="mt-1 text-stone-600">
-          Product franchises are built from single SKUs only. Add SKUs manually
-          for new products, or upload franchise and bundle mappings from Excel.
-          Mark retired SKUs as inactive to keep them in historical sales and
-          bundle rules without showing them in the inventory forecast. Set unit
-          costs from{" "}
+          Product names, franchises, and bundle flags for forecasting. Add SKUs
+          manually for new products, or upload franchise and bundle mappings
+          from Excel. Mark retired SKUs as inactive to keep them in historical
+          sales and bundle rules without showing them in the inventory forecast.
+          Set unit costs from{" "}
           <Link
             href="/dashboard/mappings/cogs"
             className="font-medium text-emerald-700 hover:text-emerald-800"

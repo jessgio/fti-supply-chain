@@ -286,7 +286,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 text-xs font-medium text-stone-800 hover:bg-stone-50"
           >
             <Settings2 className="h-3.5 w-3.5" />
-            Manage mappings
+            Action codes
           </Link>
         </div>
       </CardHeader>
@@ -304,7 +304,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
               {loading
                 ? "Loading extracts…"
                 : extracts.length === 0
-                  ? "No extracts — update the DN catalog first"
+                  ? "No extracts — add items in the Extract Catalog first"
                   : "Select item number…"}
             </option>
             {extracts.map((ex) => (
@@ -322,7 +322,7 @@ export function ExtractEntryForm({ onCommitted }: ExtractEntryFormProps) {
                 href="/dashboard/extract-inbound-delivery-notes/codes"
                 className="text-emerald-700 hover:underline"
               >
-                Extract Code DN catalog
+                Extract Catalog
               </Link>
               .
             </p>

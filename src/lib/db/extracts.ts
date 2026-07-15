@@ -1,10 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
-  categorize,
   DEFAULT_CATEGORY_RULES,
 } from "@/lib/extracts/categories";
-import { resolveActionCodeCategory } from "@/lib/extracts/mappings";
+import { resolveExtractCategory } from "@/lib/extracts/mappings";
 import {
   annualizeIssuedUsage,
   computeLedgerStats,
@@ -578,10 +577,7 @@ export async function commitExtract(
   const actionMappings = await loadActionCodeMappings(supabase);
 
   function resolveCategory(row: ParsedExtract["rows"][number]): ExtractCategory {
-    if (row.category) return row.category;
-    const fromCode = resolveActionCodeCategory(row.tran_code, actionMappings);
-    if (fromCode !== "uncategorized") return fromCode;
-    return categorize(row.from_to, rules);
+    return resolveExtractCategory(row, actionMappings, rules);
   }
 
   let extractId: string;
@@ -829,12 +825,15 @@ export async function updateExtractTransaction(
     patch.tran_code !== undefined
       ? patch.tran_code?.trim() || null
       : current.tran_code;
-  const fromTo = tranCode ?? current.from_to;
+  const fromTo =
+    patch.tran_code !== undefined ? tranCode : (tranCode ?? current.from_to);
   let category = current.category;
   if (patch.tran_code !== undefined) {
-    const fromCode = resolveActionCodeCategory(tranCode, actionMappings);
-    category =
-      fromCode !== "uncategorized" ? fromCode : categorize(fromTo, rules);
+    category = resolveExtractCategory(
+      { tran_code: tranCode, from_to: fromTo },
+      actionMappings,
+      rules,
+    );
   }
 
   let txnDate = current.txn_date;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,19 +26,12 @@ import type {
   ExtractCategory,
 } from "@/types/database";
 
-interface ItemNameMappingRow {
-  id: string;
-  manufacturer_name: string;
-  extract_id: string;
-  item_no: string;
-  description: string | null;
-}
+const EXTRACT_CATALOG_HREF = "/dashboard/extract-inbound-delivery-notes/codes";
 
 export default function ExtractMappingsPage() {
   const [actionCodes, setActionCodes] = useState<ExtractActionCodeMapping[]>(
     [],
   );
-  const [itemNames, setItemNames] = useState<ItemNameMappingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -46,27 +39,17 @@ export default function ExtractMappingsPage() {
   const [newCode, setNewCode] = useState("");
   const [newCodeCategory, setNewCodeCategory] =
     useState<ExtractCategory>("production");
-  const [newMfrName, setNewMfrName] = useState("");
-  const [newItemNo, setNewItemNo] = useState("");
 
   const loadMappings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [codesRes, namesRes] = await Promise.all([
-        fetch("/api/extracts/mappings/action-codes"),
-        fetch("/api/extracts/mappings/item-names"),
-      ]);
+      const codesRes = await fetch("/api/extracts/mappings/action-codes");
       const codesData = await codesRes.json();
-      const namesData = await namesRes.json();
       if (!codesRes.ok) {
         throw new Error(codesData.error ?? "Failed to load action codes");
       }
-      if (!namesRes.ok) {
-        throw new Error(namesData.error ?? "Failed to load item names");
-      }
       setActionCodes(codesData.mappings ?? []);
-      setItemNames(namesData.mappings ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load mappings");
     } finally {
@@ -149,73 +132,8 @@ export default function ExtractMappingsPage() {
     }
   }
 
-  async function addItemName() {
-    const manufacturer_name = newMfrName.trim();
-    const item_no = newItemNo.trim();
-    if (!manufacturer_name || !item_no) return;
-    setSavingId("new-item");
-    setError(null);
-    try {
-      const res = await fetch("/api/extracts/mappings/item-names", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manufacturer_name, item_no }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to add mapping");
-      setItemNames((prev) => [...prev, data.mapping]);
-      setNewMfrName("");
-      setNewItemNo("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add");
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function updateItemName(
-    id: string,
-    patch: { manufacturer_name?: string; item_no?: string },
-  ) {
-    setSavingId(id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/extracts/mappings/item-names/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Update failed");
-      setItemNames((prev) =>
-        prev.map((row) => (row.id === id ? data.mapping : row)),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Update failed");
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function removeItemName(id: string) {
-    setSavingId(id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/extracts/mappings/item-names/${id}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Delete failed");
-      setItemNames((prev) => prev.filter((row) => row.id !== id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setSavingId(null);
-    }
-  }
-
   return (
-    <PageShell wide>
+    <PageShell className="max-w-4xl space-y-6">
       <div>
         <Link
           href="/dashboard/extracts"
@@ -225,12 +143,13 @@ export default function ExtractMappingsPage() {
           Back to extracts
         </Link>
         <h1 className="text-2xl font-semibold text-stone-900">
-          Extract mappings
+          Extract Action Codes
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-stone-600">
-          Map manufacturer action codes to internal categories, and manufacturer
-          item names to FTI extract item numbers. These mappings are used when
-          entering movements manually.
+          Map manufacturer action codes (e.g. QAC, RNI) to internal ledger
+          categories. OCR and ledger commit prefer these codes, then fall back
+          to FROM/TO rules. Extract name ↔ item code lives in the Extract
+          Inbound Catalog.
         </p>
       </div>
 
@@ -238,10 +157,28 @@ export default function ExtractMappingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Extract name ↔ item code</CardTitle>
+          <CardDescription>
+            Manage extract names and FTI item codes in one place. The catalog
+            drives the extract ledger, inbound delivery notes, and imports.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link href={EXTRACT_CATALOG_HREF}>
+            <Button type="button" variant="outline" size="sm">
+              Open Extract Inbound Catalog
+              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Action codes</CardTitle>
           <CardDescription>
-            Manufacturer action codes (e.g. QAC, RNI, SC/HC) map to internal
-            movement categories when you enter ledger rows.
+            Manufacturer action codes map to internal movement categories when
+            you enter ledger rows.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -343,116 +280,6 @@ export default function ExtractMappingsPage() {
                           disabled={savingId === row.id}
                           className="rounded p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600"
                           aria-label="Delete action code"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Item names</CardTitle>
-          <CardDescription>
-            Manufacturer item names map to FTI extract item numbers. Adding a
-            mapping creates the extract record if it does not exist yet.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-[12rem] flex-1">
-              <label className="mb-1 block text-xs font-medium text-stone-500">
-                Manufacturer item name
-              </label>
-              <Input
-                value={newMfrName}
-                onChange={(e) => setNewMfrName(e.target.value)}
-                placeholder="As shown on manufacturer ledger"
-                disabled={savingId === "new-item"}
-              />
-            </div>
-            <div className="min-w-[8rem] flex-1">
-              <label className="mb-1 block text-xs font-medium text-stone-500">
-                FTI Item No
-              </label>
-              <Input
-                value={newItemNo}
-                onChange={(e) => setNewItemNo(e.target.value)}
-                placeholder="e.g. 6045758"
-                disabled={savingId === "new-item"}
-              />
-            </div>
-            <Button
-              onClick={addItemName}
-              disabled={
-                !newMfrName.trim() || !newItemNo.trim() || savingId === "new-item"
-              }
-            >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add
-            </Button>
-          </div>
-
-          {loading ? (
-            <p className="text-sm text-stone-500">Loading item names…</p>
-          ) : itemNames.length === 0 ? (
-            <p className="text-sm text-stone-500">No item name mappings yet.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-stone-200">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 text-stone-500">
-                    <th className="px-3 py-2 font-medium">
-                      Manufacturer item name
-                    </th>
-                    <th className="px-3 py-2 font-medium">FTI Item No</th>
-                    <th className="px-3 py-2 w-12" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {itemNames.map((row) => (
-                    <tr key={row.id} className="border-b border-stone-100">
-                      <td className="px-3 py-2">
-                        <Input
-                          className="h-8"
-                          defaultValue={row.manufacturer_name}
-                          onBlur={(e) => {
-                            const value = e.target.value.trim();
-                            if (value && value !== row.manufacturer_name) {
-                              updateItemName(row.id, {
-                                manufacturer_name: value,
-                              });
-                            }
-                          }}
-                          disabled={savingId === row.id}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          className="h-8 font-medium"
-                          defaultValue={row.item_no}
-                          onBlur={(e) => {
-                            const value = e.target.value.trim();
-                            if (value && value !== row.item_no) {
-                              updateItemName(row.id, { item_no: value });
-                            }
-                          }}
-                          disabled={savingId === row.id}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => removeItemName(row.id)}
-                          disabled={savingId === row.id}
-                          className="rounded p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600"
-                          aria-label="Delete item name mapping"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>

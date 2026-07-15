@@ -6,8 +6,9 @@ import {
   normalizeExtractDate,
   parseExtractScreenshot,
 } from "@/lib/extracts/parse";
-import { categorize } from "@/lib/extracts/categories";
+import { resolveExtractCategory } from "@/lib/extracts/mappings";
 import { loadCategoryRules } from "@/lib/db/extracts";
+import { loadActionCodeMappings } from "@/lib/db/extract-mappings";
 import type { ParsedExtract, ParsedExtractRow } from "@/types/database";
 
 export const maxDuration = 120;
@@ -57,7 +58,10 @@ export async function POST(request: Request) {
       mimeType,
     });
 
-    const rules = await loadCategoryRules(supabase);
+    const [rules, actionMappings] = await Promise.all([
+      loadCategoryRules(supabase),
+      loadActionCodeMappings(supabase),
+    ]);
 
     // Validate the running balance chain to flag likely OCR mis-reads.
     let prevBalance: number | null = null;
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
         balance,
         status: row.status,
         remark: row.remark,
-        category: categorize(row.from_to, rules),
+        category: resolveExtractCategory(row, actionMappings, rules),
         checksum_ok: checksumOk && Boolean(normalizedDate),
         expected_balance: expectedBalance,
       } satisfies ParsedExtractRow;

@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
-  ExtractInboundPoOption,
   PrimaryPackagingDeliveryNote,
   PrimaryPackagingDeliveryNoteLine,
   PrimaryPackagingDnSettings,
@@ -8,6 +7,9 @@ import type {
 } from "@/types/database";
 import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
 import { PRIMARY_PACKAGING_DN_SETTINGS_ID } from "@/lib/primary-packaging-delivery-note/constants";
+import { listOpenPosForPackagingDn } from "@/lib/packaging-dn/open-pos";
+
+export { listOpenPosForPackagingDn as listOpenPosForPrimaryPackaging };
 
 const NOTE_SELECT =
   "id, dn_number, po_id, po_number, delivery_date, recipient_name, created_at";
@@ -182,46 +184,6 @@ export async function updatePrimaryPackagingDnSettings(
     .single();
   if (error) throw error;
   return data as PrimaryPackagingDnSettings;
-}
-
-export async function listOpenPosForPrimaryPackaging(
-  supabase: SupabaseClient,
-): Promise<ExtractInboundPoOption[]> {
-  const { data, error } = await supabase
-    .from("purchase_orders")
-    .select(
-      "id, po_number, status, order_date, purchase_order_lines ( skus ( name, sku_code ) )",
-    )
-    .not("status", "in", '("received","cancelled")')
-    .order("order_date", { ascending: false });
-  if (error) throw error;
-
-  return (data ?? []).map((row) => {
-    const lines = (row.purchase_order_lines ?? []) as Array<{
-      skus:
-        | { name: string | null; sku_code: string }
-        | { name: string | null; sku_code: string }[]
-        | null;
-    }>;
-    const skuNames: string[] = [];
-    const seen = new Set<string>();
-    for (const line of lines) {
-      const skus = line.skus;
-      const sku = Array.isArray(skus) ? skus[0] : skus;
-      const label = sku?.name?.trim() || sku?.sku_code?.trim();
-      if (label && !seen.has(label)) {
-        seen.add(label);
-        skuNames.push(label);
-      }
-    }
-    return {
-      id: row.id as string,
-      po_number: row.po_number as string,
-      status: row.status as string,
-      order_date: row.order_date as string,
-      sku_names: skuNames,
-    };
-  });
 }
 
 export async function listPrimaryPackagingItems(

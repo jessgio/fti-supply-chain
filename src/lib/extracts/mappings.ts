@@ -1,4 +1,9 @@
-import type { ExtractCategory, ExtractActionCodeMapping } from "@/types/database";
+import type {
+  ExtractCategory,
+  ExtractActionCodeMapping,
+  ExtractCategoryRule,
+} from "@/types/database";
+import { categorize } from "@/lib/extracts/categories";
 
 export function normalizeMappingKey(value: string): string {
   return value.trim().toLowerCase();
@@ -15,4 +20,18 @@ export function resolveActionCodeCategory(
     (m) => normalizeMappingKey(m.action_code) === key,
   );
   return hit?.category ?? "uncategorized";
+}
+
+/**
+ * Prefer action-code mappings, then FROM/TO category rules.
+ * Used by OCR parse, commit, and transaction edit.
+ */
+export function resolveExtractCategory(
+  row: { tran_code?: string | null; from_to?: string | null },
+  actionMappings: Pick<ExtractActionCodeMapping, "action_code" | "category">[],
+  rules: Omit<ExtractCategoryRule, "id">[],
+): ExtractCategory {
+  const fromCode = resolveActionCodeCategory(row.tran_code, actionMappings);
+  if (fromCode !== "uncategorized") return fromCode;
+  return categorize(row.from_to ?? row.tran_code, rules);
 }

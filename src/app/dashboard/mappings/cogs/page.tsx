@@ -138,7 +138,7 @@ export default function SkuCogsPage() {
             className="mb-2 inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-800"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to SKU mappings
+            Back to SKUs & Franchises
           </Link>
           <h1 className="text-2xl font-semibold text-stone-900">COGS</h1>
           <p className="mt-1 text-stone-600">
@@ -205,7 +205,8 @@ export default function SkuCogsPage() {
             <p className="text-sm text-red-600">{error}</p>
           ) : filtered.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No franchise-mapped SKUs found. Add SKUs from SKU mappings first.
+              No franchise-mapped SKUs found. Add SKUs from SKUs & Franchises
+              first.
             </p>
           ) : (
             <div className="overflow-x-auto">
