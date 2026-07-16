@@ -166,12 +166,6 @@ const links: NavItem[] = [
         exact: true,
       },
       {
-        href: "/dashboard/extract-inbound-delivery-notes/codes",
-        label: "Extract Catalog",
-        icon: FlaskConical,
-        roles: ["admin", "supply_chain"],
-      },
-      {
         href: "/dashboard/primary-packaging-delivery-notes",
         label: "Primary Packaging Inbound",
         icon: Layers,
