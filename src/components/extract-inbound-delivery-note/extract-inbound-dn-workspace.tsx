@@ -433,7 +433,7 @@ export function ExtractInboundDnWorkspace({
             {lines.map((line, idx) => (
               <div
                 key={line.key}
-                className="grid gap-3 rounded-lg border border-stone-200 p-4 md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]"
+                className="flex flex-col gap-3 rounded-lg border border-stone-200 p-4"
               >
                 <label className="flex flex-col gap-1.5 text-sm">
                   <span className="font-medium text-stone-700">Extract name</span>
@@ -444,58 +444,62 @@ export function ExtractInboundDnWorkspace({
                     disabled={extractCodeOptions.length === 0}
                   />
                 </label>
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium text-stone-700">Kode barang</span>
-                  <div className="flex h-10 items-center rounded-md border border-stone-200 bg-stone-50 px-3 font-mono text-xs">
-                    {line.item?.item_code ?? "—"}
+                <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium text-stone-700">Kode barang</span>
+                    <div className="flex h-10 items-center rounded-md border border-stone-200 bg-stone-50 px-3 font-mono text-xs">
+                      {line.item?.item_code ?? "—"}
+                    </div>
                   </div>
-                </div>
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium text-stone-700">Jumlah</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={line.quantity}
-                    onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                    required={Boolean(line.item)}
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium text-stone-700">UOM (kg)</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={line.uomKg}
-                    onChange={(e) => updateLine(line.key, { uomKg: e.target.value })}
-                    placeholder="25"
-                    required={Boolean(line.item)}
-                  />
-                </label>
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium text-stone-700">Total (kg)</span>
-                  <div className="flex h-10 items-center rounded-md border border-stone-200 bg-stone-50 px-3 font-medium text-sm">
-                    {lineTotals[idx] != null ? `${formatNumber(lineTotals[idx]!)} Kg` : "—"}
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium text-stone-700">Jumlah</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={line.quantity}
+                      onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                      required={Boolean(line.item)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium text-stone-700">UOM (kg)</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={line.uomKg}
+                      onChange={(e) => updateLine(line.key, { uomKg: e.target.value })}
+                      placeholder="25"
+                      required={Boolean(line.item)}
+                    />
+                  </label>
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <span className="font-medium text-stone-700">Total (kg)</span>
+                    <div className="flex h-10 items-center rounded-md border border-stone-200 bg-stone-50 px-3 font-medium text-sm">
+                      {lineTotals[idx] != null
+                        ? `${formatNumber(lineTotals[idx]!)} Kg`
+                        : "—"}
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={lines.length === 1}
-                    onClick={() =>
-                      setLines((prev) =>
-                        prev.length > 1
-                          ? prev.filter((l) => l.key !== line.key)
-                          : [emptyLine()],
-                      )
-                    }
-                    aria-label="Remove line"
-                  >
-                    <Trash2 className="h-4 w-4 text-stone-400" />
-                  </Button>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={lines.length === 1}
+                      onClick={() =>
+                        setLines((prev) =>
+                          prev.length > 1
+                            ? prev.filter((l) => l.key !== line.key)
+                            : [emptyLine()],
+                        )
+                      }
+                      aria-label="Remove line"
+                    >
+                      <Trash2 className="h-4 w-4 text-stone-400" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}

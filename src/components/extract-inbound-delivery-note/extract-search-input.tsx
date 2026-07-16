@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { ExtractCode } from "@/types/database";
@@ -39,9 +40,12 @@ export function ExtractSearchInput({
 }: ExtractSearchInputProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(value ? optionLabel(value) : "");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+
+  const showSelected = Boolean(value) && !open;
 
   useEffect(() => {
     setQuery(value ? optionLabel(value) : "");
@@ -56,6 +60,12 @@ export function ExtractSearchInput({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
+
+  useEffect(() => {
+    if (open && !showSelected) {
+      inputRef.current?.focus();
+    }
+  }, [open, showSelected]);
 
   const results = useMemo(() => {
     const q = query.trim();
@@ -75,40 +85,85 @@ export function ExtractSearchInput({
     setOpen(false);
   }
 
+  function clearSelection() {
+    onChange(null);
+    setQuery("");
+    setOpen(true);
+  }
+
+  function beginEdit() {
+    if (disabled) return;
+    setOpen(true);
+  }
+
   return (
     <div ref={rootRef} className={cn("relative", className)}>
-      <Input
-        value={query}
-        disabled={disabled}
-        placeholder={placeholder}
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        onFocus={() => setOpen(true)}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-          if (value && e.target.value !== optionLabel(value)) {
-            onChange(null);
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown") {
-            e.preventDefault();
+      {showSelected && value ? (
+        <div
+          className={cn(
+            "flex min-h-10 w-full items-start gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2",
+            disabled && "cursor-not-allowed opacity-50",
+          )}
+        >
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={beginEdit}
+            className="min-w-0 flex-1 text-left focus:outline-none"
+            aria-label={`Change extract: ${optionLabel(value)}`}
+          >
+            <span className="block whitespace-normal break-words text-sm font-medium text-stone-900">
+              {value.extract_name}
+            </span>
+            <span className="mt-0.5 block font-mono text-xs text-stone-500">
+              {value.item_code}
+            </span>
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={clearSelection}
+            className="mt-0.5 shrink-0 rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+            aria-label="Clear extract"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <Input
+          ref={inputRef}
+          value={query}
+          disabled={disabled}
+          placeholder={placeholder}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setQuery(e.target.value);
             setOpen(true);
-            setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
-          } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setHighlight((h) => Math.max(h - 1, 0));
-          } else if (e.key === "Enter" && open && results[highlight]) {
-            e.preventDefault();
-            selectOption(results[highlight]);
-          } else if (e.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-      />
+            if (value && e.target.value !== optionLabel(value)) {
+              onChange(null);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setHighlight((h) => Math.max(h - 1, 0));
+            } else if (e.key === "Enter" && open && results[highlight]) {
+              e.preventDefault();
+              selectOption(results[highlight]);
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+        />
+      )}
       {open && results.length > 0 && (
         <ul
           id={listId}
@@ -126,7 +181,9 @@ export function ExtractSearchInput({
                 onMouseEnter={() => setHighlight(idx)}
                 onClick={() => selectOption(option)}
               >
-                <span className="font-medium text-stone-900">{option.extract_name}</span>
+                <span className="whitespace-normal break-words font-medium text-stone-900">
+                  {option.extract_name}
+                </span>
                 <span className="font-mono text-xs text-stone-500">{option.item_code}</span>
               </button>
             </li>
