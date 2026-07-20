@@ -33,8 +33,6 @@ export interface ForecastExportRow {
   Confidence: string;
   "Covered by PO": string;
   "Needs reorder": string;
-  "Seasonality uplift": number;
-  "Seasonality reasons": string;
   "First sale date": string;
 }
 
@@ -104,8 +102,6 @@ export function buildForecastExportRows(
       Confidence: titleCase(row.confidence),
       "Covered by PO": row.covered_by_po ? "Yes" : "No",
       "Needs reorder": row.needs_reorder ? "Yes" : "No",
-      "Seasonality uplift": round(row.seasonal_uplift_multiplier, 3),
-      "Seasonality reasons": (row.seasonal_uplift_reasons ?? []).join("; "),
       "First sale date": row.first_sale_date ?? "",
     };
   });

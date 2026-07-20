@@ -240,8 +240,8 @@ function compareRows(
       break;
     case "forecast_monthly_demand":
       cmp =
-        a.forecast_daily_demand * DAYS_PER_MONTH -
-        b.forecast_daily_demand * DAYS_PER_MONTH;
+        a.base_forecast_daily_demand * DAYS_PER_MONTH -
+        b.base_forecast_daily_demand * DAYS_PER_MONTH;
       break;
     case "days_until_stockout":
       return compareNullableNumber(a.days_until_stockout, b.days_until_stockout, dir);
@@ -393,13 +393,11 @@ export default function InventoryPage() {
     setError(null);
     try {
       // Re-fetch so the export is complete even if the page filter is narrowed.
+      // Always export without seasonality so manager reports use the base L3M/L6M blend.
       const res = await fetch("/api/forecast");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Forecast failed");
-      const rows = applySeasonalityToggle(
-        data.recommendations ?? [],
-        seasonalityEnabled,
-      );
+      const rows = applySeasonalityToggle(data.recommendations ?? [], false);
       await downloadForecastXlsx({
         recommendations: rows,
         npdSkus: data.npd_skus ?? [],
@@ -1036,7 +1034,7 @@ export default function InventoryPage() {
                       </td>
                       <td className="py-2 pr-4">
                         {formatNumber(
-                          row.forecast_daily_demand * DAYS_PER_MONTH,
+                          row.base_forecast_daily_demand * DAYS_PER_MONTH,
                           0,
                         )}
                       </td>
