@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PoPaymentsSection } from "@/components/procurement/po-payments-section";
+import { PoProformaInvoicesSection } from "@/components/procurement/po-proforma-invoices-section";
 import { PoShipmentsSection } from "@/components/procurement/po-shipments-section";
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { PoExtractDeliveryNotesSection } from "@/components/extract-inbound-delivery-note/po-extract-delivery-notes-section";
@@ -371,6 +372,11 @@ export default function PurchaseOrderPage() {
               setPo(updated);
               void loadPo();
             }}
+          />
+
+          <PoProformaInvoicesSection
+            po={po}
+            readOnly={po.status === "cancelled"}
           />
 
           <LarkApSubmissionPanel

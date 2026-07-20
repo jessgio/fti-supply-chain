@@ -341,6 +341,21 @@ export interface PurchaseOrderLarkSubmission {
   submitted_at: string;
 }
 
+export type PoDocumentType = "proforma_invoice";
+
+export interface PoDocument {
+  id: string;
+  purchase_order_id: string;
+  document_type: PoDocumentType;
+  version_number: number;
+  file_name: string;
+  mime_type: string | null;
+  file_size: number | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   po_number: string;

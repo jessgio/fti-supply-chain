@@ -7,6 +7,7 @@ import type {
   Supplier,
 } from "@/types/database";
 import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
+import { deletePoDocuments } from "@/lib/db/po-documents";
 
 export interface NewPoLineInput {
   sku_id: string;
@@ -647,6 +648,8 @@ export async function deletePurchaseOrder(
       "Cannot delete a purchase order with received items. Cancel it instead.",
     );
   }
+
+  await deletePoDocuments(supabase, id);
 
   const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
   if (error) throw error;
