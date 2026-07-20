@@ -11,7 +11,11 @@ import {
   recalculatePoStatus,
 } from "@/lib/db/po-lifecycle";
 import type { PoLifecycleInput } from "@/lib/procurement/po-lifecycle-rules";
-import { TIMELINE_PO_STATUSES } from "@/lib/shipments/constants";
+import {
+  TIMELINE_PO_STATUSES,
+  type ShipmentStatus,
+} from "@/lib/shipments/constants";
+import { hasDepartureDatePassed } from "@/lib/shipments/shipment-dates";
 import type { PoStatus } from "@/types/database";
 
 function buildTimelineLifecycleInput(
@@ -372,6 +376,8 @@ export async function createInboundReceive(
           input.location ?? "Gudang Finished Goods",
           batch.batch_code ?? null,
           batch.expiry_date ?? null,
+          false,
+          receive.id,
         );
       }
     } else {
@@ -383,6 +389,8 @@ export async function createInboundReceive(
         input.location ?? "Gudang Finished Goods",
         input.batch_code ?? null,
         input.expiry_date ?? null,
+        false,
+        receive.id,
       );
     }
   }
@@ -409,9 +417,77 @@ export async function deleteInboundReceive(
   supabase: SupabaseClient,
   id: string,
 ): Promise<void> {
-  throw new Error(
-    "Deleting inbound receives is not supported because stock has already been updated. Adjust via procurement receipts instead.",
-  );
+  const existing = await getInboundReceive(supabase, id);
+  if (!existing) throw new Error("Inbound receive not found.");
+
+  const shipmentId = existing.shipment_id;
+  const { data: shipmentLinks, error: linkError } = await supabase
+    .from("shipment_purchase_orders")
+    .select("po_id")
+    .eq("shipment_id", shipmentId);
+  if (linkError) throw linkError;
+  const poIds = [
+    ...new Set(
+      [
+        existing.po_id,
+        ...((shipmentLinks ?? []) as Array<{ po_id: string }>).map((l) => l.po_id),
+      ].filter((poId): poId is string => Boolean(poId)),
+    ),
+  ];
+
+  const { error } = await supabase.rpc("delete_inbound_receive", {
+    p_id: id,
+  });
+  if (error) throw error;
+
+  if (shipmentId) {
+    await syncShipmentStatusAfterReceiveChange(supabase, shipmentId);
+  }
+  for (const poId of poIds) {
+    await recalculatePoStatus(supabase, poId);
+  }
+}
+
+async function syncShipmentStatusAfterReceiveChange(
+  supabase: SupabaseClient,
+  shipmentId: string,
+): Promise<void> {
+  const { data: shipment, error: shipError } = await supabase
+    .from("shipments")
+    .select("id, estimated_departure_date, shipment_items ( po_line_id, quantity )")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  if (shipError) throw shipError;
+  if (!shipment) return;
+
+  const priorReceivedByLine = await getPriorReceivedByLine(supabase, shipmentId);
+  const shipmentItems = (shipment.shipment_items ?? []) as Array<{
+    po_line_id: string;
+    quantity: number;
+  }>;
+
+  const cumulativeItems = shipmentItems.map((item) => ({
+    ordered_qty: Number(item.quantity),
+    received_qty: priorReceivedByLine.get(item.po_line_id) ?? 0,
+  }));
+  const totalReceived = cumulativeItems.reduce((s, i) => s + i.received_qty, 0);
+
+  let status: ShipmentStatus;
+  if (totalReceived <= 0) {
+    status = hasDepartureDatePassed(shipment.estimated_departure_date)
+      ? "in_transit"
+      : "planned";
+  } else if (deriveReceiveStatus(cumulativeItems) === "complete") {
+    status = "closed";
+  } else {
+    status = "delivered";
+  }
+
+  const { error: updateError } = await supabase
+    .from("shipments")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", shipmentId);
+  if (updateError) throw updateError;
 }
 
 export async function listOngoingPosForTimeline(

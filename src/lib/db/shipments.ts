@@ -669,12 +669,13 @@ export async function deleteShipment(
   const existing = await getShipment(supabase, id);
   if (!existing) throw new Error("Shipment not found.");
 
-  const { data: receive } = await supabase
+  const { data: receives, error: receiveError } = await supabase
     .from("inbound_receives")
     .select("id")
     .eq("shipment_id", id)
-    .maybeSingle();
-  if (receive) {
+    .limit(1);
+  if (receiveError) throw receiveError;
+  if ((receives ?? []).length > 0) {
     throw new Error(
       "Cannot delete a shipment that has an inbound receive. Delete the receive first.",
     );

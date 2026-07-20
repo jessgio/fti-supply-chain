@@ -727,6 +727,7 @@ export async function receivePoLine(
   batchCode?: string | null,
   expiryDate?: string | null,
   closeLine?: boolean,
+  inboundReceiveId?: string | null,
 ): Promise<void> {
   const trimmedBatch =
     batchCode === undefined || batchCode === null
@@ -740,6 +741,7 @@ export async function receivePoLine(
     p_batch_code: trimmedBatch,
     p_expiry_date: expiryDate ?? null,
     p_close_line: closeLine ?? false,
+    p_inbound_receive_id: inboundReceiveId ?? null,
   });
   if (error) throw error;
 }

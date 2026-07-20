@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
-import { PackageCheck, Plus, Search, Trash2 } from "lucide-react";
+import { Loader2, PackageCheck, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -59,6 +59,7 @@ export default function InboundPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [selectedShipmentId, setSelectedShipmentId] = useState("");
   const [receiveDate, setReceiveDate] = useState(
@@ -192,6 +193,30 @@ export default function InboundPage() {
     partial: receives.filter((r) => r.status === "partial").length,
   }), [receives]);
 
+  async function handleDelete(receive: InboundReceive) {
+    const label = receive.receive_number ?? "this receive";
+    if (
+      !confirm(
+        `Delete ${label}? This reverses stock and PO received quantities. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(receive.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/inbound/${receive.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete inbound receive");
+      setReceives((prev) => prev.filter((r) => r.id !== receive.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   async function handleCreate() {
     if (!selectedShipment) return;
     const batchError = validateBatches();
@@ -315,7 +340,8 @@ export default function InboundPage() {
                     <th className="py-2 pr-4 font-medium text-stone-500">Date</th>
                     <th className="py-2 pr-4 font-medium text-stone-500">Qty received</th>
                     <th className="py-2 pr-4 font-medium text-stone-500">Status</th>
-                    <th className="py-2 font-medium text-stone-500">Items</th>
+                    <th className="py-2 pr-4 font-medium text-stone-500">Items</th>
+                    <th className="py-2 font-medium text-stone-500">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -328,6 +354,7 @@ export default function InboundPage() {
                       (s, i) => s + i.ordered_qty,
                       0,
                     );
+                    const isDeleting = deletingId === receive.id;
                     return (
                       <tr
                         key={receive.id}
@@ -357,7 +384,7 @@ export default function InboundPage() {
                             {INBOUND_STATUS_LABELS[receive.status as InboundReceiveStatus]}
                           </Badge>
                         </td>
-                        <td className="py-3 text-stone-600">
+                        <td className="py-3 pr-4 text-stone-600">
                           <div className="space-y-0.5">
                             {(receive.items ?? []).map((item) => (
                               <div key={item.id} className="text-xs">
@@ -365,6 +392,21 @@ export default function InboundPage() {
                               </div>
                             ))}
                           </div>
+                        </td>
+                        <td className="py-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(receive)}
+                            disabled={isDeleting || deletingId !== null}
+                            className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
+                          >
+                            {isDeleting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            Delete
+                          </button>
                         </td>
                       </tr>
                     );
