@@ -343,69 +343,81 @@ export async function createInboundReceive(
     .single();
   if (recvError) throw recvError;
 
-  const itemRows = input.items.map((item) => ({
-    inbound_receive_id: receive.id,
-    po_line_id: item.po_line_id,
-    sku_id: item.sku_id,
-    ordered_qty: item.ordered_qty,
-    received_qty: item.received_qty,
-    discrepancy: item.received_qty - item.ordered_qty,
-  }));
-  const { error: itemsError } = await supabase
-    .from("inbound_receive_items")
-    .insert(itemRows);
-  if (itemsError) throw itemsError;
+  try {
+    const itemRows = input.items.map((item) => ({
+      inbound_receive_id: receive.id,
+      po_line_id: item.po_line_id,
+      sku_id: item.sku_id,
+      ordered_qty: item.ordered_qty,
+      received_qty: item.received_qty,
+      discrepancy: item.received_qty - item.ordered_qty,
+    }));
+    const { error: itemsError } = await supabase
+      .from("inbound_receive_items")
+      .insert(itemRows);
+    if (itemsError) throw itemsError;
 
-  for (const item of input.items) {
-    if (item.received_qty <= 0) continue;
+    for (const item of input.items) {
+      if (item.received_qty <= 0) continue;
 
-    const batches = (item.batches ?? []).filter((b) => b.qty > 0);
-    if (batches.length > 0) {
-      const batchTotal = batches.reduce((sum, b) => sum + b.qty, 0);
-      if (batchTotal !== item.received_qty) {
-        throw new Error(
-          `Batch quantities must equal received quantity for line ${item.po_line_id}.`,
-        );
-      }
-      for (const batch of batches) {
+      const batches = (item.batches ?? []).filter((b) => b.qty > 0);
+      if (batches.length > 0) {
+        const batchTotal = batches.reduce((sum, b) => sum + b.qty, 0);
+        if (batchTotal !== item.received_qty) {
+          throw new Error(
+            `Batch quantities must equal received quantity for line ${item.po_line_id}.`,
+          );
+        }
+        for (const batch of batches) {
+          await receivePoLine(
+            supabase,
+            item.po_line_id,
+            batch.qty,
+            receiveDate,
+            input.location ?? "Gudang Finished Goods",
+            batch.batch_code ?? null,
+            batch.expiry_date ?? null,
+            false,
+            receive.id,
+          );
+        }
+      } else {
         await receivePoLine(
           supabase,
           item.po_line_id,
-          batch.qty,
+          item.received_qty,
           receiveDate,
           input.location ?? "Gudang Finished Goods",
-          batch.batch_code ?? null,
-          batch.expiry_date ?? null,
+          input.batch_code ?? null,
+          input.expiry_date ?? null,
           false,
           receive.id,
         );
       }
-    } else {
-      await receivePoLine(
-        supabase,
-        item.po_line_id,
-        item.received_qty,
-        receiveDate,
-        input.location ?? "Gudang Finished Goods",
-        input.batch_code ?? null,
-        input.expiry_date ?? null,
-        false,
-        receive.id,
-      );
     }
-  }
 
-  const newShipmentStatus = shipmentComplete ? "closed" : "delivered";
-  await supabase
-    .from("shipments")
-    .update({
-      status: newShipmentStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.shipment_id);
+    const newShipmentStatus = shipmentComplete ? "closed" : "delivered";
+    await supabase
+      .from("shipments")
+      .update({
+        status: newShipmentStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.shipment_id);
 
-  for (const poId of poIds) {
-    await recalculatePoStatus(supabase, poId);
+    for (const poId of poIds) {
+      await recalculatePoStatus(supabase, poId);
+    }
+  } catch (error) {
+    // Roll back header/items and any stock already applied for this receive.
+    const { error: rollbackError } = await supabase.rpc(
+      "delete_inbound_receive",
+      { p_id: receive.id },
+    );
+    if (rollbackError) {
+      await supabase.from("inbound_receives").delete().eq("id", receive.id);
+    }
+    throw error;
   }
 
   const created = await getInboundReceive(supabase, receive.id);
