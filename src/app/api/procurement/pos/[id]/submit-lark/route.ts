@@ -22,14 +22,23 @@ import {
   getLarkApprovalCode,
   uploadApprovalAttachment,
 } from "@/lib/lark/client";
+import {
+  downloadCompanyLogo,
+  getCompanySettings,
+} from "@/lib/db/company-settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getPurchaseOrder } from "@/lib/db/procurement";
+import { getPurchaseOrder, getSupplier } from "@/lib/db/procurement";
+import { generatePoPdf } from "@/lib/procurement/po-pdf";
 import { errorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
+/** Lark upload + approval create can exceed the default serverless limit. */
+export const maxDuration = 120;
 
 const MAX_EXTRA_FILES = 10;
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+/** Keep under Vercel's ~4.5MB request body limit (PO PDF is generated server-side). */
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_TOTAL_EXTRA_BYTES = 4 * 1024 * 1024;
 
 function normalizeOpenIds(ids: unknown): string[] {
   if (!Array.isArray(ids)) return [];
@@ -165,20 +174,6 @@ export async function POST(
     );
   }
 
-  const poPdfEntry = formData.get("poPdf");
-  if (!(poPdfEntry instanceof File) || poPdfEntry.size === 0) {
-    return NextResponse.json(
-      { error: "PO PDF is required" },
-      { status: 400 },
-    );
-  }
-  if (poPdfEntry.size > MAX_FILE_BYTES) {
-    return NextResponse.json(
-      { error: "PO PDF is too large" },
-      { status: 400 },
-    );
-  }
-
   const extraEntries = formData.getAll("files").filter((e): e is File => {
     return e instanceof File && e.size > 0;
   });
@@ -188,13 +183,25 @@ export async function POST(
       { status: 400 },
     );
   }
+  let totalExtraBytes = 0;
   for (const f of extraEntries) {
     if (f.size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { error: `File too large: ${f.name}` },
+        {
+          error: `File too large: ${f.name} (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB each)`,
+        },
         { status: 400 },
       );
     }
+    totalExtraBytes += f.size;
+  }
+  if (totalExtraBytes > MAX_TOTAL_EXTRA_BYTES) {
+    return NextResponse.json(
+      {
+        error: `Extra attachments total too large (max ${Math.floor(MAX_TOTAL_EXTRA_BYTES / (1024 * 1024))} MB). Remove some files and try again.`,
+      },
+      { status: 400 },
+    );
   }
 
   const supabase = createAdminClient();
@@ -238,12 +245,27 @@ export async function POST(
   try {
     const attachmentCodes: string[] = [];
 
-    const poPdfName =
-      poPdfEntry.name?.trim() || `${po.po_number || "PO"}.pdf`;
+    // Generate PO PDF on the server so the browser does not re-upload a large
+    // blob (that was exceeding Vercel's request body limit → "Failed to fetch").
+    const [company, supplierRecord] = await Promise.all([
+      getCompanySettings(supabase),
+      po.supplier_id ? getSupplier(supabase, po.supplier_id) : null,
+    ]);
+    const logo =
+      company.logo_path != null
+        ? await downloadCompanyLogo(supabase, company.logo_path)
+        : null;
+    const poPdfBytes = await generatePoPdf({
+      po,
+      supplier: supplierRecord,
+      company,
+      logo,
+    });
+    const poPdfName = `${po.po_number || "PO"}.pdf`;
     attachmentCodes.push(
       await uploadApprovalAttachment({
         filename: poPdfName,
-        bytes: await fileToBytes(poPdfEntry),
+        bytes: poPdfBytes,
         kind: "attachment",
       }),
     );

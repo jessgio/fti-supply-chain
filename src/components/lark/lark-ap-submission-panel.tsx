@@ -78,6 +78,23 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Vercel serverless request body limit is ~4.5MB; leave headroom for form fields. */
+const MAX_EXTRA_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_TOTAL_EXTRA_BYTES = 4 * 1024 * 1024;
+
+function networkErrorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const msg = err.message || fallback;
+  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(msg)) {
+    return (
+      "Network error while reaching the server. If you attached large files, " +
+      "remove them (or keep extras under 4 MB total) and try again. " +
+      "The PO PDF is attached automatically on the server."
+    );
+  }
+  return msg;
+}
+
 const fieldClass =
   "mt-1 w-full rounded-md border border-stone-300 bg-white px-2.5 py-2 text-sm text-stone-900 placeholder:text-stone-400";
 
@@ -492,14 +509,30 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     const incoming = Array.from(list);
     setExtraFiles((prev) => {
       const next = [...prev];
+      let total = next.reduce((sum, f) => sum + f.size, 0);
       for (const file of incoming) {
+        if (file.size > MAX_EXTRA_FILE_BYTES) {
+          setError(
+            `"${file.name}" is too large (${formatBytes(file.size)}). Max ${formatBytes(MAX_EXTRA_FILE_BYTES)} per file.`,
+          );
+          continue;
+        }
+        if (total + file.size > MAX_TOTAL_EXTRA_BYTES) {
+          setError(
+            `Extra attachments would exceed ${formatBytes(MAX_TOTAL_EXTRA_BYTES)} total. Remove some files first.`,
+          );
+          break;
+        }
         const duplicate = next.some(
           (f) =>
             f.name === file.name &&
             f.size === file.size &&
             f.lastModified === file.lastModified,
         );
-        if (!duplicate) next.push(file);
+        if (!duplicate) {
+          next.push(file);
+          total += file.size;
+        }
       }
       return next.slice(0, 10);
     });
@@ -556,18 +589,19 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       return;
     }
 
+    const extraTotal = extraFiles.reduce((sum, f) => sum + f.size, 0);
+    if (extraTotal > MAX_TOTAL_EXTRA_BYTES) {
+      setError(
+        `Extra attachments are too large (${formatBytes(extraTotal)}). Keep under ${formatBytes(MAX_TOTAL_EXTRA_BYTES)}.`,
+      );
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
-      const pdfRes = await fetch(`/api/procurement/pos/${po.id}/pdf`);
-      if (!pdfRes.ok) {
-        const pdfData = (await pdfRes.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(pdfData.error ?? "Failed to generate PO PDF");
-      }
-      const pdfBlob = await pdfRes.blob();
-
+      // PO PDF is generated and attached on the server — do not upload it here
+      // (re-uploading the PDF was hitting Vercel's body size limit → "Failed to fetch").
       const form = new FormData();
       form.append("expenseCategory", expenseCategory);
       form.append("brand", brand);
@@ -578,7 +612,6 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       form.append("remarks", remarks);
       form.append("paymentScope", paymentPlanScope);
       form.append("planRows", JSON.stringify(planRows));
-      form.append("poPdf", pdfBlob, `${po.po_number || "PO"}.pdf`);
       for (const file of extraFiles) {
         form.append("files", file, file.name);
       }
@@ -587,7 +620,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         method: "POST",
         body: form,
       });
-      const data = (await res.json()) as {
+      const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         instanceCode?: string;
         serialNumber?: string | null;
@@ -625,7 +658,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       // Refresh submission history after a successful submit.
       void syncLarkDetails();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Submit failed");
+      setError(networkErrorMessage(err, "Submit failed"));
     } finally {
       setBusy(false);
     }
@@ -1377,8 +1410,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               </p>
             </div>
             <p className="mt-0.5 text-[11px] text-stone-500">
-              PO PDF is always included. Add invoices, images, or other files
-              (max 10 extra).
+              PO PDF is always included automatically. Add invoices, images, or
+              other files (max 10 extra, {formatBytes(MAX_TOTAL_EXTRA_BYTES)}{" "}
+              total).
             </p>
 
             <label

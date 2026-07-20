@@ -31,6 +31,20 @@ export function getLarkApprovalCode(): string {
   return requireEnv("LARK_APPROVAL_CODE");
 }
 
+function formatFetchFailure(err: unknown, label: string): Error {
+  if (err instanceof Error) {
+    const cause =
+      "cause" in err && err.cause instanceof Error
+        ? err.cause.message
+        : "cause" in err && err.cause
+          ? String(err.cause)
+          : "";
+    const detail = [err.message, cause].filter(Boolean).join(" — ");
+    return new Error(`${label}: ${detail}`);
+  }
+  return new Error(`${label}: ${String(err)}`);
+}
+
 async function larkFetch<T>(
   path: string,
   init: RequestInit & { token?: string } = {},
@@ -44,10 +58,15 @@ async function larkFetch<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(`${larkBaseUrl()}${path}`, {
-    ...rest,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${larkBaseUrl()}${path}`, {
+      ...rest,
+      headers,
+    });
+  } catch (err) {
+    throw formatFetchFailure(err, `Lark API unreachable (${path})`);
+  }
 
   let json: LarkApiResponse<T>;
   try {
@@ -76,14 +95,19 @@ export async function getTenantAccessToken(): Promise<string> {
   const appId = requireEnv("LARK_APP_ID");
   const appSecret = requireEnv("LARK_APP_SECRET");
 
-  const res = await fetch(
-    `${larkBaseUrl()}/open-apis/auth/v3/tenant_access_token/internal`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
-    },
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `${larkBaseUrl()}/open-apis/auth/v3/tenant_access_token/internal`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+      },
+    );
+  } catch (err) {
+    throw formatFetchFailure(err, "Lark token API unreachable");
+  }
 
   let json: {
     code: number;
@@ -756,13 +780,18 @@ export async function uploadApprovalAttachment(input: {
     filename,
   );
 
-  const res = await fetch(approvalFileUploadUrl(), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: form,
-  });
+  let res: Response;
+  try {
+    res = await fetch(approvalFileUploadUrl(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: form,
+    });
+  } catch (err) {
+    throw formatFetchFailure(err, "Lark file upload unreachable");
+  }
 
   let json: {
     code: number;
