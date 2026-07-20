@@ -15,6 +15,7 @@ import {
   ArrowUpDown,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,7 @@ import {
   type StockStatus,
 } from "@/lib/forecast/stock-status";
 import { applySeasonalityToggle } from "@/lib/forecast/seasonality-toggle";
+import { downloadForecastXlsx } from "@/lib/forecast/export-forecast-xlsx";
 import type {
   DemandPattern,
   NpdStockRow,
@@ -343,6 +345,7 @@ export default function InventoryPage() {
   );
   const [activeMetric, setActiveMetric] = useState<MetricKey | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [exporting, setExporting] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
 
   function handleMetricClick(metric: MetricKey) {
@@ -383,6 +386,30 @@ export default function InventoryPage() {
       else next.add(skuCode);
       return next;
     });
+  }
+
+  async function handleExportXlsx() {
+    setExporting(true);
+    setError(null);
+    try {
+      // Re-fetch so the export is complete even if the page filter is narrowed.
+      const res = await fetch("/api/forecast");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Forecast failed");
+      const rows = applySeasonalityToggle(
+        data.recommendations ?? [],
+        seasonalityEnabled,
+      );
+      await downloadForecastXlsx({
+        recommendations: rows,
+        npdSkus: data.npd_skus ?? [],
+        packagingByProduct: data.packaging_by_product ?? {},
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export");
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -534,6 +561,14 @@ export default function InventoryPage() {
             title="Toggle Ramadan / Q4 uplift on Fcst/day and restock calculations"
           >
             Seasonality {seasonalityEnabled ? "on" : "off"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleExportXlsx()}
+            disabled={loading || exporting}
+          >
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting…" : "Export XLSX"}
           </Button>
           <Button
             variant="outline"
