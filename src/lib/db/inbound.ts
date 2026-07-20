@@ -295,11 +295,9 @@ export async function createInboundReceive(
     if (item.received_qty < 0) {
       throw new Error("Received quantity cannot be negative.");
     }
-    const shipped = shippedByLine.get(item.po_line_id) ?? 0;
-    const prior = priorReceivedByLine.get(item.po_line_id) ?? 0;
-    if (prior + item.received_qty > shipped) {
+    if (!shippedByLine.has(item.po_line_id)) {
       throw new Error(
-        `Received quantity exceeds remaining shipped quantity for line ${item.po_line_id}.`,
+        `Line ${item.po_line_id} is not on this shipment.`,
       );
     }
   }

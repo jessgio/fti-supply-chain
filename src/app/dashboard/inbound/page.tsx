@@ -467,19 +467,25 @@ export default function InboundPage() {
                                   {formatNumber(item.quantity)}
                                 </td>
                                 <td className="px-3 py-2">
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    max={item.quantity}
-                                    className="h-8 w-24"
-                                    value={receivedQty}
-                                    onChange={(e) =>
-                                      updateLineQty(
-                                        item.po_line_id,
-                                        Number(e.target.value),
-                                      )
-                                    }
-                                  />
+                                  <div className="flex flex-col gap-0.5">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      className="h-8 w-24"
+                                      value={receivedQty}
+                                      onChange={(e) =>
+                                        updateLineQty(
+                                          item.po_line_id,
+                                          Number(e.target.value),
+                                        )
+                                      }
+                                    />
+                                    {receivedQty > item.quantity && (
+                                      <span className="text-xs text-amber-700">
+                                        +{formatNumber(receivedQty - item.quantity)} over shipped
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                               {receivedQty > 0 && (

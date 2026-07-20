@@ -18,7 +18,10 @@ export function billableLineQty(
   line: PurchaseOrderLine,
   po: { status?: PurchaseOrder["status"] },
 ): number {
-  return usesBilledQuantities(po) ? line.qty_received : line.qty_ordered;
+  // Short-closed POs bill received qty; over-receipts (defect buffers) do not increase billing.
+  return usesBilledQuantities(po)
+    ? Math.min(line.qty_received, line.qty_ordered)
+    : line.qty_ordered;
 }
 
 export function poSubtotal(po: Pick<PurchaseOrder, "lines">): number {
