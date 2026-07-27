@@ -100,6 +100,26 @@ export interface BundleComponent {
   qty_per_bundle: number;
 }
 
+/** Persisted bundle BOM row for UI editing (ids + display fields). */
+export interface BundleBomLink {
+  id: string;
+  bundle_sku_id: string;
+  bundle_sku_code: string;
+  bundle_name: string | null;
+  component_sku_id: string;
+  component_sku_code: string;
+  component_name: string | null;
+  qty_per_bundle: number;
+}
+
+export interface BundleSkuOption {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_active: boolean;
+  component_count: number;
+}
+
 export interface SalesRow {
   sale_date: string;
   channel: string;

@@ -149,6 +149,12 @@ const links: NavItem[] = [
         icon: Link2,
         roles: ["admin", "supply_chain"],
       },
+      {
+        href: "/dashboard/bundles",
+        label: "Bundle BOM",
+        icon: Boxes,
+        roles: ["admin", "supply_chain"],
+      },
     ],
   },
   {
