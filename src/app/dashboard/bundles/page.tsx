@@ -120,7 +120,11 @@ function BundleBomInner() {
   const bundlesWithCounts = useMemo(() => {
     return bundles.map((b) => ({
       ...b,
-      component_count: linksByBundle.get(b.id)?.length ?? 0,
+      // Prefer live link count; fall back to API count if links were truncated.
+      component_count: Math.max(
+        b.component_count,
+        linksByBundle.get(b.id)?.length ?? 0,
+      ),
     }));
   }, [bundles, linksByBundle]);
 
@@ -191,7 +195,19 @@ function BundleBomInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add");
-      setLinks((prev) => [...prev, data.link]);
+      setLinks((prev) => {
+        const next = data.link as BundleBomLink;
+        const idx = prev.findIndex(
+          (row) =>
+            row.id === next.id ||
+            (row.bundle_sku_id === next.bundle_sku_id &&
+              row.component_sku_id === next.component_sku_id),
+        );
+        if (idx >= 0) {
+          return prev.map((row, i) => (i === idx ? next : row));
+        }
+        return [...prev, next];
+      });
       setAddComponent(null);
       setAddQty("1");
     } catch (err) {

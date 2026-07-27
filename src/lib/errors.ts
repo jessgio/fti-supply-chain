@@ -15,6 +15,12 @@ export function errorMessage(error: unknown): string {
     if (details.includes("item_code") || details.includes("extract_codes")) {
       return "That item code and extract name combination is already in the catalog.";
     }
+    if (
+      details.includes("bundle_sku_id") ||
+      details.includes("bundle_components")
+    ) {
+      return "That component is already on this bundle’s BOM.";
+    }
     return "A record with that value already exists.";
   }
   if (error instanceof Error) return error.message;

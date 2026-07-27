@@ -37,14 +37,19 @@ export async function listBundleBomLinks(
   supabase: SupabaseClient,
   filters?: { bundleSkuId?: string },
 ): Promise<BundleBomLink[]> {
-  let query = supabase.from("bundle_components").select(LINK_SELECT);
-  if (filters?.bundleSkuId) {
-    query = query.eq("bundle_sku_id", filters.bundleSkuId);
-  }
+  const rows = await fetchAllRows<LinkRow>(() => {
+    let query = supabase.from("bundle_components").select(LINK_SELECT);
+    if (filters?.bundleSkuId) {
+      query = query.eq("bundle_sku_id", filters.bundleSkuId);
+    }
+    return query.order("created_at") as unknown as Parameters<
+      typeof fetchAllRows<LinkRow>
+    >[0] extends () => infer Q
+      ? Q
+      : never;
+  });
 
-  const { data, error } = await query.order("created_at");
-  if (error) throw error;
-  return ((data ?? []) as unknown as LinkRow[]).map(mapLinkRow);
+  return rows.map(mapLinkRow);
 }
 
 export interface NewBundleBomInput {
@@ -85,11 +90,14 @@ export async function createBundleBomLink(
 
   const { data, error } = await supabase
     .from("bundle_components")
-    .insert({
-      bundle_sku_id: input.bundle_sku_id,
-      component_sku_id: input.component_sku_id,
-      qty_per_bundle: input.qty_per_bundle,
-    })
+    .upsert(
+      {
+        bundle_sku_id: input.bundle_sku_id,
+        component_sku_id: input.component_sku_id,
+        qty_per_bundle: input.qty_per_bundle,
+      },
+      { onConflict: "bundle_sku_id,component_sku_id" },
+    )
     .select(LINK_SELECT)
     .single();
   if (error) throw error;
