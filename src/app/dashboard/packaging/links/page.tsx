@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Link2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Link2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,6 +19,7 @@ import {
   type SkuSearchOption,
 } from "@/components/packaging/sku-search-input";
 import { DEFAULT_TARGET_STOCK_MONTHS } from "@/lib/forecast/demand";
+import { downloadPackagingBomXlsx } from "@/lib/packaging/export-bom-xlsx";
 import { formatNumber } from "@/lib/utils";
 import type { ProductPackagingLink } from "@/types/database";
 
@@ -37,6 +38,7 @@ function PackagingLinksInner() {
   const [addPackaging, setAddPackaging] = useState<SkuSearchOption | null>(null);
   const [addQty, setAddQty] = useState("1");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [productFilter, setProductFilter] = useState("");
 
   const load = useCallback(async () => {
@@ -208,6 +210,18 @@ function PackagingLinksInner() {
     selectProduct(product);
   }
 
+  async function handleExportXlsx() {
+    setExporting(true);
+    setError(null);
+    try {
+      await downloadPackagingBomXlsx(links);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <PageShell wide>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -232,6 +246,14 @@ function PackagingLinksInner() {
             restock batch in Inventory.
           </p>
         </div>
+        <Button
+          variant="outline"
+          disabled={loading || exporting || links.length === 0}
+          onClick={() => void handleExportXlsx()}
+        >
+          <Download className="h-4 w-4" />
+          {exporting ? "Exporting…" : "Export XLSX"}
+        </Button>
       </div>
 
       {error && (
