@@ -19,10 +19,20 @@ export async function PATCH(request: Request, context: RouteContext) {
     const { id } = await context.params;
     const body = await request.json();
     const patch: {
+      extract_id?: string;
       extract_kg_per_unit?: number;
       notes?: string | null;
     } = {};
 
+    if (body.extract_id !== undefined) {
+      if (typeof body.extract_id !== "string" || !body.extract_id.trim()) {
+        return NextResponse.json(
+          { error: "Extract is required." },
+          { status: 400 },
+        );
+      }
+      patch.extract_id = body.extract_id.trim();
+    }
     if (body.extract_kg_per_unit !== undefined) {
       const kg = Number(body.extract_kg_per_unit);
       if (!Number.isFinite(kg) || kg <= 0) {
@@ -34,7 +44,10 @@ export async function PATCH(request: Request, context: RouteContext) {
       patch.extract_kg_per_unit = kg;
     }
     if (body.notes !== undefined) {
-      patch.notes = body.notes;
+      patch.notes =
+        body.notes === null || body.notes === ""
+          ? null
+          : String(body.notes);
     }
 
     const supabase = createAdminClient();

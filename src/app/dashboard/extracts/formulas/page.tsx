@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { formatNumber } from "@/lib/utils";
 import type { ExtractSummary, ProductExtractFormula } from "@/types/database";
 
 type SkuSearchOption = {
@@ -164,14 +163,20 @@ function ExtractFormulasInner() {
     }
   }
 
-  async function handleUpdateKg(formula: ProductExtractFormula, value: string) {
-    const kg = Number(value);
-    if (!Number.isFinite(kg) || kg <= 0) return;
+  async function handleUpdate(
+    formula: ProductExtractFormula,
+    patch: {
+      extract_id?: string;
+      extract_kg_per_unit?: number;
+      notes?: string | null;
+    },
+  ) {
+    setError(null);
     try {
       const res = await fetch(`/api/extracts/formulas/${formula.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extract_kg_per_unit: kg }),
+        body: JSON.stringify(patch),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update");
@@ -183,8 +188,33 @@ function ExtractFormulasInner() {
     }
   }
 
+  async function handleUpdateKg(formula: ProductExtractFormula, value: string) {
+    const kg = Number(value);
+    if (!Number.isFinite(kg) || kg <= 0) return;
+    if (kg === formula.extract_kg_per_unit) return;
+    await handleUpdate(formula, { extract_kg_per_unit: kg });
+  }
+
+  async function handleUpdateNotes(
+    formula: ProductExtractFormula,
+    value: string,
+  ) {
+    const notes = value.trim() || null;
+    if (notes === (formula.notes ?? null)) return;
+    await handleUpdate(formula, { notes });
+  }
+
+  async function handleUpdateExtract(
+    formula: ProductExtractFormula,
+    extractId: string,
+  ) {
+    if (!extractId || extractId === formula.extract_id) return;
+    await handleUpdate(formula, { extract_id: extractId });
+  }
+
   async function handleDelete(id: string) {
     if (!confirm("Remove this formula?")) return;
+    setError(null);
     try {
       const res = await fetch(`/api/extracts/formulas/${id}`, {
         method: "DELETE",
@@ -194,6 +224,36 @@ function ExtractFormulasInner() {
       setFormulas((prev) => prev.filter((f) => f.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  }
+
+  async function handleDeleteAllForProduct() {
+    if (!selectedProduct || productFormulas.length === 0) return;
+    if (
+      !confirm(
+        `Remove all ${productFormulas.length} formula${
+          productFormulas.length === 1 ? "" : "s"
+        } for ${selectedProduct.sku_code}?`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    const ids = productFormulas.map((f) => f.id);
+    try {
+      await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/extracts/formulas/${id}`, {
+            method: "DELETE",
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? "Failed to delete");
+        }),
+      );
+      setFormulas((prev) => prev.filter((f) => !ids.includes(f.id)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete");
+      await load();
     }
   }
 
@@ -278,15 +338,32 @@ function ExtractFormulasInner() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">
-                {selectedProduct
-                  ? `Formulas — ${selectedProduct.sku_code}`
-                  : "Select a product"}
-              </CardTitle>
-              <CardDescription>
-                kg of extract consumed per finished unit (pc). Used to compare
-                against actual production ledger usage.
-              </CardDescription>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">
+                    {selectedProduct
+                      ? `Formulas — ${selectedProduct.sku_code}`
+                      : "Select a product"}
+                  </CardTitle>
+                  <CardDescription>
+                    kg of extract consumed per finished unit (pc). Used to
+                    compare against actual production ledger usage. Edit values
+                    inline; changes save when you leave the field.
+                  </CardDescription>
+                </div>
+                {selectedProduct && productFormulas.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                    onClick={() => void handleDeleteAllForProduct()}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Remove all
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {selectedProduct ? (
@@ -349,7 +426,7 @@ function ExtractFormulasInner() {
                               kg / pc
                             </th>
                             <th className="px-3 py-2 font-medium">Notes</th>
-                            <th className="px-3 py-2" />
+                            <th className="px-3 py-2 w-10" />
                           </tr>
                         </thead>
                         <tbody>
@@ -359,35 +436,67 @@ function ExtractFormulasInner() {
                               className="border-t border-stone-100"
                             >
                               <td className="px-3 py-2">
-                                <span className="font-medium">
-                                  {formula.extract_item_no}
-                                </span>
-                                {formula.extract_name && (
-                                  <span className="block text-xs text-stone-500">
-                                    {formula.extract_name}
-                                  </span>
-                                )}
+                                <select
+                                  className="h-8 w-full min-w-[12rem] rounded-lg border border-stone-300 bg-white px-2 text-xs"
+                                  value={formula.extract_id}
+                                  onChange={(e) =>
+                                    void handleUpdateExtract(
+                                      formula,
+                                      e.target.value,
+                                    )
+                                  }
+                                  aria-label={`Extract for ${formula.extract_item_no}`}
+                                >
+                                  {extracts.map((ex) => (
+                                    <option key={ex.id} value={ex.id}>
+                                      {ex.item_no}
+                                      {ex.description
+                                        ? ` — ${ex.description}`
+                                        : ""}
+                                    </option>
+                                  ))}
+                                </select>
                               </td>
                               <td className="px-3 py-2 text-right">
                                 <Input
+                                  key={`${formula.id}-kg-${formula.extract_kg_per_unit}`}
                                   type="number"
                                   min="0"
                                   step="any"
                                   className="ml-auto h-8 w-28 text-right text-xs"
-                                  defaultValue={String(formula.extract_kg_per_unit)}
+                                  defaultValue={String(
+                                    formula.extract_kg_per_unit,
+                                  )}
                                   onBlur={(e) =>
-                                    void handleUpdateKg(formula, e.target.value)
+                                    void handleUpdateKg(
+                                      formula,
+                                      e.target.value,
+                                    )
                                   }
+                                  aria-label={`kg per unit for ${formula.extract_item_no}`}
                                 />
                               </td>
-                              <td className="px-3 py-2 text-stone-600">
-                                {formula.notes ?? "—"}
+                              <td className="px-3 py-2">
+                                <Input
+                                  key={`${formula.id}-notes-${formula.notes ?? ""}`}
+                                  className="h-8 text-xs"
+                                  defaultValue={formula.notes ?? ""}
+                                  placeholder="—"
+                                  onBlur={(e) =>
+                                    void handleUpdateNotes(
+                                      formula,
+                                      e.target.value,
+                                    )
+                                  }
+                                  aria-label={`Notes for ${formula.extract_item_no}`}
+                                />
                               </td>
                               <td className="px-3 py-2">
                                 <button
                                   type="button"
                                   onClick={() => void handleDelete(formula.id)}
                                   className="rounded p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600"
+                                  aria-label={`Delete formula for ${formula.extract_item_no}`}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
@@ -414,6 +523,10 @@ function ExtractFormulasInner() {
                 <FlaskConical className="h-4 w-4" />
                 All formulas
               </CardTitle>
+              <CardDescription>
+                Edit kg or notes inline, or remove a formula with the trash
+                icon.
+              </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               {formulas.length === 0 ? (
@@ -422,9 +535,13 @@ function ExtractFormulasInner() {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-stone-200 text-stone-500">
-                      <th className="py-2 pr-4">Product</th>
-                      <th className="py-2 pr-4">Extract</th>
-                      <th className="py-2 text-right">kg / pc</th>
+                      <th className="py-2 pr-4 font-medium">Product</th>
+                      <th className="py-2 pr-4 font-medium">Extract</th>
+                      <th className="py-2 pr-4 text-right font-medium">
+                        kg / pc
+                      </th>
+                      <th className="py-2 pr-4 font-medium">Notes</th>
+                      <th className="py-2 w-10" />
                     </tr>
                   </thead>
                   <tbody>
@@ -433,7 +550,7 @@ function ExtractFormulasInner() {
                         <td className="py-2 pr-4">
                           <button
                             type="button"
-                            className="text-left hover:underline"
+                            className="text-left font-medium hover:underline"
                             onClick={() => {
                               const product = products.find(
                                 (p) => p.id === f.product_sku_id,
@@ -444,9 +561,60 @@ function ExtractFormulasInner() {
                             {f.product_sku_code}
                           </button>
                         </td>
-                        <td className="py-2 pr-4">{f.extract_item_no}</td>
-                        <td className="py-2 text-right">
-                          {formatNumber(f.extract_kg_per_unit, 6)}
+                        <td className="py-2 pr-4">
+                          <select
+                            className="h-8 w-full min-w-[10rem] rounded-lg border border-stone-300 bg-white px-2 text-xs"
+                            value={f.extract_id}
+                            onChange={(e) =>
+                              void handleUpdateExtract(f, e.target.value)
+                            }
+                            aria-label={`Extract for ${f.product_sku_code}`}
+                          >
+                            {extracts.map((ex) => (
+                              <option key={ex.id} value={ex.id}>
+                                {ex.item_no}
+                                {ex.description
+                                  ? ` — ${ex.description}`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-2 pr-4 text-right">
+                          <Input
+                            key={`${f.id}-all-kg-${f.extract_kg_per_unit}`}
+                            type="number"
+                            min="0"
+                            step="any"
+                            className="ml-auto h-8 w-28 text-right text-xs"
+                            defaultValue={String(f.extract_kg_per_unit)}
+                            onBlur={(e) =>
+                              void handleUpdateKg(f, e.target.value)
+                            }
+                            aria-label={`kg per unit for ${f.product_sku_code} / ${f.extract_item_no}`}
+                          />
+                        </td>
+                        <td className="py-2 pr-4">
+                          <Input
+                            key={`${f.id}-all-notes-${f.notes ?? ""}`}
+                            className="h-8 text-xs"
+                            defaultValue={f.notes ?? ""}
+                            placeholder="—"
+                            onBlur={(e) =>
+                              void handleUpdateNotes(f, e.target.value)
+                            }
+                            aria-label={`Notes for ${f.product_sku_code} / ${f.extract_item_no}`}
+                          />
+                        </td>
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(f.id)}
+                            className="rounded p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600"
+                            aria-label={`Delete formula for ${f.product_sku_code} / ${f.extract_item_no}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </td>
                       </tr>
                     ))}

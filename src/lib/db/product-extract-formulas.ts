@@ -100,6 +100,12 @@ export async function updateProductExtractFormula(
   input: Partial<ProductExtractFormulaInput>,
 ): Promise<ProductExtractFormula> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (input.extract_id !== undefined) {
+    if (!input.extract_id) {
+      throw new Error("Extract is required.");
+    }
+    patch.extract_id = input.extract_id;
+  }
   if (input.extract_kg_per_unit !== undefined) {
     if (input.extract_kg_per_unit <= 0) {
       throw new Error("Extract kg per unit must be greater than zero.");
@@ -115,7 +121,14 @@ export async function updateProductExtractFormula(
     .eq("id", id)
     .select(FORMULA_SELECT)
     .single();
-  if (error) throw error;
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error(
+        "This product already has a formula for that extract.",
+      );
+    }
+    throw error;
+  }
   return mapFormulaRow(data as unknown as FormulaRow);
 }
 
