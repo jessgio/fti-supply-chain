@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
+  FlaskConical,
   Pencil,
   Trash2,
   Truck,
@@ -26,6 +27,7 @@ import {
   type PoSkuOption,
 } from "@/components/procurement/edit-po-dialog";
 import { SinglePoGantt } from "@/components/procurement/single-po-gantt";
+import type { FillingPoExtractShortfall } from "@/lib/extracts/filling-po-extract-shortfall";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -61,6 +63,9 @@ export default function PurchaseOrderPage() {
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [timeline, setTimeline] = useState<PoTimelineEntry | null>(null);
   const [allocations, setAllocations] = useState<ShipmentLineAllocation[]>([]);
+  const [extractShortfalls, setExtractShortfalls] = useState<
+    FillingPoExtractShortfall[]
+  >([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [skus, setSkus] = useState<PoSkuOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,19 +78,24 @@ export default function PurchaseOrderPage() {
     setLoading(true);
     setError(null);
     try {
-      const [poRes, timelineRes, allocRes] = await Promise.all([
+      const [poRes, timelineRes, allocRes, extractRes] = await Promise.all([
         fetch(`/api/procurement/pos/${poId}`, { signal }),
         fetch(`/api/procurement/pos/${poId}/timeline`, { signal }),
         fetch(`/api/shipments/allocations?po_id=${poId}`, { signal }),
+        fetch(`/api/procurement/pos/${poId}/extract-coverage`, { signal }),
       ]);
       const poData = await poRes.json();
       const timelineData = await timelineRes.json();
       const allocData = await allocRes.json();
+      const extractData = await extractRes.json();
 
       if (!poRes.ok) throw new Error(poData.error ?? "Failed to load PO");
       setPo(poData.purchaseOrder);
       setTimeline(timelineData.entry ?? null);
       setAllocations(allocData.allocations ?? []);
+      setExtractShortfalls(
+        extractRes.ok ? (extractData.shortfalls ?? []) : [],
+      );
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -184,6 +194,13 @@ export default function PurchaseOrderPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
       setPo(data.purchaseOrder);
+      const extractRes = await fetch(
+        `/api/procurement/pos/${poId}/extract-coverage`,
+      );
+      const extractData = await extractRes.json();
+      setExtractShortfalls(
+        extractRes.ok ? (extractData.shortfalls ?? []) : [],
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -314,6 +331,50 @@ export default function PurchaseOrderPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-6">
           {timeline && <SinglePoGantt entry={timeline} />}
+
+          {extractShortfalls.length > 0 && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+              <div className="flex items-start gap-2">
+                <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-rose-700" />
+                <div className="min-w-0 space-y-2">
+                  <p className="font-medium text-rose-900">
+                    Extract stock is short for open Filling demand
+                  </p>
+                  <ul className="space-y-2">
+                    {extractShortfalls.map((row) => (
+                      <li key={row.extract_id}>
+                        Need to top up{" "}
+                        <Link
+                          href={`/dashboard/extracts/${row.extract_id}`}
+                          className="font-medium underline underline-offset-2"
+                        >
+                          {row.extract_item_no}
+                        </Link>
+                        {row.extract_name ? ` (${row.extract_name})` : ""} by{" "}
+                        <span className="font-semibold">
+                          {formatNumber(row.shortfall_kg, 5)} kg
+                        </span>
+                        . This PO needs {formatNumber(row.po_needed_kg, 5)} kg;
+                        extract balance is{" "}
+                        {formatNumber(row.ending_balance, 5)} kg; open Filling
+                        POs need {formatNumber(row.total_needed_kg, 5)} kg total.
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-rose-800/80">
+                    Based on extract formulas and current extract ledger
+                    balances.{" "}
+                    <Link
+                      href="/dashboard/extracts/formulas"
+                      className="underline underline-offset-2"
+                    >
+                      Review formulas
+                    </Link>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader>
