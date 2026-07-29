@@ -398,12 +398,13 @@ function ProcurementInner() {
   ) {
     return poList.map((po) => {
       const isOpen = expanded.has(po.id) || skuQ.length > 0;
-      const lines = po.lines ?? [];
+      const lines = (po.lines ?? []).filter((line) => poLineOpenQty(line) > 0);
       const productOpenQty = poOpenQtyForPrimaryGroup(
         po,
         primarySkuId,
         packagingToProducts,
       );
+      if (productOpenQty <= 0) return null;
       return (
         <Fragment key={po.id}>
           <tr className="border-b border-stone-100">
@@ -507,7 +508,9 @@ function ProcurementInner() {
               <td />
               <td colSpan={9} className="py-2 pr-4">
                 {lines.length === 0 ? (
-                  <p className="py-1 text-xs text-stone-500">No line items.</p>
+                  <p className="py-1 text-xs text-stone-500">
+                    No open line items remaining.
+                  </p>
                 ) : (
                   <table className="w-full text-left text-xs">
                     <thead>

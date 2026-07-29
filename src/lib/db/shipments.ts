@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  PoShortfallResolution,
   Shipment,
   ShipmentLineAllocation,
   ShipmentStatus,
@@ -18,7 +19,7 @@ import {
   shipmentNumberPrefix,
   stripShipmentDuplicateSuffix,
 } from "@/lib/shipments/shipment-number";
-import { syncPoStatusesAfterShipmentChange } from "@/lib/db/po-lifecycle";
+import { recalculatePoStatus, syncPoStatusesAfterShipmentChange } from "@/lib/db/po-lifecycle";
 import {
   deleteShipmentDocuments,
   getMissingDocumentCountsByShipmentId,
@@ -26,6 +27,10 @@ import {
   setRequiredDocuments,
 } from "@/lib/db/shipment-documents";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
+import {
+  adjustPoOrderedToAllocated,
+  isPoShortfallResolution,
+} from "@/lib/procurement/po-shortfall";
 
 export interface CreateShipmentInput {
   shipment_number?: string;
@@ -38,6 +43,13 @@ export interface CreateShipmentInput {
   po_ids: string[];
   items: Array<{ po_line_id: string; quantity: number }>;
   required_documents?: ShipmentDocumentType[];
+  /**
+   * When shipping less than remaining PO qty:
+   * omit/undefined = leave open for another shipment
+   * leave_as_is = store on shipment; apply close after inbound closes it
+   * adjust_ordered = set qty_ordered to total allocated after this save
+   */
+  po_resolution?: PoShortfallResolution;
 }
 
 export interface UpdateShipmentInput {
@@ -52,6 +64,7 @@ export interface UpdateShipmentInput {
   po_ids?: string[];
   items?: Array<{ po_line_id: string; quantity: number }>;
   required_documents?: ShipmentDocumentType[];
+  po_resolution?: PoShortfallResolution | null;
 }
 
 export interface ShipmentListParams {
@@ -70,6 +83,7 @@ const SHIPMENT_SELECT = `
   delay_days,
   expected_delivery_date,
   notes,
+  po_shortfall_resolution,
   created_at,
   updated_at,
   shipment_purchase_orders (
@@ -105,6 +119,7 @@ type ShipmentRow = {
   delay_days: number;
   expected_delivery_date: string;
   notes: string | null;
+  po_shortfall_resolution?: PoShortfallResolution | null;
   created_at?: string;
   updated_at?: string;
   shipment_purchase_orders?: Array<{
@@ -198,6 +213,7 @@ function mapShipmentRow(row: ShipmentRow): Shipment {
     delay_days: row.delay_days,
     expected_delivery_date: row.expected_delivery_date,
     notes: row.notes,
+    po_shortfall_resolution: row.po_shortfall_resolution ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     purchase_orders: Array.from(poMap.values()),
@@ -293,7 +309,7 @@ export async function getLineAllocations(
   const { data: lines, error: linesError } = await supabase
     .from("purchase_order_lines")
     .select(
-      "id, po_id, sku_id, qty_ordered, skus(sku_code, name), purchase_orders!inner(id, po_number)",
+      "id, po_id, sku_id, qty_ordered, is_closed, skus(sku_code, name), purchase_orders!inner(id, po_number)",
     )
     .in("po_id", poIds);
   if (linesError) throw linesError;
@@ -338,6 +354,7 @@ export async function getLineAllocations(
     const qtyOrdered = Number(line.qty_ordered);
     const qtyAllocated = allocatedByLine.get(lineId) ?? 0;
     const currentQty = currentByLine.get(lineId) ?? 0;
+    const isClosed = Boolean(line.is_closed);
     return {
       po_line_id: lineId,
       po_id: po.id,
@@ -347,7 +364,9 @@ export async function getLineAllocations(
       sku_name: sku?.name ?? null,
       qty_ordered: qtyOrdered,
       qty_allocated: qtyAllocated,
-      qty_available: Math.max(0, qtyOrdered - qtyAllocated + currentQty),
+      qty_available: isClosed
+        ? 0
+        : Math.max(0, qtyOrdered - qtyAllocated + currentQty),
     };
   });
 }
@@ -422,9 +441,15 @@ async function validateShipmentItems(
   for (const item of items) {
     const alloc = allocations.get(item.po_line_id);
     if (!alloc) throw new Error("Invalid PO line selected.");
-    if (item.quantity > alloc.available + (excludeShipmentId ? alloc.current : 0)) {
+    if (alloc.is_closed && item.quantity > alloc.current) {
       throw new Error(
-        `Quantity for ${alloc.sku_code} exceeds available (${alloc.available} units).`,
+        `Cannot ship more on ${alloc.sku_code}: the PO line is already closed.`,
+      );
+    }
+    const maxQty = alloc.available + (excludeShipmentId ? alloc.current : 0);
+    if (item.quantity > maxQty) {
+      throw new Error(
+        `Quantity for ${alloc.sku_code} exceeds available (${maxQty} units).`,
       );
     }
   }
@@ -437,21 +462,25 @@ async function getLineAllocationsForLines(
 ): Promise<
   Map<
     string,
-    { sku_code: string; available: number; current: number }
+    {
+      sku_code: string;
+      allocated: number;
+      available: number;
+      current: number;
+      is_closed: boolean;
+    }
   >
 > {
   const { data: lines, error: linesError } = await supabase
     .from("purchase_order_lines")
-    .select("id, qty_ordered, skus(sku_code)")
+    .select("id, qty_ordered, is_closed, skus(sku_code)")
     .in("id", lineIds);
   if (linesError) throw linesError;
 
-  let allocQuery = supabase
+  const { data: allocated, error: allocError } = await supabase
     .from("shipment_items")
     .select("po_line_id, quantity, shipment_id")
     .in("po_line_id", lineIds);
-
-  const { data: allocated, error: allocError } = await allocQuery;
   if (allocError) throw allocError;
 
   const allocatedByLine = new Map<string, number>();
@@ -467,12 +496,19 @@ async function getLineAllocationsForLines(
 
   const result = new Map<
     string,
-    { sku_code: string; available: number; current: number }
+    {
+      sku_code: string;
+      allocated: number;
+      available: number;
+      current: number;
+      is_closed: boolean;
+    }
   >();
   for (const line of lines ?? []) {
     const id = line.id as string;
     const qtyOrdered = Number(line.qty_ordered);
     const qtyAllocated = allocatedByLine.get(id) ?? 0;
+    const isClosed = Boolean(line.is_closed);
     const sku = unwrapRelation(
       line.skus as
         | { sku_code: string }
@@ -481,11 +517,88 @@ async function getLineAllocationsForLines(
     );
     result.set(id, {
       sku_code: sku?.sku_code ?? "",
-      available: Math.max(0, qtyOrdered - qtyAllocated),
+      allocated: qtyAllocated,
+      available: isClosed ? 0 : Math.max(0, qtyOrdered - qtyAllocated),
       current: currentByLine.get(id) ?? 0,
+      is_closed: isClosed,
     });
   }
   return result;
+}
+
+type ShortShipAdjustment = {
+  po_line_id: string;
+  available: number;
+  shipQty: number;
+  totalAllocated: number;
+};
+
+async function findShortShipLines(
+  supabase: SupabaseClient,
+  items: Array<{ po_line_id: string; quantity: number }>,
+  excludeShipmentId?: string,
+): Promise<ShortShipAdjustment[]> {
+  const allocations = await getLineAllocationsForLines(
+    supabase,
+    items.map((i) => i.po_line_id),
+    excludeShipmentId,
+  );
+  const short: ShortShipAdjustment[] = [];
+
+  for (const item of items) {
+    const alloc = allocations.get(item.po_line_id);
+    if (!alloc || alloc.is_closed) continue;
+    const availableForInput =
+      alloc.available + (excludeShipmentId ? alloc.current : 0);
+    if (item.quantity <= 0 || item.quantity >= availableForInput) continue;
+    short.push({
+      po_line_id: item.po_line_id,
+      available: availableForInput,
+      shipQty: item.quantity,
+      totalAllocated: alloc.allocated - alloc.current + item.quantity,
+    });
+  }
+  return short;
+}
+
+function requirePoResolutionForShortShip(
+  shortLines: ShortShipAdjustment[],
+  poResolution: PoShortfallResolution | null | undefined,
+): PoShortfallResolution | null {
+  if (shortLines.length === 0) {
+    return null;
+  }
+  if (poResolution == null) {
+    // Leave open for further shipment
+    return null;
+  }
+  if (!isPoShortfallResolution(poResolution)) {
+    throw new Error("Invalid purchase order shortfall resolution.");
+  }
+  return poResolution;
+}
+
+async function applyShipPoResolution(
+  supabase: SupabaseClient,
+  shortLines: ShortShipAdjustment[],
+  poResolution: PoShortfallResolution | null,
+  poIds: string[],
+): Promise<void> {
+  if (!poResolution || shortLines.length === 0) return;
+
+  if (poResolution === "adjust_ordered") {
+    await adjustPoOrderedToAllocated(
+      supabase,
+      shortLines.map((line) => ({
+        po_line_id: line.po_line_id,
+        qty_ordered: line.totalAllocated,
+      })),
+    );
+  }
+
+  for (const poId of poIds) {
+    await recalculatePoStatus(supabase, poId);
+  }
 }
 
 export async function createShipment(
@@ -497,6 +610,12 @@ export async function createShipment(
   }
 
   await validateShipmentItems(supabase, input.items);
+
+  const shortLines = await findShortShipLines(supabase, input.items);
+  const poResolution = requirePoResolutionForShortShip(
+    shortLines,
+    input.po_resolution,
+  );
 
   const transitDays = input.transit_days ?? 21;
   const delayDays = input.delay_days ?? 0;
@@ -533,6 +652,7 @@ export async function createShipment(
       delay_days: delayDays,
       expected_delivery_date: expectedDelivery,
       notes: input.notes ?? null,
+      po_shortfall_resolution: poResolution,
     })
     .select("id")
     .single();
@@ -571,6 +691,12 @@ export async function createShipment(
     );
   }
 
+  await applyShipPoResolution(
+    supabase,
+    shortLines,
+    poResolution,
+    input.po_ids,
+  );
   await syncPoStatusesAfterShipmentChange(supabase, input.po_ids);
 
   const created = await getShipment(supabase, shipment.id);
@@ -601,6 +727,13 @@ export async function updateShipment(
     await validateShipmentItems(supabase, input.items, id);
   }
 
+  const shortLines = input.items
+    ? await findShortShipLines(supabase, input.items, id)
+    : [];
+  const poResolution = input.items
+    ? requirePoResolutionForShortShip(shortLines, input.po_resolution)
+    : (existing.po_shortfall_resolution ?? null);
+
   const status = resolveShipmentStatusFromDeparture(
     input.status ?? existing.status,
     departureDate,
@@ -617,6 +750,11 @@ export async function updateShipment(
       delay_days: delayDays,
       expected_delivery_date: expectedDelivery,
       notes: input.notes !== undefined ? input.notes : existing.notes,
+      ...(input.items
+        ? { po_shortfall_resolution: poResolution }
+        : input.po_resolution !== undefined
+          ? { po_shortfall_resolution: poResolution }
+          : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
@@ -649,6 +787,8 @@ export async function updateShipment(
       .from("shipment_items")
       .insert(itemRows);
     if (itemsError) throw itemsError;
+
+    await applyShipPoResolution(supabase, shortLines, poResolution, poIds);
   }
 
   if (input.required_documents !== undefined) {
@@ -734,7 +874,17 @@ export async function listOpenShipmentsForInbound(
     );
 
     if (hasRemaining) {
-      eligible.push(shipment);
+      const enriched: Shipment = {
+        ...shipment,
+        purchase_orders: (shipment.purchase_orders ?? []).map((po) => ({
+          ...po,
+          items: (po.items ?? []).map((item) => ({
+            ...item,
+            qty_previously_received: receivedByLine.get(item.po_line_id) ?? 0,
+          })),
+        })),
+      };
+      eligible.push(enriched);
     }
   }
 

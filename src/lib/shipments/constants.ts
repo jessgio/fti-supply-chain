@@ -39,19 +39,26 @@ export function isShipmentClosed(status: ShipmentStatus): boolean {
   return status === "closed";
 }
 
-export const INBOUND_STATUSES = ["pending", "partial", "complete"] as const;
+export const INBOUND_STATUSES = [
+  "pending",
+  "partial",
+  "complete",
+  "short_received",
+] as const;
 export type InboundReceiveStatus = (typeof INBOUND_STATUSES)[number];
 
 export const INBOUND_STATUS_LABELS: Record<InboundReceiveStatus, string> = {
   pending: "Pending",
   partial: "Partial",
   complete: "Complete",
+  short_received: "Short received",
 };
 
 export const INBOUND_STATUS_STYLES: Record<InboundReceiveStatus, string> = {
   pending: "bg-stone-100 text-stone-700",
   partial: "bg-amber-100 text-amber-800",
   complete: "bg-emerald-100 text-emerald-800",
+  short_received: "bg-rose-100 text-rose-800",
 };
 
 /** PO statuses shown on the master timeline (ongoing orders). */

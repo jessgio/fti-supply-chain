@@ -234,6 +234,9 @@ export default function PurchaseOrderPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={STATUS_STYLES[po.status]}>{STATUS_LABELS[po.status]}</Badge>
+            {totals.isShortReceived && (
+              <Badge className="bg-rose-100 text-rose-800">Short received</Badge>
+            )}
             {po.lark_instance_code ? (
               <Badge
                 className={`border ${larkApprovalStatusBadgeClass(po.lark_approval_status)}`}
@@ -332,6 +335,8 @@ export default function PurchaseOrderPage() {
                     const alloc = allocationByLine.get(line.id);
                     const shipped = alloc?.qty_allocated ?? 0;
                     const open = poLineOpenQty(line);
+                    const closedShort =
+                      line.is_closed && line.qty_received < line.qty_ordered;
                     return (
                       <tr key={line.id} className="border-b border-stone-100">
                         <td className="py-2 pr-4">
@@ -339,6 +344,11 @@ export default function PurchaseOrderPage() {
                           {line.sku_name && (
                             <span className="block text-xs text-stone-500">
                               {line.sku_name}
+                            </span>
+                          )}
+                          {closedShort && (
+                            <span className="mt-0.5 block text-xs text-rose-700">
+                              Closed short · received less than ordered
                             </span>
                           )}
                         </td>

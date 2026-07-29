@@ -63,6 +63,10 @@ function resolvePrimaryKeysForPo(
   const keys = new Set<string>();
 
   for (const line of po.lines ?? []) {
+    // Fully received / short-closed lines should not keep a product on the
+    // active procurement list — only remaining open SKUs stay visible.
+    if (poLineOpenQty(line) <= 0) continue;
+
     const linkedProducts = packagingToProducts.get(line.sku_id);
     if (linkedProducts && linkedProducts.length > 0) {
       for (const productId of linkedProducts) {
@@ -81,12 +85,16 @@ function resolvePrimaryKeysForPo(
     keys.add(line.sku_id);
   }
 
-  if (keys.size === 0 && po.pd_project_id) {
-    keys.add(`pd:${po.pd_project_id}`);
-  }
-
   if (keys.size === 0) {
-    keys.add(UNCATEGORIZED_KEY);
+    const hasOpenLines = (po.lines ?? []).some((line) => poLineOpenQty(line) > 0);
+    if (!hasOpenLines) {
+      return [];
+    }
+    if (po.pd_project_id) {
+      keys.add(`pd:${po.pd_project_id}`);
+    } else {
+      keys.add(UNCATEGORIZED_KEY);
+    }
   }
 
   return [...keys];
@@ -102,6 +110,8 @@ export function classifyPoForPrimary(
   let hasPackaging = false;
 
   for (const line of po.lines ?? []) {
+    if (poLineOpenQty(line) <= 0) continue;
+
     const linkedProducts = packagingToProducts.get(line.sku_id) ?? [];
     if (linkedProducts.includes(primarySkuId)) {
       hasPackaging = true;
@@ -202,27 +212,39 @@ export function groupPurchaseOrdersByPrimaryGood(
 
       const seen = poIdsByGroup.get(key)!;
       if (seen.has(po.id)) continue;
-      seen.add(po.id);
 
+      const primarySkuId = groups.get(key)?.primarySkuId ?? null;
       const role =
-        key !== UNCATEGORIZED_KEY && !key.startsWith("pd:") && groups.get(key)?.primarySkuId
+        key !== UNCATEGORIZED_KEY && !key.startsWith("pd:") && primarySkuId
           ? classifyPoForPrimary(
               po,
-              groups.get(key)!.primarySkuId!,
+              primarySkuId,
               packagingToProducts,
               skuById,
             )
           : undefined;
 
-      groups.get(key)!.pos.push(role ? { ...po, primaryRole: role } : po);
+      const poWithRole = role ? { ...po, primaryRole: role } : po;
+      // Skip product sections where this PO no longer has open qty for that SKU.
+      if (
+        poOpenQtyForPrimaryGroup(poWithRole, primarySkuId, packagingToProducts) <=
+        0
+      ) {
+        continue;
+      }
+
+      seen.add(po.id);
+      groups.get(key)!.pos.push(poWithRole);
     }
   }
 
-  return [...groups.values()].sort((a, b) => {
-    if (a.key === UNCATEGORIZED_KEY) return 1;
-    if (b.key === UNCATEGORIZED_KEY) return -1;
-    return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
-  });
+  return [...groups.values()]
+    .filter((group) => group.pos.length > 0)
+    .sort((a, b) => {
+      if (a.key === UNCATEGORIZED_KEY) return 1;
+      if (b.key === UNCATEGORIZED_KEY) return -1;
+      return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+    });
 }
 
 export const ACTIVE_PO_STATUSES = new Set([

@@ -2,9 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   InboundReceive,
   InboundReceiveStatus,
+  PoShortfallResolution,
   PoTimelineEntry,
 } from "@/types/database";
 import { receivePoLine } from "@/lib/db/procurement";
+import { resolvePoShortfallAfterShortClose } from "@/lib/procurement/po-shortfall";
 import {
   computePoDisplayStatus,
   isTimelineActiveShipmentStatus,
@@ -87,6 +89,18 @@ export interface CreateInboundReceiveInput {
     received_qty: number;
     batches?: InboundReceiveBatchInput[];
   }>;
+  /**
+   * When cumulative received is short of shipped qty:
+   * - true: close the shipment (no further inbound)
+   * - false/undefined: leave open for further receives
+   */
+  close_shipment?: boolean;
+  /**
+   * Required when close_shipment is true and receipt is short.
+   * leave_as_is: short-close PO lines (mark receiving less)
+   * adjust_ordered: set qty_ordered to qty_received, then complete PO
+   */
+  po_resolution?: PoShortfallResolution;
 }
 
 export interface InboundListParams {
@@ -319,12 +333,36 @@ export async function createInboundReceive(
       input.items.find((i) => i.po_line_id === item.po_line_id)?.received_qty ??
       0;
     return {
+      po_line_id: item.po_line_id,
       ordered_qty: Number(item.quantity),
       received_qty: prior + increment,
     };
   });
   const shipmentComplete =
     deriveReceiveStatus(cumulativeItems) === "complete";
+  const shipmentShort = !shipmentComplete;
+  const closeShipment = shipmentShort ? input.close_shipment === true : true;
+  const poResolution = input.po_resolution;
+
+  if (shipmentShort && closeShipment && !poResolution) {
+    throw new Error(
+      "Choose whether to leave PO quantities as-is (mark short received) or adjust ordered quantities to match what was received.",
+    );
+  }
+  if (
+    poResolution &&
+    poResolution !== "leave_as_is" &&
+    poResolution !== "adjust_ordered"
+  ) {
+    throw new Error("Invalid purchase order shortfall resolution.");
+  }
+
+  const receiveStatus: InboundReceiveStatus =
+    shipmentShort && closeShipment
+      ? poResolution === "leave_as_is"
+        ? "short_received"
+        : "complete"
+      : status;
 
   const receiveDate = input.receive_date ?? new Date().toISOString().slice(0, 10);
 
@@ -335,7 +373,7 @@ export async function createInboundReceive(
       po_id: primaryPoId,
       shipment_id: input.shipment_id,
       receive_date: receiveDate,
-      status,
+      status: receiveStatus,
       received_by: input.received_by ?? null,
       notes: input.notes ?? null,
     })
@@ -396,7 +434,8 @@ export async function createInboundReceive(
       }
     }
 
-    const newShipmentStatus = shipmentComplete ? "closed" : "delivered";
+    const newShipmentStatus =
+      shipmentComplete || closeShipment ? "closed" : "delivered";
     await supabase
       .from("shipments")
       .update({
@@ -404,6 +443,23 @@ export async function createInboundReceive(
         updated_at: new Date().toISOString(),
       })
       .eq("id", input.shipment_id);
+
+    if (shipmentShort && closeShipment && poResolution) {
+      const shortPoLineIds = cumulativeItems
+        .filter((item) => item.received_qty < item.ordered_qty)
+        .map((item) => item.po_line_id);
+      await resolvePoShortfallAfterShortClose(
+        supabase,
+        shortPoLineIds,
+        poResolution,
+      );
+    } else if (newShipmentStatus === "closed") {
+      await applyDeferredShipShortfallResolution(
+        supabase,
+        input.shipment_id,
+        shipmentItems.map((item) => item.po_line_id),
+      );
+    }
 
     for (const poId of poIds) {
       await recalculatePoStatus(supabase, poId);
@@ -423,6 +479,26 @@ export async function createInboundReceive(
   const created = await getInboundReceive(supabase, receive.id);
   if (!created) throw new Error("Failed to load created inbound receive.");
   return created;
+}
+
+/**
+ * When a shipment was short-shipped with leave_as_is, close remaining PO open qty
+ * after the shipment is fully closed by inbound.
+ */
+async function applyDeferredShipShortfallResolution(
+  supabase: SupabaseClient,
+  shipmentId: string,
+  poLineIds: string[],
+): Promise<void> {
+  const { data: shipment, error } = await supabase
+    .from("shipments")
+    .select("po_shortfall_resolution")
+    .eq("id", shipmentId)
+    .maybeSingle();
+  if (error) throw error;
+  if (shipment?.po_shortfall_resolution !== "leave_as_is") return;
+
+  await resolvePoShortfallAfterShortClose(supabase, poLineIds, "leave_as_is");
 }
 
 export async function deleteInboundReceive(

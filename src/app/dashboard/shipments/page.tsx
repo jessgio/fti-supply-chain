@@ -44,12 +44,20 @@ import {
 import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
 import { mergeAutoFillLineQtys } from "@/lib/shipments/line-qtys";
+import { detectShortShipLines } from "@/lib/shipments/short-ship";
+import {
+  ShortShipWizardPanel,
+  shortShipDialogDescription,
+  shortShipDialogTitle,
+  type ShortShipWizardStep,
+} from "@/components/shipments/short-ship-wizard";
 import {
   groupShipmentsByPrimaryGood,
   type ShipmentGroupEntry,
 } from "@/lib/shipments/shipment-primary-groups";
 import { formatNumber, cn } from "@/lib/utils";
 import type {
+  PoShortfallResolution,
   ProductPackagingLink,
   PurchaseOrder,
   Shipment,
@@ -162,6 +170,7 @@ function ShipmentsInner() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [wizardStep, setWizardStep] = useState<ShortShipWizardStep>("form");
 
   const [selectedPoIds, setSelectedPoIds] = useState<string[]>([]);
   const [allocations, setAllocations] = useState<ShipmentLineAllocation[]>([]);
@@ -354,7 +363,18 @@ function ShipmentsInner() {
     };
   }, [activeShipments, historicalShipments]);
 
-  async function handleCreate() {
+  const shortLines = detectShortShipLines(allocations, lineQtys);
+
+  function resetCreateDialog() {
+    setDialogOpen(false);
+    setSelectedPoIds([]);
+    setNotes("");
+    setRequiredDocuments(defaultRequiredDocuments("sea"));
+    setWizardStep("form");
+    setFormError(null);
+  }
+
+  async function submitCreate(poResolution?: PoShortfallResolution) {
     setSaving(true);
     setFormError(null);
     try {
@@ -378,20 +398,33 @@ function ShipmentsInner() {
           po_ids: selectedPoIds,
           items,
           required_documents: requiredDocuments,
+          ...(poResolution ? { po_resolution: poResolution } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create shipment");
-      setDialogOpen(false);
-      setSelectedPoIds([]);
-      setNotes("");
-      setRequiredDocuments(defaultRequiredDocuments("sea"));
+      resetCreateDialog();
       await loadShipments();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create");
+      setWizardStep("form");
     } finally {
       setSaving(false);
     }
+  }
+
+  function handlePrimaryCreate() {
+    const hasItems = allocations.some((a) => (lineQtys[a.po_line_id] ?? 0) > 0);
+    if (!hasItems) {
+      setFormError("Enter a ship quantity for at least one line.");
+      return;
+    }
+    setFormError(null);
+    if (shortLines.length > 0) {
+      setWizardStep("close_ship");
+      return;
+    }
+    void submitCreate();
   }
 
 
@@ -414,6 +447,7 @@ function ShipmentsInner() {
           <Button
             onClick={() => {
               setRequiredDocuments(defaultRequiredDocuments(shipmentType));
+              setWizardStep("form");
               setDialogOpen(true);
             }}
           >
@@ -712,12 +746,31 @@ function ShipmentsInner() {
 
       <Dialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title="New shipment"
-        description="Allocate PO line quantities to this shipment. You can split a PO across multiple shipments."
+        onClose={resetCreateDialog}
+        title={shortShipDialogTitle(wizardStep) ?? "New shipment"}
+        description={
+          shortShipDialogDescription(wizardStep) ??
+          "Allocate PO line quantities to this shipment. You can split a PO across multiple shipments."
+        }
         className="max-w-2xl"
       >
         <div className="space-y-4">
+          {wizardStep !== "form" ? (
+            <ShortShipWizardPanel
+              step={wizardStep}
+              shortLines={shortLines}
+              saving={saving}
+              onLeaveOpen={() => void submitCreate()}
+              onChooseClose={() => setWizardStep("po_resolution")}
+              onResolve={(resolution) => void submitCreate(resolution)}
+              onBack={() =>
+                setWizardStep(
+                  wizardStep === "po_resolution" ? "close_ship" : "form",
+                )
+              }
+            />
+          ) : (
+            <>
             <div>
               <label className="mb-1 block text-sm font-medium text-stone-700">
                 Purchase orders
@@ -867,16 +920,22 @@ function ShipmentsInner() {
           )}
 
           <div className="flex justify-end gap-2 border-t border-stone-200 pt-4">
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={resetCreateDialog}>
               Cancel
             </Button>
             <Button
-              onClick={handleCreate}
+              onClick={handlePrimaryCreate}
               disabled={saving || !selectedPoIds.length || !allocations.length}
             >
-              {saving ? "Creating…" : "Create shipment"}
+              {saving
+                ? "Creating…"
+                : shortLines.length > 0
+                  ? "Continue"
+                  : "Create shipment"}
             </Button>
           </div>
+            </>
+          )}
         </div>
       </Dialog>
 

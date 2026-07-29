@@ -23,12 +23,20 @@ import { ShipmentDocumentsDialog } from "@/components/shipments/shipment-documen
 import { ShipmentDocumentChecklist } from "@/components/shipments/shipment-document-checklist";
 import { defaultRequiredDocuments } from "@/lib/shipments/document-types";
 import type {
+  PoShortfallResolution,
   PurchaseOrder,
   Shipment,
   ShipmentDocumentType,
   ShipmentLineAllocation,
 } from "@/types/database";
 import { formatNumber } from "@/lib/utils";
+import { detectShortShipLines } from "@/lib/shipments/short-ship";
+import {
+  ShortShipWizardPanel,
+  shortShipDialogDescription,
+  shortShipDialogTitle,
+  type ShortShipWizardStep,
+} from "@/components/shipments/short-ship-wizard";
 
 export function PoShipmentsSection({
   po,
@@ -58,6 +66,7 @@ export function PoShipmentsSection({
     null,
   );
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState<ShortShipWizardStep>("form");
 
   useEffect(() => {
     fetch("/api/shipments")
@@ -110,7 +119,15 @@ export function PoShipmentsSection({
     setTransitDays(DEFAULT_TRANSIT_DAYS[shipmentType]);
   }, [shipmentType]);
 
-  async function handleCreate() {
+  const shortLines = detectShortShipLines(allocations, lineQtys);
+
+  function resetDialog() {
+    setDialogOpen(false);
+    setWizardStep("form");
+    setFormError(null);
+  }
+
+  async function submitCreate(poResolution?: PoShortfallResolution) {
     setSaving(true);
     setFormError(null);
     try {
@@ -134,17 +151,38 @@ export function PoShipmentsSection({
           po_ids: [po.id],
           items,
           required_documents: requiredDocuments,
+          ...(poResolution ? { po_resolution: poResolution } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create shipment");
-      setDialogOpen(false);
+      resetDialog();
       onChanged();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create");
+      setWizardStep("form");
     } finally {
       setSaving(false);
     }
+  }
+
+  function handlePrimaryAction() {
+    if (itemsMissing()) return;
+    if (shortLines.length > 0) {
+      setWizardStep("close_ship");
+      return;
+    }
+    void submitCreate();
+  }
+
+  function itemsMissing() {
+    const hasItems = allocations.some((a) => (lineQtys[a.po_line_id] ?? 0) > 0);
+    if (!hasItems) {
+      setFormError("Enter a ship quantity for at least one line.");
+      return true;
+    }
+    setFormError(null);
+    return false;
   }
 
   return (
@@ -157,6 +195,7 @@ export function PoShipmentsSection({
         {po.status !== "received" && po.status !== "cancelled" && (
           <Button size="sm" variant="outline" onClick={() => {
             setRequiredDocuments(defaultRequiredDocuments(shipmentType));
+            setWizardStep("form");
             setDialogOpen(true);
           }}>
             <Plus className="h-3.5 w-3.5" />
@@ -227,12 +266,33 @@ export function PoShipmentsSection({
 
       <Dialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title="Log shipment"
-        description={`Allocate line quantities from ${po.po_number} to this shipment.`}
+        onClose={resetDialog}
+        title={
+          shortShipDialogTitle(wizardStep) ?? "Log shipment"
+        }
+        description={
+          shortShipDialogDescription(wizardStep) ??
+          `Allocate line quantities from ${po.po_number} to this shipment.`
+        }
         className="max-w-xl"
       >
         <div className="space-y-4">
+          {wizardStep !== "form" ? (
+            <ShortShipWizardPanel
+              step={wizardStep}
+              shortLines={shortLines}
+              saving={saving}
+              onLeaveOpen={() => void submitCreate()}
+              onChooseClose={() => setWizardStep("po_resolution")}
+              onResolve={(resolution) => void submitCreate(resolution)}
+              onBack={() =>
+                setWizardStep(
+                  wizardStep === "po_resolution" ? "close_ship" : "form",
+                )
+              }
+            />
+          ) : (
+            <>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm">
               <span className="mb-1 block text-stone-600">Type</span>
@@ -321,16 +381,22 @@ export function PoShipmentsSection({
           {formError && <p className="text-sm text-red-600">{formError}</p>}
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+            <Button variant="outline" onClick={resetDialog} disabled={saving}>
               Cancel
             </Button>
             <Button
-              onClick={handleCreate}
+              onClick={handlePrimaryAction}
               disabled={saving || allocations.length === 0}
             >
-              {saving ? "Saving…" : "Create shipment"}
+              {saving
+                ? "Saving…"
+                : shortLines.length > 0
+                  ? "Continue"
+                  : "Create shipment"}
             </Button>
           </div>
+            </>
+          )}
         </div>
       </Dialog>
 

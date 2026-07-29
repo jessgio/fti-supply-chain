@@ -594,7 +594,13 @@ export type ShipmentType = "sea" | "air" | "local";
 
 export type ShipmentStatus = "planned" | "in_transit" | "delivered" | "closed";
 
-export type InboundReceiveStatus = "pending" | "partial" | "complete";
+export type InboundReceiveStatus =
+  | "pending"
+  | "partial"
+  | "complete"
+  | "short_received";
+
+export type PoShortfallResolution = "leave_as_is" | "adjust_ordered";
 
 export interface ShipmentItemRef {
   id: string;
@@ -606,6 +612,8 @@ export interface ShipmentItemRef {
   sku_name: string | null;
   quantity: number;
   qty_ordered: number;
+  /** Qty already received against this shipment (open-inbound list only). */
+  qty_previously_received?: number;
 }
 
 export interface ShipmentPoRef {
@@ -625,6 +633,8 @@ export interface Shipment {
   delay_days: number;
   expected_delivery_date: string;
   notes: string | null;
+  /** Ship-time shortfall intent; leave_as_is applied when inbound closes shipment. */
+  po_shortfall_resolution?: PoShortfallResolution | null;
   created_at?: string;
   updated_at?: string;
   purchase_orders?: ShipmentPoRef[];

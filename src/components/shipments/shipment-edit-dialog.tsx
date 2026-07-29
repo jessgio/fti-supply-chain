@@ -14,9 +14,17 @@ import {
   type ShipmentType,
 } from "@/lib/shipments/constants";
 import { mergeAutoFillLineQtys } from "@/lib/shipments/line-qtys";
+import { detectShortShipLines } from "@/lib/shipments/short-ship";
+import {
+  ShortShipWizardPanel,
+  shortShipDialogDescription,
+  shortShipDialogTitle,
+  type ShortShipWizardStep,
+} from "@/components/shipments/short-ship-wizard";
 import { resolveShipmentStatusFromDeparture } from "@/lib/shipments/shipment-dates";
 import { formatNumber } from "@/lib/utils";
 import type {
+  PoShortfallResolution,
   PurchaseOrder,
   Shipment,
   ShipmentDocumentType,
@@ -58,6 +66,7 @@ export function ShipmentEditDialog({
   const [requiredDocuments, setRequiredDocuments] = useState<
     ShipmentDocumentType[]
   >([]);
+  const [wizardStep, setWizardStep] = useState<ShortShipWizardStep>("form");
 
   const loadShipment = useCallback(async () => {
     if (!shipmentId) return;
@@ -98,6 +107,7 @@ export function ShipmentEditDialog({
   useEffect(() => {
     if (!open || !shipmentId) return;
     setTab("details");
+    setWizardStep("form");
     void loadShipment();
   }, [open, shipmentId, loadShipment]);
 
@@ -154,6 +164,26 @@ export function ShipmentEditDialog({
     [allocations, lineQtys],
   );
 
+  const currentAllocatedOnThisShipment = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const po of shipment?.purchase_orders ?? []) {
+      for (const item of po.items ?? []) {
+        map[item.po_line_id] = item.quantity;
+      }
+    }
+    return map;
+  }, [shipment]);
+
+  const shortLines = useMemo(
+    () =>
+      detectShortShipLines(
+        visibleAllocations,
+        lineQtys,
+        currentAllocatedOnThisShipment,
+      ),
+    [visibleAllocations, lineQtys, currentAllocatedOnThisShipment],
+  );
+
   const selectablePos = useMemo(() => {
     const linkedFromShipment = (shipment?.purchase_orders ?? []).filter(
       (po) => !openPos.some((p) => p.id === po.id),
@@ -173,7 +203,7 @@ export function ShipmentEditDialog({
     );
   }
 
-  async function handleSave() {
+  async function submitSave(poResolution?: PoShortfallResolution | null) {
     if (!shipmentId) return;
     setSaving(true);
     setError(null);
@@ -199,27 +229,57 @@ export function ShipmentEditDialog({
           po_ids: selectedPoIds,
           items,
           required_documents: requiredDocuments,
+          po_resolution: poResolution ?? null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update shipment");
 
       setShipment(data.shipment);
+      setWizardStep("form");
       onSaved?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
+      setWizardStep("form");
     } finally {
       setSaving(false);
     }
   }
 
+  function handlePrimarySave() {
+    const hasItems = visibleAllocations.some(
+      (a) => (lineQtys[a.po_line_id] ?? 0) > 0,
+    );
+    if (!hasItems) {
+      setError("Enter a ship quantity for at least one line.");
+      return;
+    }
+    setError(null);
+    if (shortLines.length > 0) {
+      setWizardStep("close_ship");
+      return;
+    }
+    void submitSave(null);
+  }
+
+  function handleClose() {
+    setWizardStep("form");
+    onClose();
+  }
+
   return (
     <Dialog
       open={open}
-      onClose={onClose}
-      title={shipment ? `Edit shipment · ${shipment.shipment_number}` : "Edit shipment"}
-      description="Update shipment details, allocations, and documents."
+      onClose={handleClose}
+      title={
+        shortShipDialogTitle(wizardStep) ??
+        (shipment ? `Edit shipment · ${shipment.shipment_number}` : "Edit shipment")
+      }
+      description={
+        shortShipDialogDescription(wizardStep) ??
+        "Update shipment details, allocations, and documents."
+      }
       className="max-w-3xl"
     >
       {loading ? (
@@ -228,6 +288,20 @@ export function ShipmentEditDialog({
         <p className="py-8 text-center text-sm text-rose-600">
           {error ?? "Shipment not found."}
         </p>
+      ) : wizardStep !== "form" ? (
+        <ShortShipWizardPanel
+          step={wizardStep}
+          shortLines={shortLines}
+          saving={saving}
+          onLeaveOpen={() => void submitSave(null)}
+          onChooseClose={() => setWizardStep("po_resolution")}
+          onResolve={(resolution) => void submitSave(resolution)}
+          onBack={() =>
+            setWizardStep(
+              wizardStep === "po_resolution" ? "close_ship" : "form",
+            )
+          }
+        />
       ) : (
         <div className="space-y-4">
           <div className="flex gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1">
@@ -424,17 +498,21 @@ export function ShipmentEditDialog({
           {error && <p className="text-sm text-rose-600">{error}</p>}
 
           <div className="flex justify-end gap-2 border-t border-stone-200 pt-4">
-            <Button variant="outline" onClick={onClose}>
+            <Button variant="outline" onClick={handleClose}>
               {tab === "documents" ? "Close" : "Cancel"}
             </Button>
             {tab === "details" && (
               <Button
-                onClick={handleSave}
+                onClick={handlePrimarySave}
                 disabled={
                   saving || !selectedPoIds.length || !visibleAllocations.length
                 }
               >
-                {saving ? "Saving…" : "Save changes"}
+                {saving
+                  ? "Saving…"
+                  : shortLines.length > 0
+                    ? "Continue"
+                    : "Save changes"}
               </Button>
             )}
           </div>
