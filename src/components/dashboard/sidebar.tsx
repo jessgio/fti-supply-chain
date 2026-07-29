@@ -131,6 +131,12 @@ const links: NavItem[] = [
         roles: ["admin", "supply_chain"],
       },
       {
+        href: "/dashboard/extracts/calculator",
+        label: "Extract Calculator",
+        icon: Beaker,
+        roles: ["admin", "supply_chain"],
+      },
+      {
         href: "/dashboard/extracts/mappings",
         label: "Extract Action Codes",
         icon: Link2,
