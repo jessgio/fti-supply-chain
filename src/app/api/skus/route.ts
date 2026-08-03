@@ -1,41 +1,84 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole } from "@/lib/auth";
-import { createSku } from "@/lib/db/skus";
+import { createSku, SkuAlreadyExistsError } from "@/lib/db/skus";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 
-export async function GET() {
+type SkuScope = "mapped" | "unclassified" | "all";
+
+function mapSkuRow(row: {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  is_packaging: boolean;
+  is_active: boolean;
+  franchise_id: string | null;
+  product_franchises: unknown;
+}) {
+  const franchise = row.product_franchises as
+    | { name: string }
+    | { name: string }[]
+    | null;
+  const franchiseName = Array.isArray(franchise)
+    ? (franchise[0]?.name ?? null)
+    : (franchise?.name ?? null);
+  return {
+    id: row.id,
+    sku_code: row.sku_code,
+    name: row.name,
+    is_bundle: row.is_bundle,
+    is_packaging: row.is_packaging,
+    is_active: row.is_active,
+    franchise_id: row.franchise_id,
+    franchise_name: franchiseName,
+  };
+}
+
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const scopeParam = searchParams.get("scope");
+    const scope: SkuScope =
+      scopeParam === "unclassified" || scopeParam === "all"
+        ? scopeParam
+        : "mapped";
+    const countOnly = searchParams.get("count_only") === "1";
+
     const supabase = createAdminClient();
-    const { data, error } = await supabase
+
+    if (countOnly && scope === "unclassified") {
+      const { count, error } = await supabase
+        .from("skus")
+        .select("id", { count: "exact", head: true })
+        .eq("is_bundle", false)
+        .eq("is_packaging", false)
+        .is("franchise_id", null);
+      if (error) throw error;
+      return NextResponse.json({ count: count ?? 0 });
+    }
+
+    let query = supabase
       .from("skus")
       .select(
-        "id, sku_code, name, is_bundle, is_active, franchise_id, product_franchises(name)",
+        "id, sku_code, name, is_bundle, is_packaging, is_active, franchise_id, product_franchises(name)",
       )
-      .or("franchise_id.not.is.null,is_bundle.eq.true")
       .order("sku_code");
+
+    if (scope === "mapped") {
+      query = query.or("franchise_id.not.is.null,is_bundle.eq.true");
+    } else if (scope === "unclassified") {
+      query = query
+        .eq("is_bundle", false)
+        .eq("is_packaging", false)
+        .is("franchise_id", null);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
 
-    const skus = (data ?? []).map((row) => {
-      const franchise = row.product_franchises as unknown as
-        | { name: string }
-        | { name: string }[]
-        | null;
-      const franchiseName = Array.isArray(franchise)
-        ? (franchise[0]?.name ?? null)
-        : (franchise?.name ?? null);
-      return {
-        id: row.id,
-        sku_code: row.sku_code,
-        name: row.name,
-        is_bundle: row.is_bundle,
-        is_active: row.is_active,
-        franchise_id: row.franchise_id,
-        franchise_name: franchiseName,
-      };
-    });
-
-    return NextResponse.json({ skus });
+    const skus = (data ?? []).map(mapSkuRow);
+    return NextResponse.json({ skus, count: skus.length });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -54,6 +97,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const isBundle = Boolean(body.is_bundle);
+    const isPackaging = Boolean(body.is_packaging);
+    if (isBundle && isPackaging) {
+      return NextResponse.json(
+        { error: "A SKU cannot be both a bundle and packaging." },
+        { status: 400 },
+      );
+    }
+
     const supabase = createAdminClient();
     const sku = await createSku(supabase, {
       sku_code: body.sku_code,
@@ -62,13 +114,20 @@ export async function POST(request: Request) {
         typeof body.franchise_id === "string" ? body.franchise_id : null,
       franchise_name:
         typeof body.franchise_name === "string" ? body.franchise_name : null,
-      is_bundle: Boolean(body.is_bundle),
+      is_bundle: isBundle,
+      is_packaging: isPackaging,
       retail_price:
         body.retail_price != null ? Number(body.retail_price) : null,
     });
 
     return NextResponse.json({ ok: true, sku });
   } catch (error) {
+    if (error instanceof SkuAlreadyExistsError) {
+      return NextResponse.json(
+        { error: error.message, existing: error.existing },
+        { status: 409 },
+      );
+    }
     const message = errorMessage(error);
     const status = message.includes("already exists") ? 409 : 500;
     return NextResponse.json({ error: message }, { status });

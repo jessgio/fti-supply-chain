@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   Beaker,
@@ -315,8 +316,26 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggleCollapsed } = useSidebar();
+  const [unclassifiedCount, setUnclassifiedCount] = useState(0);
 
   const visibleLinks = filterNavItems(links, role);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/skus?scope=unclassified&count_only=1")
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const count = typeof data.count === "number" ? data.count : 0;
+        setUnclassifiedCount(count);
+      })
+      .catch(() => {
+        if (!cancelled) setUnclassifiedCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   async function signOut() {
     const supabase = createClient();
@@ -417,6 +436,9 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
                       childHref,
                       childExact,
                     );
+                    const showUnclassifiedBadge =
+                      childHref === "/dashboard/mappings" &&
+                      unclassifiedCount > 0;
                     return (
                       <Link
                         key={childHref}
@@ -429,6 +451,16 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
                         )}
                       >
                         <span className="truncate">{childLabel}</span>
+                        {showUnclassifiedBadge && (
+                          <span
+                            className="ml-auto shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-900"
+                            title={`${unclassifiedCount} SKU${unclassifiedCount === 1 ? "" : "s"} need classification`}
+                          >
+                            {unclassifiedCount > 99
+                              ? "99+"
+                              : unclassifiedCount}
+                          </span>
+                        )}
                       </Link>
                     );
                   },

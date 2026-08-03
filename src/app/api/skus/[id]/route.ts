@@ -16,6 +16,7 @@ export async function PATCH(
     const body = (await request.json()) as {
       name?: string | null;
       is_active?: boolean;
+      is_bundle?: boolean;
       is_packaging?: boolean;
       franchise_id?: string | null;
       franchise_name?: string | null;
@@ -24,6 +25,7 @@ export async function PATCH(
     const input: {
       name?: string | null;
       is_active?: boolean;
+      is_bundle?: boolean;
       is_packaging?: boolean;
       franchise_id?: string | null;
       franchise_name?: string | null;
@@ -35,6 +37,9 @@ export async function PATCH(
 
     if (typeof body.is_active === "boolean") {
       input.is_active = body.is_active;
+    }
+    if (typeof body.is_bundle === "boolean") {
+      input.is_bundle = body.is_bundle;
     }
     if (typeof body.is_packaging === "boolean") {
       input.is_packaging = body.is_packaging;
@@ -52,7 +57,7 @@ export async function PATCH(
       return NextResponse.json(
         {
           error:
-            "Provide name, is_active, is_packaging, franchise_id, and/or franchise_name",
+            "Provide name, is_active, is_bundle, is_packaging, franchise_id, and/or franchise_name",
         },
         { status: 400 },
       );

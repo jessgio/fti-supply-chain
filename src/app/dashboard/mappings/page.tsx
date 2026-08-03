@@ -28,43 +28,69 @@ interface SkuRow {
   sku_code: string;
   name: string | null;
   is_bundle: boolean;
+  is_packaging: boolean;
   is_active: boolean;
   franchise_id: string | null;
   franchise_name: string | null;
 }
 
 type StatusFilter = "all" | "active" | "inactive";
+type ListTab = "mapped" | "unclassified";
+type ProductType = "single" | "bundle" | "packaging";
 
 interface FranchiseOption {
   id: string;
   name: string;
 }
 
+function skuTypeLabel(sku: Pick<SkuRow, "is_bundle" | "is_packaging">): string {
+  if (sku.is_bundle) return "Bundle";
+  if (sku.is_packaging) return "Packaging";
+  return "Single";
+}
+
+function SkuTypeBadge({ sku }: { sku: Pick<SkuRow, "is_bundle" | "is_packaging"> }) {
+  if (sku.is_bundle) {
+    return <Badge className="bg-stone-100 text-stone-700">Bundle</Badge>;
+  }
+  if (sku.is_packaging) {
+    return <Badge className="bg-amber-100 text-amber-800">Packaging</Badge>;
+  }
+  return <Badge className="bg-sky-100 text-sky-800">Single</Badge>;
+}
+
 export default function MappingsPage() {
   const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [unclassified, setUnclassified] = useState<SkuRow[]>([]);
   const [franchises, setFranchises] = useState<FranchiseOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [unclassifiedLoading, setUnclassifiedLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [listTab, setListTab] = useState<ListTab>("mapped");
+  const [highlightSkuCode, setHighlightSkuCode] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [editingFranchiseId, setEditingFranchiseId] = useState<string | null>(
     null,
   );
   const [newFranchiseName, setNewFranchiseName] = useState("");
+  const [classifyFranchiseId, setClassifyFranchiseId] = useState<
+    Record<string, string>
+  >({});
   const [addSkuCode, setAddSkuCode] = useState("");
   const [addSkuName, setAddSkuName] = useState("");
   const [addFranchiseId, setAddFranchiseId] = useState("");
   const [addFranchiseName, setAddFranchiseName] = useState("");
-  const [addIsBundle, setAddIsBundle] = useState(false);
+  const [addProductType, setAddProductType] = useState<ProductType>("single");
   const [addSaving, setAddSaving] = useState(false);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
-  const loadSkus = useCallback(async () => {
+  const loadMappedSkus = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/skus");
+      const res = await fetch("/api/skus?scope=mapped");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load SKUs");
       setSkus(data.skus ?? []);
@@ -75,9 +101,33 @@ export default function MappingsPage() {
     }
   }, []);
 
+  const loadUnclassified = useCallback(async () => {
+    setUnclassifiedLoading(true);
+    try {
+      const res = await fetch("/api/skus?scope=unclassified");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load unclassified SKUs");
+      }
+      setUnclassified(data.skus ?? []);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load unclassified SKUs",
+      );
+    } finally {
+      setUnclassifiedLoading(false);
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadMappedSkus(), loadUnclassified()]);
+  }, [loadMappedSkus, loadUnclassified]);
+
   useEffect(() => {
-    loadSkus();
-  }, [loadSkus]);
+    void refreshAll();
+  }, [refreshAll]);
 
   useEffect(() => {
     fetch("/api/metadata")
@@ -88,7 +138,13 @@ export default function MappingsPage() {
       .catch(() => {});
   }, []);
 
-  const filtered = useMemo(() => {
+  useEffect(() => {
+    if (!highlightSkuCode) return;
+    const timer = window.setTimeout(() => setHighlightSkuCode(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [highlightSkuCode]);
+
+  const filteredMapped = useMemo(() => {
     const q = search.trim().toLowerCase();
     return skus.filter((sku) => {
       if (statusFilter === "active" && !sku.is_active) return false;
@@ -101,6 +157,17 @@ export default function MappingsPage() {
       );
     });
   }, [skus, search, statusFilter]);
+
+  const filteredUnclassified = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return unclassified.filter((sku) => {
+      if (!q) return true;
+      return (
+        sku.sku_code.toLowerCase().includes(q) ||
+        (sku.name?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [unclassified, search]);
 
   const inactiveCount = skus.filter((s) => !s.is_active && !s.is_bundle).length;
 
@@ -126,7 +193,7 @@ export default function MappingsPage() {
     franchiseId: string,
     franchiseName?: string,
   ) {
-    if (sku.is_bundle) return;
+    if (sku.is_bundle || sku.is_packaging) return;
     if (!franchiseName && (!franchiseId || franchiseId === sku.franchise_id)) {
       return;
     }
@@ -150,6 +217,7 @@ export default function MappingsPage() {
       setSkus((prev) =>
         prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
       );
+      setUnclassified((prev) => prev.filter((row) => row.id !== sku.id));
 
       if (updated.franchise_id && updated.franchise_name) {
         setFranchises((prev) => {
@@ -189,6 +257,9 @@ export default function MappingsPage() {
       setSkus((prev) =>
         prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
       );
+      setUnclassified((prev) =>
+        prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
     } finally {
@@ -219,6 +290,81 @@ export default function MappingsPage() {
     }
   }
 
+  async function classifySku(
+    sku: SkuRow,
+    kind: ProductType,
+    franchiseId?: string,
+  ) {
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      let body: Record<string, string | boolean>;
+      if (kind === "bundle") {
+        body = { is_bundle: true, is_packaging: false };
+      } else if (kind === "packaging") {
+        body = { is_bundle: false, is_packaging: true };
+      } else {
+        if (!franchiseId) {
+          throw new Error("Select a franchise to classify as a single SKU.");
+        }
+        body = {
+          is_bundle: false,
+          is_packaging: false,
+          franchise_id: franchiseId,
+        };
+      }
+
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Classification failed");
+
+      const updated = data.sku as SkuRow;
+      setUnclassified((prev) => prev.filter((row) => row.id !== sku.id));
+      setClassifyFranchiseId((prev) => {
+        const next = { ...prev };
+        delete next[sku.id];
+        return next;
+      });
+
+      if (updated.is_bundle || updated.franchise_id) {
+        setSkus((prev) => {
+          if (prev.some((row) => row.id === updated.id)) {
+            return prev.map((row) =>
+              row.id === updated.id ? { ...row, ...updated } : row,
+            );
+          }
+          return [...prev, updated].sort((a, b) =>
+            a.sku_code.localeCompare(b.sku_code),
+          );
+        });
+      }
+
+      if (updated.franchise_id && updated.franchise_name) {
+        setFranchises((prev) => {
+          if (prev.some((f) => f.id === updated.franchise_id)) return prev;
+          return [
+            ...prev,
+            { id: updated.franchise_id!, name: updated.franchise_name! },
+          ].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Classification failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  function openUnclassifiedForCode(skuCode: string) {
+    setListTab("unclassified");
+    setSearch(skuCode);
+    setHighlightSkuCode(skuCode);
+  }
+
   async function handleAddSku() {
     const sku_code = addSkuCode.trim();
     if (!sku_code) return;
@@ -229,10 +375,11 @@ export default function MappingsPage() {
     try {
       const body: Record<string, string | boolean> = {
         sku_code,
-        is_bundle: addIsBundle,
+        is_bundle: addProductType === "bundle",
+        is_packaging: addProductType === "packaging",
       };
       if (addSkuName.trim()) body.name = addSkuName.trim();
-      if (!addIsBundle) {
+      if (addProductType === "single") {
         if (addFranchiseName.trim()) {
           body.franchise_name = addFranchiseName.trim();
         } else if (addFranchiseId) {
@@ -246,28 +393,56 @@ export default function MappingsPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to add SKU");
+      if (!res.ok) {
+        if (res.status === 409 && data.existing) {
+          const existing = data.existing as {
+            sku_code: string;
+            is_bundle: boolean;
+            is_packaging: boolean;
+            franchise_id: string | null;
+          };
+          const isOrphan =
+            !existing.is_bundle &&
+            !existing.is_packaging &&
+            !existing.franchise_id;
+          if (isOrphan) {
+            setError(
+              `${existing.sku_code} already exists and needs classification.`,
+            );
+            openUnclassifiedForCode(existing.sku_code);
+            await loadUnclassified();
+          } else {
+            setError(
+              `${existing.sku_code} already exists as ${skuTypeLabel(existing)}.`,
+            );
+            if (existing.is_bundle || existing.franchise_id) {
+              setListTab("mapped");
+              setSearch(existing.sku_code);
+              setHighlightSkuCode(existing.sku_code);
+            }
+          }
+          return;
+        }
+        throw new Error(data.error ?? "Failed to add SKU");
+      }
 
       const created = data.sku as SkuRow;
-      if (created.franchise_id || created.is_bundle) {
+      setAddSkuCode("");
+      setAddSkuName("");
+      setAddFranchiseId("");
+      setAddFranchiseName("");
+      setAddProductType("single");
+
+      if (created.is_packaging) {
+        setAddSuccess(
+          `${created.sku_code} added as packaging. Manage it under Packaging.`,
+        );
+      } else if (created.is_bundle || created.franchise_id) {
         setSkus((prev) =>
           [...prev, created].sort((a, b) =>
             a.sku_code.localeCompare(b.sku_code),
           ),
         );
-      }
-
-      setAddSkuCode("");
-      setAddSkuName("");
-      setAddFranchiseId("");
-      setAddFranchiseName("");
-      setAddIsBundle(false);
-
-      if (!created.franchise_id && !created.is_bundle) {
-        setAddSuccess(
-          `${created.sku_code} added. Assign a franchise to include it in forecast and this list.`,
-        );
-      } else {
         setAddSuccess(`${created.sku_code} added.`);
         if (addFranchiseName.trim() && created.franchise_name) {
           setFranchises((prev) => {
@@ -278,6 +453,17 @@ export default function MappingsPage() {
             ].sort((a, b) => a.name.localeCompare(b.name));
           });
         }
+      } else {
+        setUnclassified((prev) =>
+          [...prev, created].sort((a, b) =>
+            a.sku_code.localeCompare(b.sku_code),
+          ),
+        );
+        setAddSuccess(
+          `${created.sku_code} added. Assign a type in Needs classification to include it in forecast.`,
+        );
+        setListTab("unclassified");
+        setHighlightSkuCode(created.sku_code);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add SKU");
@@ -293,11 +479,12 @@ export default function MappingsPage() {
           SKUs & Franchises
         </h1>
         <p className="mt-1 text-stone-600">
-          Product names, franchises, and bundle flags for forecasting. Add SKUs
-          manually for new products, or upload franchise and bundle mappings
-          from Excel. Mark retired SKUs as inactive to keep them in historical
-          sales and bundle rules without showing them in the inventory forecast.
-          Set unit costs from{" "}
+          Set each SKU as single, bundle, or packaging. Add SKUs manually for
+          new products, or upload franchise and bundle mappings from Excel.
+          Unmapped codes from sales/stock uploads appear under Needs
+          classification. Mark retired SKUs as inactive to keep them in
+          historical sales without showing them in the inventory forecast. Set
+          unit costs from{" "}
           <Link
             href="/dashboard/mappings/cogs"
             className="font-medium text-emerald-700 hover:text-emerald-800"
@@ -312,9 +499,9 @@ export default function MappingsPage() {
         <CardHeader>
           <CardTitle>Add SKU</CardTitle>
           <CardDescription>
-            Create a SKU without uploading sales or stock files. Single SKUs
-            need a franchise to appear in forecast; bundle parents need a
-            breakdown sheet (upload or Excel) before sales split applies.
+            Create a SKU without uploading sales or stock files. Singles need a
+            franchise for forecast; bundles need a BOM; packaging is managed
+            under Supply Chain → Packaging.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -341,23 +528,29 @@ export default function MappingsPage() {
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-stone-700">
-            <input
-              type="checkbox"
-              className="rounded border-stone-300"
-              checked={addIsBundle}
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-stone-700">
+              Product type
+            </label>
+            <Select
+              value={addProductType}
               onChange={(e) => {
-                setAddIsBundle(e.target.checked);
-                if (e.target.checked) {
+                const next = e.target.value as ProductType;
+                setAddProductType(next);
+                if (next !== "single") {
                   setAddFranchiseId("");
                   setAddFranchiseName("");
                 }
               }}
-            />
-            Bundle parent SKU (no franchise)
-          </label>
+              className="max-w-xs"
+            >
+              <option value="single">Single</option>
+              <option value="bundle">Bundle</option>
+              <option value="packaging">Packaging</option>
+            </Select>
+          </div>
 
-          {!addIsBundle && (
+          {addProductType === "single" && (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <label className="text-sm font-medium text-stone-700">
@@ -411,212 +604,135 @@ export default function MappingsPage() {
         <CardHeader>
           <CardTitle>SKU status</CardTitle>
           <CardDescription>
-            Inactive SKUs remain in franchise and bundle mappings. Re-uploading
-            the mappings Excel does not reset status. Only active, franchise-mapped
-            single SKUs appear in inventory forecast. Edit product names inline;
-            change a franchise from the dropdown in the table.
+            Mapped SKUs have a franchise or are bundle parents. Needs
+            classification lists unrecognized codes (usually from uploads) that
+            are not yet single, bundle, or packaging.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={listTab === "mapped" ? "default" : "outline"}
+              onClick={() => setListTab("mapped")}
+            >
+              Mapped
+              <span className="ml-1.5 text-xs opacity-80">({skus.length})</span>
+            </Button>
+            <Button
+              size="sm"
+              variant={listTab === "unclassified" ? "default" : "outline"}
+              onClick={() => setListTab("unclassified")}
+            >
+              Needs classification
+              {unclassified.length > 0 && (
+                <Badge className="ml-1.5 bg-amber-100 text-amber-900">
+                  {unclassified.length}
+                </Badge>
+              )}
+            </Button>
+          </div>
+
           <div className="flex flex-wrap gap-3">
             <Input
-              placeholder="Search SKU or franchise…"
+              placeholder={
+                listTab === "mapped"
+                  ? "Search SKU or franchise…"
+                  : "Search unclassified SKU…"
+              }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="max-w-xs"
             />
-            <div className="flex gap-2">
-              {(
-                [
-                  ["all", "All"],
-                  ["active", "Active"],
-                  ["inactive", "Inactive"],
-                ] as const
-              ).map(([id, label]) => (
-                <Button
-                  key={id}
-                  size="sm"
-                  variant={statusFilter === id ? "default" : "outline"}
-                  onClick={() => setStatusFilter(id)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-            <Button size="sm" variant="outline" onClick={loadSkus}>
+            {listTab === "mapped" && (
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["all", "All"],
+                    ["active", "Active"],
+                    ["inactive", "Inactive"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <Button
+                    key={id}
+                    size="sm"
+                    variant={statusFilter === id ? "default" : "outline"}
+                    onClick={() => setStatusFilter(id)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            )}
+            <Button size="sm" variant="outline" onClick={() => void refreshAll()}>
               Refresh
             </Button>
           </div>
 
-          {inactiveCount > 0 && (
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {listTab === "mapped" && inactiveCount > 0 && (
             <p className="text-sm text-stone-600">
               {inactiveCount} single SKU{inactiveCount === 1 ? "" : "s"} marked
               inactive (excluded from forecast).
             </p>
           )}
 
-          {loading ? (
-            <p className="text-sm text-stone-500">Loading SKUs…</p>
-          ) : error ? (
-            <p className="text-sm text-red-600">{error}</p>
-          ) : filtered.length === 0 ? (
+          {listTab === "mapped" ? (
+            loading ? (
+              <p className="text-sm text-stone-500">Loading SKUs…</p>
+            ) : filteredMapped.length === 0 ? (
+              <p className="text-sm text-stone-500">
+                No mapped SKUs found. Add a SKU above or upload franchise and
+                bundle mappings.
+              </p>
+            ) : (
+              <MappedSkuTable
+                skus={filteredMapped}
+                franchiseOptions={franchiseOptions}
+                updatingId={updatingId}
+                editingFranchiseId={editingFranchiseId}
+                newFranchiseName={newFranchiseName}
+                highlightSkuCode={highlightSkuCode}
+                onEditFranchise={(id) => {
+                  setEditingFranchiseId(id);
+                  setNewFranchiseName("");
+                }}
+                onCancelEditFranchise={() => {
+                  setEditingFranchiseId(null);
+                  setNewFranchiseName("");
+                }}
+                onNewFranchiseNameChange={setNewFranchiseName}
+                onUpdateFranchise={updateFranchise}
+                onUpdateProductName={updateProductName}
+                onToggleActive={toggleActive}
+              />
+            )
+          ) : unclassifiedLoading ? (
             <p className="text-sm text-stone-500">
-              No SKUs found. Add a SKU above or upload franchise and bundle
-              mappings.
+              Loading unclassified SKUs…
+            </p>
+          ) : filteredUnclassified.length === 0 ? (
+            <p className="text-sm text-stone-500">
+              No unclassified SKUs. New codes from sales/stock uploads will
+              appear here until you set them as single, bundle, or packaging.
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-stone-200">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2">Product name</th>
-                    <th className="px-3 py-2">Franchise</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2">Forecast</th>
-                    <th className="px-3 py-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((sku) => (
-                    <tr
-                      key={sku.id}
-                      className="border-b border-stone-100 last:border-0"
-                    >
-                      <td className="px-3 py-2 font-mono text-xs sm:text-sm">
-                        {sku.sku_code}
-                      </td>
-                      <td className="px-3 py-2">
-                        <ProductNameInput
-                          name={sku.name}
-                          disabled={updatingId === sku.id}
-                          onSave={(name) => updateProductName(sku, name)}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        {sku.is_bundle ? (
-                          "—"
-                        ) : editingFranchiseId === sku.id ? (
-                          <div className="flex min-w-[200px] flex-wrap items-center gap-2">
-                            <Input
-                              placeholder="New franchise name"
-                              value={newFranchiseName}
-                              onChange={(e) => setNewFranchiseName(e.target.value)}
-                              className="h-8 min-w-[140px] flex-1 text-xs"
-                              disabled={updatingId === sku.id}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && newFranchiseName.trim()) {
-                                  void updateFranchise(
-                                    sku,
-                                    "",
-                                    newFranchiseName.trim(),
-                                  );
-                                }
-                                if (e.key === "Escape") {
-                                  setEditingFranchiseId(null);
-                                  setNewFranchiseName("");
-                                }
-                              }}
-                            />
-                            <Button
-                              size="sm"
-                              disabled={
-                                updatingId === sku.id ||
-                                !newFranchiseName.trim()
-                              }
-                              onClick={() =>
-                                updateFranchise(
-                                  sku,
-                                  "",
-                                  newFranchiseName.trim(),
-                                )
-                              }
-                            >
-                              {updatingId === sku.id ? "Saving…" : "Save"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={updatingId === sku.id}
-                              onClick={() => {
-                                setEditingFranchiseId(null);
-                                setNewFranchiseName("");
-                              }}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : (
-                          <Select
-                            value={sku.franchise_id ?? ""}
-                            disabled={updatingId === sku.id}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              if (value === "__new__") {
-                                setEditingFranchiseId(sku.id);
-                                setNewFranchiseName("");
-                                return;
-                              }
-                              void updateFranchise(sku, value);
-                            }}
-                            className="h-8 min-w-[160px] text-xs"
-                          >
-                            {franchiseOptions.map((f) => (
-                              <option key={f.id} value={f.id}>
-                                {f.name}
-                              </option>
-                            ))}
-                            <option value="__new__">+ New franchise…</option>
-                          </Select>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {sku.is_bundle ? (
-                          <Badge className="bg-stone-100 text-stone-700">
-                            Bundle
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-sky-100 text-sky-800">
-                            Single
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {sku.is_bundle ? (
-                          <span className="text-stone-500">N/A</span>
-                        ) : sku.is_active ? (
-                          <Badge className="bg-emerald-100 text-emerald-800">
-                            Included
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-amber-100 text-amber-800">
-                            Excluded
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {sku.is_bundle ? (
-                          <span className="text-xs text-stone-400">—</span>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={updatingId === sku.id}
-                            onClick={() => toggleActive(sku)}
-                          >
-                            {updatingId === sku.id
-                              ? "Saving…"
-                              : sku.is_active
-                                ? "Mark inactive"
-                                : "Mark active"}
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <UnclassifiedSkuTable
+              skus={filteredUnclassified}
+              franchises={franchises}
+              classifyFranchiseId={classifyFranchiseId}
+              updatingId={updatingId}
+              highlightSkuCode={highlightSkuCode}
+              onClassifyFranchiseChange={(id, franchiseId) =>
+                setClassifyFranchiseId((prev) => ({
+                  ...prev,
+                  [id]: franchiseId,
+                }))
+              }
+              onUpdateProductName={updateProductName}
+              onClassify={classifySku}
+            />
           )}
         </CardContent>
       </Card>
@@ -680,6 +796,286 @@ export default function MappingsPage() {
           </p>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function MappedSkuTable({
+  skus,
+  franchiseOptions,
+  updatingId,
+  editingFranchiseId,
+  newFranchiseName,
+  highlightSkuCode,
+  onEditFranchise,
+  onCancelEditFranchise,
+  onNewFranchiseNameChange,
+  onUpdateFranchise,
+  onUpdateProductName,
+  onToggleActive,
+}: {
+  skus: SkuRow[];
+  franchiseOptions: FranchiseOption[];
+  updatingId: string | null;
+  editingFranchiseId: string | null;
+  newFranchiseName: string;
+  highlightSkuCode: string | null;
+  onEditFranchise: (id: string) => void;
+  onCancelEditFranchise: () => void;
+  onNewFranchiseNameChange: (value: string) => void;
+  onUpdateFranchise: (
+    sku: SkuRow,
+    franchiseId: string,
+    franchiseName?: string,
+  ) => void;
+  onUpdateProductName: (sku: SkuRow, name: string) => void;
+  onToggleActive: (sku: SkuRow) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-stone-200">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
+            <th className="px-3 py-2">SKU</th>
+            <th className="px-3 py-2">Product name</th>
+            <th className="px-3 py-2">Franchise</th>
+            <th className="px-3 py-2">Type</th>
+            <th className="px-3 py-2">Forecast</th>
+            <th className="px-3 py-2">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {skus.map((sku) => (
+            <tr
+              key={sku.id}
+              className={
+                highlightSkuCode === sku.sku_code
+                  ? "border-b border-amber-200 bg-amber-50 last:border-0"
+                  : "border-b border-stone-100 last:border-0"
+              }
+            >
+              <td className="px-3 py-2 font-mono text-xs sm:text-sm">
+                {sku.sku_code}
+              </td>
+              <td className="px-3 py-2">
+                <ProductNameInput
+                  name={sku.name}
+                  disabled={updatingId === sku.id}
+                  onSave={(name) => onUpdateProductName(sku, name)}
+                />
+              </td>
+              <td className="px-3 py-2">
+                {sku.is_bundle || sku.is_packaging ? (
+                  "—"
+                ) : editingFranchiseId === sku.id ? (
+                  <div className="flex min-w-[200px] flex-wrap items-center gap-2">
+                    <Input
+                      placeholder="New franchise name"
+                      value={newFranchiseName}
+                      onChange={(e) => onNewFranchiseNameChange(e.target.value)}
+                      className="h-8 min-w-[140px] flex-1 text-xs"
+                      disabled={updatingId === sku.id}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newFranchiseName.trim()) {
+                          void onUpdateFranchise(
+                            sku,
+                            "",
+                            newFranchiseName.trim(),
+                          );
+                        }
+                        if (e.key === "Escape") {
+                          onCancelEditFranchise();
+                        }
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={
+                        updatingId === sku.id || !newFranchiseName.trim()
+                      }
+                      onClick={() =>
+                        onUpdateFranchise(sku, "", newFranchiseName.trim())
+                      }
+                    >
+                      {updatingId === sku.id ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={updatingId === sku.id}
+                      onClick={onCancelEditFranchise}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Select
+                    value={sku.franchise_id ?? ""}
+                    disabled={updatingId === sku.id}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__new__") {
+                        onEditFranchise(sku.id);
+                        return;
+                      }
+                      void onUpdateFranchise(sku, value);
+                    }}
+                    className="h-8 min-w-[160px] text-xs"
+                  >
+                    {franchiseOptions.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                    <option value="__new__">+ New franchise…</option>
+                  </Select>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                <SkuTypeBadge sku={sku} />
+              </td>
+              <td className="px-3 py-2">
+                {sku.is_bundle || sku.is_packaging ? (
+                  <span className="text-stone-500">N/A</span>
+                ) : sku.is_active ? (
+                  <Badge className="bg-emerald-100 text-emerald-800">
+                    Included
+                  </Badge>
+                ) : (
+                  <Badge className="bg-amber-100 text-amber-800">
+                    Excluded
+                  </Badge>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                {sku.is_bundle || sku.is_packaging ? (
+                  <span className="text-xs text-stone-400">—</span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={updatingId === sku.id}
+                    onClick={() => onToggleActive(sku)}
+                  >
+                    {updatingId === sku.id
+                      ? "Saving…"
+                      : sku.is_active
+                        ? "Mark inactive"
+                        : "Mark active"}
+                  </Button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function UnclassifiedSkuTable({
+  skus,
+  franchises,
+  classifyFranchiseId,
+  updatingId,
+  highlightSkuCode,
+  onClassifyFranchiseChange,
+  onUpdateProductName,
+  onClassify,
+}: {
+  skus: SkuRow[];
+  franchises: FranchiseOption[];
+  classifyFranchiseId: Record<string, string>;
+  updatingId: string | null;
+  highlightSkuCode: string | null;
+  onClassifyFranchiseChange: (id: string, franchiseId: string) => void;
+  onUpdateProductName: (sku: SkuRow, name: string) => void;
+  onClassify: (
+    sku: SkuRow,
+    kind: ProductType,
+    franchiseId?: string,
+  ) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-stone-200">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
+            <th className="px-3 py-2">SKU</th>
+            <th className="px-3 py-2">Product name</th>
+            <th className="px-3 py-2">Classify</th>
+          </tr>
+        </thead>
+        <tbody>
+          {skus.map((sku) => {
+            const franchiseId = classifyFranchiseId[sku.id] ?? "";
+            const busy = updatingId === sku.id;
+            return (
+              <tr
+                key={sku.id}
+                className={
+                  highlightSkuCode === sku.sku_code
+                    ? "border-b border-amber-200 bg-amber-50 last:border-0"
+                    : "border-b border-stone-100 last:border-0"
+                }
+              >
+                <td className="px-3 py-2 font-mono text-xs sm:text-sm">
+                  {sku.sku_code}
+                </td>
+                <td className="px-3 py-2">
+                  <ProductNameInput
+                    name={sku.name}
+                    disabled={busy}
+                    onSave={(name) => onUpdateProductName(sku, name)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex min-w-[280px] flex-wrap items-center gap-2">
+                    <Select
+                      value={franchiseId}
+                      disabled={busy}
+                      onChange={(e) =>
+                        onClassifyFranchiseChange(sku.id, e.target.value)
+                      }
+                      className="h-8 min-w-[140px] text-xs"
+                    >
+                      <option value="">Franchise for single…</option>
+                      {franchises.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <Button
+                      size="sm"
+                      disabled={busy || !franchiseId}
+                      onClick={() => onClassify(sku, "single", franchiseId)}
+                    >
+                      {busy ? "Saving…" : "Single"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => onClassify(sku, "bundle")}
+                    >
+                      Bundle
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => onClassify(sku, "packaging")}
+                    >
+                      Packaging
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
