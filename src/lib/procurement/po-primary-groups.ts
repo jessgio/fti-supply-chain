@@ -59,13 +59,16 @@ function resolvePrimaryKeysForPo(
   po: PurchaseOrder,
   skuById: Map<string, PrimaryGoodSkuMeta>,
   packagingToProducts: Map<string, string[]>,
+  includeCompleted = false,
 ): string[] {
   const keys = new Set<string>();
+  const lines = po.lines ?? [];
 
-  for (const line of po.lines ?? []) {
+  for (const line of lines) {
     // Fully received / short-closed lines should not keep a product on the
     // active procurement list — only remaining open SKUs stay visible.
-    if (poLineOpenQty(line) <= 0) continue;
+    // Historical received/cancelled views include completed lines.
+    if (!includeCompleted && poLineOpenQty(line) <= 0) continue;
 
     const linkedProducts = packagingToProducts.get(line.sku_id);
     if (linkedProducts && linkedProducts.length > 0) {
@@ -86,8 +89,12 @@ function resolvePrimaryKeysForPo(
   }
 
   if (keys.size === 0) {
-    const hasOpenLines = (po.lines ?? []).some((line) => poLineOpenQty(line) > 0);
-    if (!hasOpenLines) {
+    if (!includeCompleted) {
+      const hasOpenLines = lines.some((line) => poLineOpenQty(line) > 0);
+      if (!hasOpenLines) {
+        return [];
+      }
+    } else if (lines.length === 0) {
       return [];
     }
     if (po.pd_project_id) {
@@ -105,12 +112,13 @@ export function classifyPoForPrimary(
   primarySkuId: string,
   packagingToProducts: Map<string, string[]>,
   skuById: Map<string, PrimaryGoodSkuMeta>,
+  includeCompleted = false,
 ): PoPrimaryRole {
   let hasFinished = false;
   let hasPackaging = false;
 
   for (const line of po.lines ?? []) {
-    if (poLineOpenQty(line) <= 0) continue;
+    if (!includeCompleted && poLineOpenQty(line) <= 0) continue;
 
     const linkedProducts = packagingToProducts.get(line.sku_id) ?? [];
     if (linkedProducts.includes(primarySkuId)) {
@@ -180,7 +188,9 @@ export function groupPurchaseOrdersByPrimaryGood(
   pos: PurchaseOrder[],
   skus: PrimaryGoodSkuMeta[],
   packagingLinks: ProductPackagingLink[],
+  options?: { includeCompleted?: boolean },
 ): PoPrimaryGroup[] {
+  const includeCompleted = Boolean(options?.includeCompleted);
   const skuById = new Map(skus.map((sku) => [sku.id, sku]));
   const packagingToProducts = buildPackagingToProducts(packagingLinks);
   const packagingByProduct = buildPackagingByProduct(packagingLinks);
@@ -205,7 +215,12 @@ export function groupPurchaseOrdersByPrimaryGood(
   }
 
   for (const po of pos) {
-    const keys = resolvePrimaryKeysForPo(po, skuById, packagingToProducts);
+    const keys = resolvePrimaryKeysForPo(
+      po,
+      skuById,
+      packagingToProducts,
+      includeCompleted,
+    );
 
     for (const key of keys) {
       ensureGroup(key, po);
@@ -221,14 +236,17 @@ export function groupPurchaseOrdersByPrimaryGood(
               primarySkuId,
               packagingToProducts,
               skuById,
+              includeCompleted,
             )
           : undefined;
 
       const poWithRole = role ? { ...po, primaryRole: role } : po;
       // Skip product sections where this PO no longer has open qty for that SKU.
+      // Received/cancelled (and search across statuses) keep completed POs visible.
       if (
+        !includeCompleted &&
         poOpenQtyForPrimaryGroup(poWithRole, primarySkuId, packagingToProducts) <=
-        0
+          0
       ) {
         continue;
       }

@@ -366,10 +366,19 @@ function ProcurementInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos, skuQ]);
 
+  // Active list hides received/cancelled; Received/Cancelled tabs and search
+  // must still show completed POs (zero open qty).
+  const includeCompleted =
+    statusFilter === "received" ||
+    statusFilter === "cancelled" ||
+    Boolean(skuQ);
+
   const posForGrouping = useMemo(() => {
     if (statusFilter) return filteredPos;
+    // Searching from Active: include received/cancelled matches.
+    if (skuQ) return filteredPos;
     return filteredPos.filter(isActivePurchaseOrder);
-  }, [filteredPos, statusFilter]);
+  }, [filteredPos, statusFilter, skuQ]);
 
   const packagingToProducts = useMemo(
     () => packagingSkuToProductIds(packagingLinks),
@@ -388,8 +397,9 @@ function ProcurementInner() {
           is_bundle: sku.is_bundle ?? false,
         })),
         packagingLinks,
+        { includeCompleted },
       ),
-    [posForGrouping, skus, packagingLinks],
+    [posForGrouping, skus, packagingLinks, includeCompleted],
   );
 
   function renderPoRows(
@@ -398,13 +408,16 @@ function ProcurementInner() {
   ) {
     return poList.map((po) => {
       const isOpen = expanded.has(po.id) || skuQ.length > 0;
-      const lines = (po.lines ?? []).filter((line) => poLineOpenQty(line) > 0);
+      const allLines = po.lines ?? [];
+      const lines = includeCompleted
+        ? allLines
+        : allLines.filter((line) => poLineOpenQty(line) > 0);
       const productOpenQty = poOpenQtyForPrimaryGroup(
         po,
         primarySkuId,
         packagingToProducts,
       );
-      if (productOpenQty <= 0) return null;
+      if (!includeCompleted && productOpenQty <= 0) return null;
       return (
         <Fragment key={po.id}>
           <tr className="border-b border-stone-100">
@@ -509,7 +522,7 @@ function ProcurementInner() {
               <td colSpan={9} className="py-2 pr-4">
                 {lines.length === 0 ? (
                   <p className="py-1 text-xs text-stone-500">
-                    No open line items remaining.
+                    No line items on this purchase order.
                   </p>
                 ) : (
                   <table className="w-full text-left text-xs">
@@ -665,7 +678,7 @@ function ProcurementInner() {
               <CardTitle>Purchase orders by product</CardTitle>
               <CardDescription>
                 {skuQ
-                  ? `${posForGrouping.length} active order${
+                  ? `${posForGrouping.length} order${
                       posForGrouping.length === 1 ? "" : "s"
                     } match “${skuQuery.trim()}”`
                   : statusFilter
@@ -678,6 +691,7 @@ function ProcurementInner() {
                         primaryGroups.length === 1 ? "" : "s"
                       }`}
                 {statusFilter ? ` · ${STATUS_LABELS[statusFilter]}` : ""}
+                {skuQ && !statusFilter ? " · including received/cancelled" : ""}
               </CardDescription>
             </div>
             <div className="relative w-full sm:w-72">
@@ -717,8 +731,11 @@ function ProcurementInner() {
             </p>
           ) : primaryGroups.length === 0 ? (
             <p className="text-sm text-stone-500">
-              No active purchase orders to show. Use the status filters above to view
-              received or cancelled POs.
+              {statusFilter === "received" || statusFilter === "cancelled"
+                ? `No ${STATUS_LABELS[statusFilter].toLowerCase()} purchase orders to show.`
+                : skuQ
+                  ? `No purchase orders match “${skuQuery.trim()}”.`
+                  : "No active purchase orders to show. Use the status filters above to view received or cancelled POs."}
             </p>
           ) : (
             <div className="space-y-8">
