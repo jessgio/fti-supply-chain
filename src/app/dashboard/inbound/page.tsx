@@ -15,6 +15,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { ShipmentSelectInput } from "@/components/inbound/shipment-select-input";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
@@ -22,7 +23,6 @@ import {
   INBOUND_STATUS_STYLES,
   type InboundReceiveStatus,
 } from "@/lib/shipments/constants";
-import { summarizeSkuLabels } from "@/lib/procurement/sku-labels";
 import { formatNumber } from "@/lib/utils";
 import type {
   InboundReceive,
@@ -47,18 +47,6 @@ function newBatchEntry(qty = 0): LineBatchEntry {
     expiry_date: "",
     qty,
   };
-}
-
-function formatInboundShipmentOption(shipment: Shipment): string {
-  const poNumbers = (shipment.purchase_orders ?? [])
-    .map((po) => po.po_number)
-    .filter(Boolean);
-  const poLabel = poNumbers.length > 0 ? ` · ${poNumbers.join(", ")}` : "";
-  const skuLabel = summarizeSkuLabels(
-    (shipment.purchase_orders ?? []).flatMap((po) => po.items ?? []),
-  );
-  const skus = skuLabel ? ` · ${skuLabel}` : "";
-  return `${shipment.shipment_number}${poLabel}${skus} — delivery ${formatDisplayDate(shipment.expected_delivery_date)}`;
 }
 
 function shipmentLineRemaining(item: ShipmentItemRef): number {
@@ -557,18 +545,11 @@ export default function InboundPage() {
                 <label className="mb-1 block text-sm font-medium text-stone-700">
                   Shipment
                 </label>
-                <select
-                  className="w-full rounded-md border border-stone-200 px-3 py-2 text-sm"
+                <ShipmentSelectInput
+                  options={openShipments}
                   value={selectedShipmentId}
-                  onChange={(e) => setSelectedShipmentId(e.target.value)}
-                >
-                  <option value="">Select a shipment…</option>
-                  {openShipments.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {formatInboundShipmentOption(s)}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedShipmentId}
+                />
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
