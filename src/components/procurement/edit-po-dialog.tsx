@@ -53,7 +53,8 @@ export function EditPoDialog({
   onSaved: (updated: PurchaseOrder) => void;
   onSupplierCreated: (s: Supplier) => void;
 }) {
-  const locked = po.status === "received" || po.status === "cancelled";
+  const locked = po.status === "cancelled";
+  const wasReceived = po.status === "received";
   const [supplierId, setSupplierId] = useState(po.supplier_id ?? "");
   const [poNumber, setPoNumber] = useState(po.po_number);
   const [status, setStatus] = useState<PoStatus>(po.status);
@@ -192,8 +193,10 @@ export function EditPoDialog({
       title={`Edit ${po.po_number}`}
       description={
         locked
-          ? "Only notes can be changed on received or cancelled orders."
-          : "Update supplier, dates, status, and line items."
+          ? "Only notes can be changed on cancelled orders."
+          : wasReceived
+            ? "This PO was marked received. You can roll the status back or edit details. If goods were actually received, lifecycle sync may set it back to received."
+            : "Update supplier, dates, status, and line items."
       }
     >
       <div className="space-y-4">

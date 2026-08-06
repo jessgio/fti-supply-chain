@@ -22,6 +22,7 @@ import {
   INBOUND_STATUS_STYLES,
   type InboundReceiveStatus,
 } from "@/lib/shipments/constants";
+import { summarizeSkuLabels } from "@/lib/procurement/sku-labels";
 import { formatNumber } from "@/lib/utils";
 import type {
   InboundReceive,
@@ -53,7 +54,11 @@ function formatInboundShipmentOption(shipment: Shipment): string {
     .map((po) => po.po_number)
     .filter(Boolean);
   const poLabel = poNumbers.length > 0 ? ` · ${poNumbers.join(", ")}` : "";
-  return `${shipment.shipment_number}${poLabel} — delivery ${formatDisplayDate(shipment.expected_delivery_date)}`;
+  const skuLabel = summarizeSkuLabels(
+    (shipment.purchase_orders ?? []).flatMap((po) => po.items ?? []),
+  );
+  const skus = skuLabel ? ` · ${skuLabel}` : "";
+  return `${shipment.shipment_number}${poLabel}${skus} — delivery ${formatDisplayDate(shipment.expected_delivery_date)}`;
 }
 
 function shipmentLineRemaining(item: ShipmentItemRef): number {

@@ -56,6 +56,7 @@ import {
   type ShipmentGroupEntry,
 } from "@/lib/shipments/shipment-primary-groups";
 import { formatNumber, cn } from "@/lib/utils";
+import { summarizeSkuLabels } from "@/lib/procurement/sku-labels";
 import type {
   PoShortfallResolution,
   ProductPackagingLink,
@@ -779,24 +780,39 @@ function ShipmentsInner() {
                 {openPos.length === 0 ? (
                   <p className="text-sm text-stone-500">No open POs available.</p>
                 ) : (
-                  openPos.map((po) => (
+                  openPos.map((po) => {
+                    const skuSummary = summarizeSkuLabels(po.lines);
+                    return (
                     <label
                       key={po.id}
-                      className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-stone-50"
+                      className="flex cursor-pointer items-start gap-2 rounded px-2 py-1 hover:bg-stone-50"
                     >
                       <input
                         type="checkbox"
+                        className="mt-1"
                         checked={selectedPoIds.includes(po.id)}
                         onChange={() => toggleSelectedPo(po.id)}
                       />
-                      <span className="text-sm">
-                        <span className="font-medium text-rose-700">{po.po_number}</span>
-                        {po.supplier_name && (
-                          <span className="ml-2 text-stone-500">{po.supplier_name}</span>
+                      <span className="min-w-0 text-sm">
+                        <span className="block">
+                          <span className="font-medium text-rose-700">
+                            {po.po_number}
+                          </span>
+                          {po.supplier_name && (
+                            <span className="ml-2 text-stone-500">
+                              {po.supplier_name}
+                            </span>
+                          )}
+                        </span>
+                        {skuSummary && (
+                          <span className="block truncate text-xs italic text-stone-500">
+                            {skuSummary}
+                          </span>
                         )}
                       </span>
                     </label>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

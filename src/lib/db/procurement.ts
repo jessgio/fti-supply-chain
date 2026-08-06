@@ -488,8 +488,7 @@ export async function updatePurchaseOrder(
 
   const manualStatus = input.status !== undefined;
 
-  const lockedStatus =
-    existing.status === "received" || existing.status === "cancelled";
+  const lockedStatus = existing.status === "cancelled";
   if (lockedStatus) {
     const notesOnly =
       input.notes !== undefined &&
@@ -506,11 +505,13 @@ export async function updatePurchaseOrder(
       input.currency === undefined &&
       input.lines === undefined;
     if (!notesOnly) {
-      throw new Error(
-        `${existing.status === "received" ? "Received" : "Cancelled"} purchase orders can only have notes updated.`,
-      );
+      throw new Error("Cancelled purchase orders can only have notes updated.");
     }
   }
+
+  // Rolling a received PO back is allowed (e.g. status advanced without
+  // inbound). If lines are fully received, the next lifecycle recalc may
+  // set status back to received until receipts are reversed.
 
   const headerPatch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),

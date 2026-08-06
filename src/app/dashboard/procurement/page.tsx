@@ -83,7 +83,7 @@ function InlinePoStatusSelect({
   disabled?: boolean;
   onChange: (status: PoStatus) => void;
 }) {
-  const locked = status === "received" || status === "cancelled";
+  const locked = status === "cancelled";
   if (locked) {
     return <StatusBadge status={status} />;
   }

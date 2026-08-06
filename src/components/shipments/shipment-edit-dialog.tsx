@@ -22,6 +22,7 @@ import {
   type ShortShipWizardStep,
 } from "@/components/shipments/short-ship-wizard";
 import { resolveShipmentStatusFromDeparture } from "@/lib/shipments/shipment-dates";
+import { summarizeSkuLabels } from "@/lib/procurement/sku-labels";
 import { formatNumber } from "@/lib/utils";
 import type {
   PoShortfallResolution,
@@ -193,6 +194,17 @@ export function ShipmentEditDialog({
       po_number: po.po_number,
       supplier_name: po.supplier_name,
       status: "ordered",
+      lines: (po.items ?? []).map((item) => ({
+        id: item.po_line_id,
+        po_id: po.id,
+        sku_id: item.sku_id,
+        sku_code: item.sku_code,
+        sku_name: item.sku_name,
+        qty_ordered: item.qty_ordered,
+        qty_received: 0,
+        is_closed: false,
+        unit_cost: null,
+      })),
     })) as PurchaseOrder[];
     return [...openPos, ...extra.filter((po) => !openPos.some((p) => p.id === po.id))];
   }, [openPos, shipment]);
@@ -339,24 +351,39 @@ export function ShipmentEditDialog({
                   {selectablePos.length === 0 ? (
                     <p className="text-sm text-stone-500">No open POs available.</p>
                   ) : (
-                    selectablePos.map((po) => (
+                    selectablePos.map((po) => {
+                      const skuSummary = summarizeSkuLabels(po.lines);
+                      return (
                       <label
                         key={po.id}
-                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-stone-50"
+                        className="flex cursor-pointer items-start gap-2 rounded px-2 py-1 hover:bg-stone-50"
                       >
                         <input
                           type="checkbox"
+                          className="mt-1"
                           checked={selectedPoIds.includes(po.id)}
                           onChange={() => toggleSelectedPo(po.id)}
                         />
-                        <span className="text-sm">
-                          <span className="font-medium text-rose-700">{po.po_number}</span>
-                          {po.supplier_name && (
-                            <span className="ml-2 text-stone-500">{po.supplier_name}</span>
+                        <span className="min-w-0 text-sm">
+                          <span className="block">
+                            <span className="font-medium text-rose-700">
+                              {po.po_number}
+                            </span>
+                            {po.supplier_name && (
+                              <span className="ml-2 text-stone-500">
+                                {po.supplier_name}
+                              </span>
+                            )}
+                          </span>
+                          {skuSummary && (
+                            <span className="block truncate text-xs italic text-stone-500">
+                              {skuSummary}
+                            </span>
                           )}
                         </span>
                       </label>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
