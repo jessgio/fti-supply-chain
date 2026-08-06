@@ -397,14 +397,22 @@ const PO_DETAIL_SELECT =
 
 export async function listPurchaseOrders(
   supabase: SupabaseClient,
-  status?: PoStatus,
+  status?: PoStatus | PoStatus[],
 ): Promise<PurchaseOrder[]> {
   let query = supabase
     .from("purchase_orders")
     .select(PO_SELECT)
     .order("order_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
-  if (status) query = query.eq("status", status);
+  if (Array.isArray(status)) {
+    if (status.length === 1) {
+      query = query.eq("status", status[0]!);
+    } else if (status.length > 1) {
+      query = query.in("status", status);
+    }
+  } else if (status) {
+    query = query.eq("status", status);
+  }
 
   const { data, error } = await query;
   if (error) throw error;

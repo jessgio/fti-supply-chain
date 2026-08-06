@@ -266,37 +266,76 @@ function ProcurementInner() {
     let active = true;
     async function loadPos() {
       setLoading(true);
-      setOpenValueLoading(true);
       setError(null);
       try {
-        const qs = new URLSearchParams();
-        if (statusFilter) qs.set("status", statusFilter);
-        qs.set("include", "open_value");
-        const res = await fetch(`/api/procurement/pos?${qs.toString()}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Failed to load");
+        // Always load the full list. Status tabs filter client-side.
+        // Do not include open_value here — FX conversion is loaded separately
+        // so the PO table is not blocked on external rate APIs.
+        const res = await fetch("/api/procurement/pos");
+        let data: {
+          error?: string;
+          purchaseOrders?: PurchaseOrder[];
+        } = {};
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error(
+            res.ok
+              ? "Failed to parse purchase order response."
+              : `Failed to load purchase orders (${res.status}).`,
+          );
+        }
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to load purchase orders.");
+        }
         if (!active) return;
         setPos(data.purchaseOrders ?? []);
-        setOpenValue(
-          data.openValue?.formatted ?? formatPoMoney(0, DEFAULT_PO_CURRENCY),
-        );
       } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : "Failed to load");
-          setOpenValue("Unavailable");
+          const message =
+            err instanceof TypeError && err.message === "Failed to fetch"
+              ? "Network error loading purchase orders. Check your connection and try again."
+              : err instanceof Error
+                ? err.message
+                : "Failed to load purchase orders.";
+          setError(message);
         }
       } finally {
-        if (active) {
-          setLoading(false);
-          setOpenValueLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
     loadPos();
     return () => {
       active = false;
     };
-  }, [statusFilter, refreshKey]);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadOpenValue() {
+      setOpenValueLoading(true);
+      try {
+        const res = await fetch("/api/procurement/open-value");
+        const data = await res.json();
+        if (!active) return;
+        if (!res.ok) {
+          setOpenValue("Unavailable");
+          return;
+        }
+        setOpenValue(
+          data.formatted ?? formatPoMoney(0, DEFAULT_PO_CURRENCY),
+        );
+      } catch {
+        if (active) setOpenValue("Unavailable");
+      } finally {
+        if (active) setOpenValueLoading(false);
+      }
+    }
+    loadOpenValue();
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
 
   const summary = useMemo(() => {
     const open = pos.filter((p) =>
@@ -361,10 +400,13 @@ function ProcurementInner() {
   };
 
   const filteredPos = useMemo(() => {
-    if (!skuQ) return pos;
-    return pos.filter(poMatchesQuery);
+    const byStatus = statusFilter
+      ? pos.filter((po) => po.status === statusFilter)
+      : pos;
+    if (!skuQ) return byStatus;
+    return byStatus.filter(poMatchesQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pos, skuQ]);
+  }, [pos, skuQ, statusFilter]);
 
   // Active list hides received/cancelled; Received/Cancelled tabs and search
   // must still show completed POs (zero open qty).

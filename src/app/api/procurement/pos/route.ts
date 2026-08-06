@@ -31,6 +31,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ purchaseOrders });
     }
 
+    // Kept for backwards compatibility; the procurement UI loads open value
+    // from /api/procurement/open-value so the PO table is not blocked on FX.
     const totalIdr = await computeOpenPoValueIdr(purchaseOrders);
     return NextResponse.json({
       purchaseOrders,

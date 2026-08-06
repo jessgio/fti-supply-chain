@@ -1,6 +1,6 @@
 import type { PurchaseOrder } from "@/types/database";
 import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
-import { getRateToIdr } from "@/lib/procurement/fx-rates";
+import { getRateToIdr, preloadRatesToIdr } from "@/lib/procurement/fx-rates";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
 export const OPEN_PO_STATUSES = [
@@ -25,22 +25,32 @@ export async function computeOpenPoValueIdr(
   pos: PurchaseOrder[],
 ): Promise<number> {
   const open = pos.filter(isOpenPo);
-  const ratePromises = new Map<string, Promise<number>>();
 
-  async function rateFor(currency: string, date: string): Promise<number> {
-    const key = `${currency}:${date}`;
-    if (!ratePromises.has(key)) {
-      ratePromises.set(key, getRateToIdr(currency, date));
-    }
-    return ratePromises.get(key)!;
+  const datesByCurrency = new Map<string, string[]>();
+  for (const po of open) {
+    const currency = (po.currency ?? DEFAULT_PO_CURRENCY).toUpperCase();
+    if (currency === "IDR") continue;
+    const list = datesByCurrency.get(currency) ?? [];
+    list.push(poFxDate(po));
+    datesByCurrency.set(currency, list);
   }
+
+  await Promise.all(
+    [...datesByCurrency.entries()].map(([currency, dates]) =>
+      preloadRatesToIdr(currency, dates),
+    ),
+  );
 
   let totalIdr = 0;
   for (const po of open) {
     const currency = po.currency ?? DEFAULT_PO_CURRENCY;
     const amount = computePoInvoiceTotals(po).invoiceTotal;
-    const rate = await rateFor(currency, poFxDate(po));
-    totalIdr += Math.round(amount * rate);
+    try {
+      const rate = await getRateToIdr(currency, poFxDate(po));
+      totalIdr += Math.round(amount * rate);
+    } catch {
+      // Skip POs whose FX rate cannot be resolved rather than failing the page.
+    }
   }
 
   return totalIdr;
