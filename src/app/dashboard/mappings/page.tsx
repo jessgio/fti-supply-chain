@@ -318,6 +318,57 @@ export default function MappingsPage() {
     }
   }
 
+  function upsertMappedSku(updated: SkuRow) {
+    setSkus((prev) => {
+      if (prev.some((row) => row.id === updated.id)) {
+        return prev.map((row) =>
+          row.id === updated.id ? { ...row, ...updated } : row,
+        );
+      }
+      return [...prev, updated].sort((a, b) =>
+        a.sku_code.localeCompare(b.sku_code),
+      );
+    });
+  }
+
+  /** Convert a mapped single SKU to bundle or packaging (clears franchise). */
+  async function changeMappedKind(
+    sku: SkuRow,
+    kind: "bundle" | "packaging",
+  ) {
+    if (sku.is_bundle || sku.is_packaging) return;
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const body =
+        kind === "bundle"
+          ? { is_bundle: true, is_packaging: false }
+          : { is_bundle: false, is_packaging: true };
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+      const updated = data.sku as SkuRow;
+      upsertMappedSku({
+        ...updated,
+        franchise_id: null,
+        franchise_name: null,
+        is_clearance: false,
+      });
+      if (editingFranchiseId === sku.id) {
+        setEditingFranchiseId(null);
+        setNewFranchiseName("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   async function classifySku(
     sku: SkuRow,
     kind: ProductType,
@@ -358,17 +409,12 @@ export default function MappingsPage() {
         return next;
       });
 
-      if (updated.is_bundle || updated.franchise_id) {
-        setSkus((prev) => {
-          if (prev.some((row) => row.id === updated.id)) {
-            return prev.map((row) =>
-              row.id === updated.id ? { ...row, ...updated } : row,
-            );
-          }
-          return [...prev, updated].sort((a, b) =>
-            a.sku_code.localeCompare(b.sku_code),
-          );
-        });
+      if (
+        updated.is_bundle ||
+        updated.is_packaging ||
+        updated.franchise_id
+      ) {
+        upsertMappedSku(updated);
       }
 
       if (updated.franchise_id && updated.franchise_name) {
@@ -462,15 +508,12 @@ export default function MappingsPage() {
       setAddProductType("single");
 
       if (created.is_packaging) {
+        upsertMappedSku(created);
         setAddSuccess(
-          `${created.sku_code} added as packaging. Manage it under Packaging.`,
+          `${created.sku_code} added as packaging.`,
         );
       } else if (created.is_bundle || created.franchise_id) {
-        setSkus((prev) =>
-          [...prev, created].sort((a, b) =>
-            a.sku_code.localeCompare(b.sku_code),
-          ),
-        );
+        upsertMappedSku(created);
         setAddSuccess(`${created.sku_code} added.`);
         if (addFranchiseName.trim() && created.franchise_name) {
           setFranchises((prev) => {
@@ -634,9 +677,10 @@ export default function MappingsPage() {
           <CardDescription>
             Mapped SKUs have a franchise or are bundle parents. Needs
             classification lists unrecognized codes (usually from uploads) that
-            are not yet single, bundle, or packaging. Mark clearance SKUs when
-            stock is being flushed — they stay in inventory forecast without a
-            Reorder now badge.
+            are not yet single, bundle, or packaging. Change mapped singles to
+            bundle or packaging when needed; mark clearance when stock is being
+            flushed — they stay in inventory forecast without a Reorder now
+            badge.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -737,6 +781,7 @@ export default function MappingsPage() {
                 onUpdateProductName={updateProductName}
                 onToggleActive={toggleActive}
                 onToggleClearance={toggleClearance}
+                onChangeKind={changeMappedKind}
               />
             )
           ) : unclassifiedLoading ? (
@@ -845,6 +890,7 @@ function MappedSkuTable({
   onUpdateProductName,
   onToggleActive,
   onToggleClearance,
+  onChangeKind,
 }: {
   skus: SkuRow[];
   franchiseOptions: FranchiseOption[];
@@ -863,6 +909,7 @@ function MappedSkuTable({
   onUpdateProductName: (sku: SkuRow, name: string) => void;
   onToggleActive: (sku: SkuRow) => void;
   onToggleClearance: (sku: SkuRow) => void;
+  onChangeKind: (sku: SkuRow, kind: "bundle" | "packaging") => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
@@ -997,6 +1044,24 @@ function MappedSkuTable({
                   <span className="text-xs text-stone-400">—</span>
                 ) : (
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updatingId === sku.id}
+                      onClick={() => onChangeKind(sku, "bundle")}
+                    >
+                      {updatingId === sku.id ? "Saving…" : "Change to bundle"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updatingId === sku.id}
+                      onClick={() => onChangeKind(sku, "packaging")}
+                    >
+                      {updatingId === sku.id
+                        ? "Saving…"
+                        : "Change to packaging"}
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

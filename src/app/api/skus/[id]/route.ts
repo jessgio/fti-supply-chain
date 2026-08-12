@@ -74,7 +74,9 @@ export async function PATCH(
 
     if (
       typeof input.is_active === "boolean" ||
-      typeof input.is_clearance === "boolean"
+      typeof input.is_clearance === "boolean" ||
+      typeof input.is_bundle === "boolean" ||
+      typeof input.is_packaging === "boolean"
     ) {
       invalidateForecastCache();
     }

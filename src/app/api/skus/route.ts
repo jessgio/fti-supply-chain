@@ -68,7 +68,9 @@ export async function GET(request: Request) {
       .order("sku_code");
 
     if (scope === "mapped") {
-      query = query.or("franchise_id.not.is.null,is_bundle.eq.true");
+      query = query.or(
+        "franchise_id.not.is.null,is_bundle.eq.true,is_packaging.eq.true",
+      );
     } else if (scope === "unclassified") {
       query = query
         .eq("is_bundle", false)
