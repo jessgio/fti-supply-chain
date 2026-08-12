@@ -22,6 +22,8 @@ export interface Sku {
   is_active: boolean;
   /** Primary packaging material (UB, EFLUTE, JAR, PUMP, etc.) — supply chain only. */
   is_packaging: boolean;
+  /** Flushing stock — keep visible, never recommend reorder. */
+  is_clearance: boolean;
   retail_price: number | null;
   unit_cogs: number | null;
 }
@@ -214,6 +216,8 @@ export interface RestockRecommendation {
   covered_by_po: boolean;
   /** True when on-hand + on-order inventory is at or below the reorder point. */
   needs_reorder: boolean;
+  /** Flushing stock — suppress reorder badges and restock qty. */
+  is_clearance: boolean;
   avg_daily_demand: number;
   /** L3M/L6M blend before Ramadan / Q4 uplift. */
   base_forecast_daily_demand: number;

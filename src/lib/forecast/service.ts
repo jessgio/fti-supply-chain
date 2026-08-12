@@ -8,6 +8,7 @@ import {
   type SkuForecastInput,
 } from "@/lib/forecast/demand";
 import { enrichWithIncomingBatchStockout } from "@/lib/forecast/pipeline-stockout";
+import { applyClearanceToRecommendations } from "@/lib/forecast/stock-status";
 import type { RestockRecommendation } from "@/types/database";
 
 export interface ForecastParams {
@@ -36,15 +37,17 @@ export async function loadRestockRecommendationsUncached(
   const historyDays = params.historyDays ?? 90;
   const ewmaDays = params.ewmaDays ?? 30;
 
-  const [{ data, error }, onOrderRes] = await Promise.all([
+  const [{ data, error }, onOrderRes, clearanceRes] = await Promise.all([
     supabase.rpc("get_sku_forecast_base", {
       p_history_days: historyDays,
       p_ewma_days: ewmaDays,
     }),
     supabase.rpc("get_on_order_qty_by_sku"),
+    supabase.from("skus").select("sku_code").eq("is_clearance", true),
   ]);
   if (error) throw error;
   if (onOrderRes.error) throw onOrderRes.error;
+  if (clearanceRes.error) throw clearanceRes.error;
 
   const inputs: SkuForecastInput[] = (data ?? []).map(
     (row: Record<string, unknown>) => ({
@@ -74,7 +77,14 @@ export async function loadRestockRecommendationsUncached(
     onOrderBySku,
   );
 
-  const recommendations = await enrichWithIncomingBatchStockout(supabase, plan);
+  const withBatches = await enrichWithIncomingBatchStockout(supabase, plan);
+  const clearanceCodes = (
+    (clearanceRes.data ?? []) as { sku_code: string }[]
+  ).map((row) => row.sku_code);
+  const recommendations = applyClearanceToRecommendations(
+    withBatches,
+    clearanceCodes,
+  );
 
   return { recommendations, skuCount: inputs.length };
 }

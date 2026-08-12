@@ -17,6 +17,7 @@ export interface CreatedSkuRow {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
   franchise_name: string | null;
@@ -28,6 +29,7 @@ export interface ExistingSkuConflict {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
 }
@@ -47,13 +49,14 @@ export interface UpdateSkuInput {
   is_active?: boolean;
   is_bundle?: boolean;
   is_packaging?: boolean;
+  is_clearance?: boolean;
   franchise_id?: string | null;
   franchise_name?: string | null;
   unit_cogs?: number | null;
 }
 
 const SKU_SELECT =
-  "id, sku_code, name, is_bundle, is_packaging, is_active, franchise_id, product_franchises(name)";
+  "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id, product_franchises(name)";
 
 function mapSkuRow(data: {
   id: string;
@@ -61,6 +64,7 @@ function mapSkuRow(data: {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
   product_franchises: unknown;
@@ -79,6 +83,7 @@ function mapSkuRow(data: {
     name: data.name,
     is_bundle: data.is_bundle,
     is_packaging: data.is_packaging,
+    is_clearance: Boolean(data.is_clearance),
     is_active: data.is_active,
     franchise_id: data.franchise_id,
     franchise_name: franchiseName,
@@ -145,7 +150,7 @@ export async function createSku(
   const { data: existing, error: existingError } = await supabase
     .from("skus")
     .select(
-      "id, sku_code, name, is_bundle, is_packaging, is_active, franchise_id",
+      "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id",
     )
     .eq("sku_code", skuCode)
     .maybeSingle();
@@ -157,6 +162,7 @@ export async function createSku(
       name: existing.name,
       is_bundle: existing.is_bundle,
       is_packaging: existing.is_packaging,
+      is_clearance: Boolean(existing.is_clearance),
       is_active: existing.is_active,
       franchise_id: existing.franchise_id,
     });
@@ -231,6 +237,7 @@ export async function updateSku(
     is_active?: boolean;
     is_bundle?: boolean;
     is_packaging?: boolean;
+    is_clearance?: boolean;
     franchise_id?: string | null;
     unit_cogs?: number | null;
   } = {};
@@ -241,6 +248,9 @@ export async function updateSku(
 
   if (typeof input.is_active === "boolean") {
     updates.is_active = input.is_active;
+  }
+  if (typeof input.is_clearance === "boolean") {
+    updates.is_clearance = input.is_clearance;
   }
 
   // Kind transitions: bundle/packaging clear franchise; packaging clears bundle and vice versa.

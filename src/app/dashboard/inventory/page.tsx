@@ -743,6 +743,7 @@ export default function InventoryPage() {
                           <option value="watch">Watch</option>
                           <option value="on_order">On order</option>
                           <option value="overstock">Overstock</option>
+                          <option value="clearance">Clearance</option>
                           <option value="healthy">Healthy</option>
                         </Select>
                       }

@@ -102,6 +102,7 @@ export function buildForecastExportRows(
       Confidence: titleCase(row.confidence),
       "Covered by PO": row.covered_by_po ? "Yes" : "No",
       "Needs reorder": row.needs_reorder ? "Yes" : "No",
+      Clearance: row.is_clearance ? "Yes" : "No",
       "First sale date": row.first_sale_date ?? "",
     };
   });

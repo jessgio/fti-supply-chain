@@ -369,6 +369,7 @@ export function buildRestockPlan(
       on_order_qty: Number(onOrderQty.toFixed(2)),
       covered_by_po: coveredByPo,
       needs_reorder: needsReorder,
+      is_clearance: false,
       avg_daily_demand: Number(l6m.toFixed(2)),
       base_forecast_daily_demand: Number(baseForecastDaily.toFixed(2)),
       forecast_daily_demand: Number(forecastDaily.toFixed(2)),

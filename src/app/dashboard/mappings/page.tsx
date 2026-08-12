@@ -29,6 +29,7 @@ interface SkuRow {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
   franchise_name: string | null;
@@ -281,6 +282,33 @@ export default function MappingsPage() {
       setSkus((prev) =>
         prev.map((row) =>
           row.id === sku.id ? { ...row, is_active: !row.is_active } : row,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function toggleClearance(sku: SkuRow) {
+    if (sku.is_bundle || sku.is_packaging) return;
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_clearance: !sku.is_clearance }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+      const updated = data.sku as SkuRow;
+      setSkus((prev) =>
+        prev.map((row) =>
+          row.id === sku.id
+            ? { ...row, is_clearance: updated.is_clearance ?? !row.is_clearance }
+            : row,
         ),
       );
     } catch (err) {
@@ -606,7 +634,9 @@ export default function MappingsPage() {
           <CardDescription>
             Mapped SKUs have a franchise or are bundle parents. Needs
             classification lists unrecognized codes (usually from uploads) that
-            are not yet single, bundle, or packaging.
+            are not yet single, bundle, or packaging. Mark clearance SKUs when
+            stock is being flushed — they stay in inventory forecast without a
+            Reorder now badge.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -706,6 +736,7 @@ export default function MappingsPage() {
                 onUpdateFranchise={updateFranchise}
                 onUpdateProductName={updateProductName}
                 onToggleActive={toggleActive}
+                onToggleClearance={toggleClearance}
               />
             )
           ) : unclassifiedLoading ? (
@@ -813,6 +844,7 @@ function MappedSkuTable({
   onUpdateFranchise,
   onUpdateProductName,
   onToggleActive,
+  onToggleClearance,
 }: {
   skus: SkuRow[];
   franchiseOptions: FranchiseOption[];
@@ -830,6 +862,7 @@ function MappedSkuTable({
   ) => void;
   onUpdateProductName: (sku: SkuRow, name: string) => void;
   onToggleActive: (sku: SkuRow) => void;
+  onToggleClearance: (sku: SkuRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
@@ -841,6 +874,7 @@ function MappedSkuTable({
             <th className="px-3 py-2">Franchise</th>
             <th className="px-3 py-2">Type</th>
             <th className="px-3 py-2">Forecast</th>
+            <th className="px-3 py-2">Clearance</th>
             <th className="px-3 py-2">Action</th>
           </tr>
         </thead>
@@ -950,19 +984,44 @@ function MappedSkuTable({
               <td className="px-3 py-2">
                 {sku.is_bundle || sku.is_packaging ? (
                   <span className="text-xs text-stone-400">—</span>
+                ) : sku.is_clearance ? (
+                  <Badge className="bg-violet-100 text-violet-800">
+                    Clearance
+                  </Badge>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={updatingId === sku.id}
-                    onClick={() => onToggleActive(sku)}
-                  >
-                    {updatingId === sku.id
-                      ? "Saving…"
-                      : sku.is_active
-                        ? "Mark inactive"
-                        : "Mark active"}
-                  </Button>
+                  <span className="text-xs text-stone-400">—</span>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                {sku.is_bundle || sku.is_packaging ? (
+                  <span className="text-xs text-stone-400">—</span>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updatingId === sku.id}
+                      onClick={() => onToggleClearance(sku)}
+                    >
+                      {updatingId === sku.id
+                        ? "Saving…"
+                        : sku.is_clearance
+                          ? "Unmark clearance"
+                          : "Mark clearance"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updatingId === sku.id}
+                      onClick={() => onToggleActive(sku)}
+                    >
+                      {updatingId === sku.id
+                        ? "Saving…"
+                        : sku.is_active
+                          ? "Mark inactive"
+                          : "Mark active"}
+                    </Button>
+                  </div>
                 )}
               </td>
             </tr>

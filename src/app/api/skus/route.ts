@@ -12,6 +12,7 @@ function mapSkuRow(row: {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
   product_franchises: unknown;
@@ -29,6 +30,7 @@ function mapSkuRow(row: {
     name: row.name,
     is_bundle: row.is_bundle,
     is_packaging: row.is_packaging,
+    is_clearance: Boolean(row.is_clearance),
     is_active: row.is_active,
     franchise_id: row.franchise_id,
     franchise_name: franchiseName,
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from("skus")
       .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_active, franchise_id, product_franchises(name)",
+        "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id, product_franchises(name)",
       )
       .order("sku_code");
 

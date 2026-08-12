@@ -41,8 +41,10 @@ function recomputeWithoutSeasonality(
     addDays(new Date(), daysUntilStockout),
     "yyyy-MM-dd",
   );
-  const needsReorder = effectiveStock <= reorderPoint;
-  const recommendedRestockQty = Math.ceil(dailyBurn * targetStockDays);
+  const needsReorder = row.is_clearance ? false : effectiveStock <= reorderPoint;
+  const recommendedRestockQty = row.is_clearance
+    ? 0
+    : Math.ceil(dailyBurn * targetStockDays);
   const coveredByPo = row.on_order_qty > 0 && !needsReorder;
 
   let incomingBatchStockoutDate: string | null = null;

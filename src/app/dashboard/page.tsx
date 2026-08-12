@@ -13,6 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getCachedGrowthAnalytics } from "@/lib/analytics/growth-cache";
 import { computeGrowthMetrics } from "@/lib/analytics/growth";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
+import { stockStatusOf } from "@/lib/forecast/stock-status";
 import { formatCurrency, formatNumber, formatPct } from "@/lib/utils";
 
 export const revalidate = 120;
@@ -79,10 +80,7 @@ async function loadOverview(): Promise<Overview | null> {
       ]);
 
     const reorderNow = recommendations.filter(
-      (r) =>
-        !r.covered_by_po &&
-        r.days_until_stockout !== null &&
-        r.days_until_stockout <= r.reorder_lead_days,
+      (r) => stockStatusOf(r) === "reorder",
     ).length;
     const stockoutSoon = recommendations.filter(
       (r) => r.days_until_stockout !== null && r.days_until_stockout <= 30,
