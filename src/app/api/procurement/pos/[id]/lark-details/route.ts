@@ -113,6 +113,9 @@ export async function GET(
         lark_status_synced_at: po.lark_status_synced_at,
         payment_scope: "both",
         lark_expense_category: null,
+        submitted_amount: null,
+        submitted_currency: null,
+        plan_rows: null,
         submitted_at: po.lark_status_synced_at ?? new Date().toISOString(),
       },
     ];

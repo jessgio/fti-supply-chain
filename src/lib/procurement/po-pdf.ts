@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import type PDFDocumentType from "pdfkit";
 import type { CompanySettings, PurchaseOrder, Supplier } from "@/types/database";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { billableLineQty, computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
 import { composePoPdfNotes } from "@/lib/procurement/supplier-po-notes";
 import { formatPoMoney } from "@/lib/procurement/currencies";
@@ -94,6 +95,7 @@ function contactBlock(
 export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
   const { po, supplier, company, logo } = data;
   const totals = computePoInvoiceTotals(po);
+  const paymentSchedule = resolvePaymentSchedule(po);
   const currency = po.currency ?? "IDR";
 
   return new Promise((resolve, reject) => {
@@ -308,12 +310,14 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     if (totals.otherCharges > 0) {
       totalRow("Other", formatCurrency(totals.otherCharges, currency));
     }
-    totalRow("Invoice total", formatCurrency(totals.invoiceTotal, currency), true);
+    totalRow("Invoice total", formatCurrency(paymentSchedule.invoiceTotal, currency), true);
     totalRow(
-      `Down payment (${totals.downPaymentPct}%)`,
-      formatCurrency(totals.downPayment, currency),
+      paymentSchedule.isCommitted
+        ? "Down payment"
+        : `Down payment (${totals.downPaymentPct}%)`,
+      formatCurrency(paymentSchedule.downPayment, currency),
     );
-    totalRow("Final payment", formatCurrency(totals.finalPayment, currency), true);
+    totalRow("Final payment", formatCurrency(paymentSchedule.balance, currency), true);
 
     const pdfNotes = composePoPdfNotes(po.notes, supplier);
 

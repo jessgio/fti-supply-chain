@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole } from "@/lib/auth";
 import {
+  buildPaymentPlanRows,
   isApPaymentPlanScope,
   isLarkApprovalStatus,
   type ApPaymentPlanScope,
 } from "@/lib/lark/ap-form";
+import {
+  buildCommittedPatchFromAp,
+  sumPlanRowAmounts,
+} from "@/lib/procurement/committed-payment-amounts";
 import {
   getApprovalInstanceDetails,
   resolveApprovalInstance,
@@ -131,6 +136,21 @@ export async function POST(
       }
     }
 
+    const planRows = buildPaymentPlanRows(po, paymentScope);
+    const submittedAmount = sumPlanRowAmounts(planRows);
+    const submittedCurrency = planRows[0]?.currency ?? po.currency ?? "IDR";
+    const planRowsSnapshot = planRows.map((row) => ({
+      dateYmd: row.dateYmd,
+      amount: row.amount,
+      currency: row.currency,
+      remarks: row.remarks,
+    }));
+    const committedPatch = buildCommittedPatchFromAp(
+      po,
+      paymentScope,
+      planRows,
+    );
+
     const { data: inserted, error: insertErr } = await supabase
       .from("purchase_order_lark_submissions")
       .insert({
@@ -141,6 +161,9 @@ export async function POST(
         lark_status_synced_at: syncedAt,
         payment_scope: paymentScope,
         lark_expense_category: null,
+        submitted_amount: submittedAmount,
+        submitted_currency: submittedCurrency,
+        plan_rows: planRowsSnapshot,
         submitted_at: syncedAt,
       })
       .select("*")
@@ -176,6 +199,7 @@ export async function POST(
         lark_approval_status: approvalStatus,
         lark_status_synced_at: syncedAt,
         lark_submitted_at: syncedAt,
+        ...(committedPatch ?? {}),
       })
       .eq("id", po.id);
 

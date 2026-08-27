@@ -7,7 +7,7 @@ import {
 } from "@/lib/procurement/payment-idr";
 import { getRateToIdr } from "@/lib/procurement/fx-rates";
 import { poFxDate } from "@/lib/procurement/open-po-value";
-import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { listPurchaseOrders } from "@/lib/db/procurement";
 
 export type PaymentLedgerSortKey =
@@ -400,9 +400,9 @@ export async function computePaymentDashboardSummary(
     if (po.status === "cancelled") continue;
 
     const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
-    const totals = computePoInvoiceTotals(po);
+    const schedule = resolvePaymentSchedule(po);
     const rate = await poRate(po);
-    const invoiceIdr = Math.round(totals.invoiceTotal * rate);
+    const invoiceIdr = Math.round(schedule.invoiceTotal * rate);
 
     const poPayments = (paymentsByPo.get(po.id) ?? []).map((payment) => ({
       amount: Number(payment.amount),
@@ -452,8 +452,8 @@ export async function computePaymentDashboardSummary(
 
     const downBalanceBalanced = downBalancePaymentsNetToZero(
       poCurrency,
-      totals.downPayment,
-      totals.finalPayment,
+      schedule.downPayment,
+      schedule.balance,
       paidDownPoCurrency,
       paidBalancePoCurrency,
     );
@@ -462,7 +462,7 @@ export async function computePaymentDashboardSummary(
       const downIssue = purposeIssue(
         po,
         poCurrency,
-        totals.downPayment,
+        schedule.downPayment,
         paidDownPoCurrency,
         downIdrRate,
       );
@@ -471,7 +471,7 @@ export async function computePaymentDashboardSummary(
       const balanceIssue = purposeIssue(
         po,
         poCurrency,
-        totals.finalPayment,
+        schedule.balance,
         paidBalancePoCurrency,
         balanceIdrRate,
       );

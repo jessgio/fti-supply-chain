@@ -10,12 +10,17 @@ import {
   isApPaymentPlanScope,
   isLarkApprovalStatus,
   buildApFormControls,
+  buildPaymentPlanRows,
   stringifyApForm,
   type ApBrandValue,
   type ApExpenseCategoryValue,
   type ApPaymentPlanScope,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
+import {
+  buildCommittedPatchFromAp,
+  sumPlanRowAmounts,
+} from "@/lib/procurement/committed-payment-amounts";
 import {
   createApprovalInstance,
   getApprovalInstanceDetails,
@@ -294,6 +299,23 @@ export async function POST(
       attachmentCodes,
     });
 
+    const effectivePlanRows =
+      planRows ?? buildPaymentPlanRows(po, paymentScope);
+    const submittedAmount = sumPlanRowAmounts(effectivePlanRows);
+    const submittedCurrency =
+      effectivePlanRows[0]?.currency ?? po.currency ?? "IDR";
+    const planRowsSnapshot = effectivePlanRows.map((row) => ({
+      dateYmd: row.dateYmd,
+      amount: row.amount,
+      currency: row.currency,
+      remarks: row.remarks,
+    }));
+    const committedPatch = buildCommittedPatchFromAp(
+      po,
+      paymentScope,
+      effectivePlanRows,
+    );
+
     const result = await createApprovalInstance({
       approvalCode: getLarkApprovalCode(),
       openId: submitterOpenId,
@@ -322,6 +344,9 @@ export async function POST(
         lark_status_synced_at: syncedAt,
         payment_scope: paymentScope,
         lark_expense_category: expenseCategory,
+        submitted_amount: submittedAmount,
+        submitted_currency: submittedCurrency,
+        plan_rows: planRowsSnapshot,
         submitted_at: syncedAt,
       });
 
@@ -347,6 +372,7 @@ export async function POST(
         lark_status_synced_at: syncedAt,
         lark_submitted_at: syncedAt,
         lark_expense_category: expenseCategory,
+        ...(committedPatch ?? {}),
       })
       .eq("id", po.id);
 

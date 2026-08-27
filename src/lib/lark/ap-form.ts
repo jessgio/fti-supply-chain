@@ -349,6 +349,35 @@ export function paymentAmountForApScope(
   }
 }
 
+/** Prefer the frozen amount stored on an AP submission over live PO totals. */
+export function paymentAmountForApSubmission(
+  po: PurchaseOrder,
+  submission: {
+    payment_scope: ApPaymentPlanScope | string;
+    submitted_amount?: number | null;
+    submitted_currency?: string | null;
+  },
+): { amount: number; currency: string } | null {
+  if (
+    submission.submitted_amount != null &&
+    Number.isFinite(Number(submission.submitted_amount))
+  ) {
+    return {
+      amount: Number(submission.submitted_amount),
+      currency:
+        submission.submitted_currency?.trim() ||
+        po.currency ||
+        "IDR",
+    };
+  }
+  return paymentAmountForApScope(
+    po,
+    isApPaymentPlanScope(submission.payment_scope)
+      ? submission.payment_scope
+      : "both",
+  );
+}
+
 export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] {
   const {
     po,

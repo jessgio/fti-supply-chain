@@ -362,6 +362,16 @@ export interface PurchaseOrderLarkSubmission {
   lark_status_synced_at: string | null;
   payment_scope: LarkPaymentPlanScope;
   lark_expense_category: string | null;
+  /** Total amount filed on this AP Form; frozen after submit/link. */
+  submitted_amount: number | null;
+  submitted_currency: string | null;
+  /** Snapshot of plan rows sent to Lark. */
+  plan_rows: Array<{
+    dateYmd: string;
+    amount: number;
+    currency: string;
+    remarks: string;
+  }> | null;
   submitted_at: string;
 }
 
@@ -395,6 +405,14 @@ export interface PurchaseOrder {
   other_charges: number;
   currency: string;
   notes: string | null;
+  /**
+   * Frozen payment schedule after AP Form submit and/or first logged payment.
+   * Expected DP/balance and PDF payment section use these instead of live lines.
+   */
+  committed_invoice_total?: number | null;
+  committed_down_payment?: number | null;
+  committed_balance?: number | null;
+  payment_amounts_committed_at?: string | null;
   /** Optional FK to a pd_projects row — links this PO to a product development launch. */
   pd_project_id: string | null;
   pd_project_name?: string | null;

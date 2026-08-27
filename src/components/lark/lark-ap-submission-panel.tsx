@@ -18,6 +18,7 @@ import {
   larkApprovalStatusBadgeClass,
   localTodayYmd,
   paymentAmountForApScope,
+  paymentAmountForApSubmission,
   poHasSplitPaymentPlan,
   type ApBrandValue,
   type ApExpenseCategoryValue,
@@ -671,11 +672,11 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     activeSubmission?.lark_approval_status ?? approvalStatus,
   );
   const activePaymentAmount = useMemo(() => {
-    const scope =
-      (activeSubmission?.payment_scope as ApPaymentPlanScope | undefined) ??
-      "both";
-    return paymentAmountForApScope(po, scope);
-  }, [po, activeSubmission?.payment_scope]);
+    if (activeSubmission) {
+      return paymentAmountForApSubmission(po, activeSubmission);
+    }
+    return paymentAmountForApScope(po, "both");
+  }, [po, activeSubmission]);
 
   return (
     <div className="space-y-4">
@@ -743,10 +744,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             <ul className="mt-1.5 space-y-1">
               {submissions.map((sub) => {
                 const selected = sub.id === (activeSubmission?.id ?? "");
-                const amount = paymentAmountForApScope(
-                  po,
-                  sub.payment_scope as ApPaymentPlanScope,
-                );
+                const amount = paymentAmountForApSubmission(po, sub);
                 return (
                   <li key={sub.id}>
                     <button

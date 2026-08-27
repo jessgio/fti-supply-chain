@@ -1,5 +1,6 @@
 import type { PoPayment, PurchaseOrder } from "@/types/database";
 import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { paymentAmountIdrSync } from "@/lib/procurement/payment-idr";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
@@ -52,7 +53,7 @@ export function paymentIdrAmount(payment: PoPayment): number | null {
 
 export function computePoPaymentSummary(po: PurchaseOrder) {
   const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
-  const totals = computePoInvoiceTotals(po);
+  const schedule = resolvePaymentSchedule(po);
   const payments = po.payments ?? [];
 
   const paidDown = sumPaymentsInPoCurrency(
@@ -74,28 +75,31 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
 
   return {
     poCurrency,
-    expectedDown: totals.downPayment,
-    expectedBalance: totals.finalPayment,
-    expectedTotal: totals.invoiceTotal,
+    expectedDown: schedule.downPayment,
+    expectedBalance: schedule.balance,
+    expectedTotal: schedule.invoiceTotal,
+    paymentScheduleCommitted: schedule.isCommitted,
     paidDown,
     paidBalance,
     paidTotalPoCurrency,
     totalIdr,
     downStatus: paymentFulfillmentStatus(
-      totals.downPayment,
+      schedule.downPayment,
       paidDown,
       poCurrency,
     ),
     balanceStatus: paymentFulfillmentStatus(
-      totals.finalPayment,
+      schedule.balance,
       paidBalance,
       poCurrency,
     ),
     overallStatus: paymentFulfillmentStatus(
-      totals.invoiceTotal,
+      schedule.invoiceTotal,
       paidTotalPoCurrency,
       poCurrency,
     ),
+    /** Live line-based totals (for reference when schedule is frozen). */
+    liveInvoiceTotal: computePoInvoiceTotals(po).invoiceTotal,
   };
 }
 

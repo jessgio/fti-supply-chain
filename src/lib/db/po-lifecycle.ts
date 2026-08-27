@@ -58,6 +58,10 @@ async function loadPoLifecycleInput(
       pph_pct,
       other_charges,
       currency,
+      committed_invoice_total,
+      committed_down_payment,
+      committed_balance,
+      payment_amounts_committed_at,
       purchase_order_lines (
         qty_ordered,
         qty_received,
@@ -130,6 +134,18 @@ async function loadPoLifecycleInput(
     pph_pct: Number(po.pph_pct ?? 0),
     other_charges: Number(po.other_charges ?? 0),
     currency: (po.currency as string) ?? "IDR",
+    committed_invoice_total:
+      po.committed_invoice_total == null
+        ? null
+        : Number(po.committed_invoice_total),
+    committed_down_payment:
+      po.committed_down_payment == null
+        ? null
+        : Number(po.committed_down_payment),
+    committed_balance:
+      po.committed_balance == null ? null : Number(po.committed_balance),
+    payment_amounts_committed_at:
+      (po.payment_amounts_committed_at as string | null) ?? null,
     lines: lines.map((line) => ({
       qty_ordered: Number(line.qty_ordered),
       qty_received: Number(line.qty_received),

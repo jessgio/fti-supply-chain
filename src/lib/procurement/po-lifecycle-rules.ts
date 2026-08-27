@@ -1,11 +1,11 @@
 import type { PoStatus, PurchaseOrderLine } from "@/types/database";
 import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import {
   isBalancePaymentPurpose,
   isDownPaymentPurpose,
   paymentFulfillmentStatus,
 } from "@/lib/procurement/po-payment-status";
-import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
 /** Shipment statuses that keep a PO linked to an active shipping schedule. */
 export const PO_ACTIVE_SHIPMENT_STATUSES = new Set(["planned", "in_transit"]);
@@ -34,6 +34,10 @@ export interface PoLifecycleInput {
   pph_pct: number;
   other_charges: number;
   currency: string;
+  committed_invoice_total?: number | null;
+  committed_down_payment?: number | null;
+  committed_balance?: number | null;
+  payment_amounts_committed_at?: string | null;
   lines: Array<
     Pick<PurchaseOrderLine, "qty_ordered" | "qty_received" | "unit_cost" | "is_closed">
   >;
@@ -141,12 +145,16 @@ function sumLifecyclePaymentsInPoCurrency(
 
 function paymentSummary(input: PoLifecycleInput) {
   const poCurrency = input.currency ?? DEFAULT_PO_CURRENCY;
-  const totals = computePoInvoiceTotals({
+  const schedule = resolvePaymentSchedule({
     down_payment_pct: input.down_payment_pct,
     discount_amount: input.discount_amount,
     tax_pct: input.tax_pct,
     pph_pct: input.pph_pct,
     other_charges: input.other_charges,
+    committed_invoice_total: input.committed_invoice_total,
+    committed_down_payment: input.committed_down_payment,
+    committed_balance: input.committed_balance,
+    payment_amounts_committed_at: input.payment_amounts_committed_at,
     lines: input.lines.map(
       (line) =>
         ({
@@ -171,12 +179,12 @@ function paymentSummary(input: PoLifecycleInput) {
 
   return {
     downStatus: paymentFulfillmentStatus(
-      totals.downPayment,
+      schedule.downPayment,
       paidDown,
       poCurrency,
     ),
     balanceStatus: paymentFulfillmentStatus(
-      totals.finalPayment,
+      schedule.balance,
       paidBalance,
       poCurrency,
     ),

@@ -8,6 +8,7 @@ import type {
 } from "@/types/database";
 import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
 import { deletePoDocuments } from "@/lib/db/po-documents";
+import { buildCommittedPatchFromPayment } from "@/lib/procurement/committed-payment-amounts";
 
 export interface NewPoLineInput {
   sku_id: string;
@@ -263,6 +264,10 @@ type PoRow = {
   lark_expense_category?: string | null;
   lark_approval_status?: string | null;
   lark_status_synced_at?: string | null;
+  committed_invoice_total?: number | null;
+  committed_down_payment?: number | null;
+  committed_balance?: number | null;
+  payment_amounts_committed_at?: string | null;
   created_at: string;
   updated_at: string;
   suppliers: { name: string } | null;
@@ -360,6 +365,17 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     other_charges: Number(row.other_charges ?? 0),
     currency: row.currency ?? "IDR",
     notes: row.notes,
+    committed_invoice_total:
+      row.committed_invoice_total == null
+        ? null
+        : Number(row.committed_invoice_total),
+    committed_down_payment:
+      row.committed_down_payment == null
+        ? null
+        : Number(row.committed_down_payment),
+    committed_balance:
+      row.committed_balance == null ? null : Number(row.committed_balance),
+    payment_amounts_committed_at: row.payment_amounts_committed_at ?? null,
     pd_project_id: row.pd_project_id ?? null,
     pd_project_name: pdProject?.name ?? null,
     pd_project_product_name: pdProject?.product_name ?? null,
@@ -379,9 +395,14 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 const PO_LARK_COLS =
   "lark_instance_code, lark_serial_number, lark_submitted_at, lark_expense_category, lark_approval_status, lark_status_synced_at";
 
+const PO_COMMITTED_PAYMENT_COLS =
+  "committed_invoice_total, committed_down_payment, committed_balance, payment_amounts_committed_at";
+
 const PO_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
   PO_LARK_COLS +
+  ", " +
+  PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging))";
@@ -389,6 +410,8 @@ const PO_SELECT =
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
   PO_LARK_COLS +
+  ", " +
+  PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
   "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), " +
@@ -850,6 +873,22 @@ export async function createPoPayment(
     purpose: input.purpose.trim(),
   });
   if (error) throw error;
+
+  const fullPo = await getPurchaseOrder(supabase, poId);
+  if (fullPo) {
+    const committedPatch = buildCommittedPatchFromPayment(
+      fullPo,
+      input.purpose.trim(),
+      input.amount,
+    );
+    if (committedPatch) {
+      const { error: commitErr } = await supabase
+        .from("purchase_orders")
+        .update(committedPatch)
+        .eq("id", poId);
+      if (commitErr) throw commitErr;
+    }
+  }
 
   await recalculatePoStatus(supabase, poId);
 
