@@ -11,6 +11,89 @@ export interface ProductFranchise {
 export interface SalesChannel {
   id: string;
   name: string;
+  sop_group?: SopChannelGroup | null;
+}
+
+export type SopChannelGroup = "online" | "offline";
+
+export interface SopMonthActual {
+  qty: number;
+  post_tax_net: number;
+}
+
+export interface SopMonthPlan {
+  projected_qty: number;
+  avg_discount_pct: number;
+  vat_in_net: number;
+  post_tax_net: number;
+  upload_id: string | null;
+}
+
+export interface SopSkuRow {
+  sku_id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  franchise_name: string | null;
+  retail_price: number | null;
+  current_stock: number;
+  on_order_qty: number;
+  projected_stockout_date: string | null;
+  l3m_qty: number;
+  l3m_post_tax: number;
+  l6m_qty: number;
+  l6m_post_tax: number;
+  remaining_year_qty: number;
+  shortfall_qty: number;
+  months: Record<
+    number,
+    {
+      actual: SopMonthActual;
+      plan: SopMonthPlan;
+    }
+  >;
+}
+
+export interface SopMonthlyTarget {
+  month: number;
+  target_net_sales_post_tax: number;
+  planned_post_tax: number;
+  gap: number;
+}
+
+export interface SopForecastUpload {
+  id: string;
+  sop_group: SopChannelGroup;
+  year: number;
+  filename: string;
+  row_count: number;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface SopForecastPayload {
+  year: number;
+  group: SopChannelGroup;
+  current_month: number;
+  read_only: boolean;
+  unmapped_channel_count: number;
+  channels: Array<{
+    id: string;
+    name: string;
+    sop_group: SopChannelGroup | null;
+  }>;
+  targets: SopMonthlyTarget[];
+  rows: SopSkuRow[];
+  uploads: SopForecastUpload[];
+}
+
+export interface SopYearForecast {
+  year: number;
+  current_month: number;
+  read_only: boolean;
+  unmapped_channel_count: number;
+  channels: SopForecastPayload["channels"];
+  groups: Record<SopChannelGroup, SopForecastPayload>;
 }
 
 export interface Sku {
@@ -1105,19 +1188,23 @@ export interface StatusUpdateEntityCount {
 
 export type StatusUpdateRecordEntityType = "po" | "payment" | "shipment";
 
-export type UserNotificationSourceType = "status_update" | "status_update_reply";
+export type UserNotificationSourceType =
+  | "status_update"
+  | "status_update_reply"
+  | "sales_forecast_stock";
 
 export interface UserNotification {
   id: string;
   recipient_id: string;
-  actor_id: string;
+  actor_id: string | null;
   actor_name?: string | null;
   source_type: UserNotificationSourceType;
   source_id: string;
-  status_update_id: string;
+  status_update_id: string | null;
   body_preview: string;
   po_id: string | null;
   po_number: string | null;
+  link_path: string | null;
   read_at: string | null;
   created_at: string;
 }

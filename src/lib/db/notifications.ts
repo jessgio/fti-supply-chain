@@ -178,7 +178,10 @@ export async function listNotificationsForUser(
 
   return (notificationsRes.data ?? []).map((row) => ({
     ...row,
-    actor_name: names.get(row.actor_id) ?? null,
+    actor_name: row.actor_id ? (names.get(row.actor_id) ?? null) : null,
+    link_path: row.link_path ?? null,
+    status_update_id: row.status_update_id ?? null,
+    actor_id: row.actor_id ?? null,
   }));
 }
 
@@ -218,5 +221,66 @@ export async function markAllNotificationsRead(
     .update({ read_at: new Date().toISOString() })
     .eq("recipient_id", userId)
     .is("read_at", null);
+  if (error) throw error;
+}
+
+export async function notifySalesForecastOversell(
+  supabase: SupabaseClient,
+  input: {
+    actorId: string | null;
+    group: "online" | "offline";
+    year: number;
+    rows: Array<{
+      sku_id: string;
+      sku_code: string;
+      remaining_year_qty: number;
+      current_stock: number;
+      on_order_qty: number;
+      shortfall_qty: number;
+      projected_stockout_date: string | null;
+    }>;
+  },
+): Promise<void> {
+  const oversell = input.rows.filter((row) => row.shortfall_qty > 0);
+  if (oversell.length === 0) return;
+
+  const profiles = await listProfiles(supabase);
+  const recipients = profiles
+    .filter(
+      (profile) =>
+        (profile.role === "supply_chain" || profile.role === "admin") &&
+        profile.id !== input.actorId,
+    )
+    .map((profile) => profile.id);
+  if (recipients.length === 0) return;
+
+  const groupLabel = input.group === "online" ? "Online" : "Offline";
+  const rows = oversell.flatMap((sku) => {
+    const sourceId = `${sku.sku_id}:${input.year}:${input.group}`;
+    const oos = sku.projected_stockout_date
+      ? ` Projected OOS ${sku.projected_stockout_date}.`
+      : "";
+    const body =
+      `${sku.sku_code} ${groupLabel} ${input.year} plan exceeds available stock. ` +
+      `On hand ${sku.current_stock}, on order ${sku.on_order_qty}, ` +
+      `remaining-year plan ${sku.remaining_year_qty}, shortfall ${sku.shortfall_qty} units.${oos}`;
+    const linkPath = `/dashboard/sales-forecast?group=${input.group}&sku=${encodeURIComponent(sku.sku_code)}`;
+    return recipients.map((recipientId) => ({
+      recipient_id: recipientId,
+      actor_id: input.actorId,
+      source_type: "sales_forecast_stock" as const,
+      source_id: sourceId,
+      status_update_id: null,
+      body_preview: statusUpdateBodyPreview(body, 280),
+      po_id: null,
+      po_number: null,
+      link_path: linkPath,
+      read_at: null,
+    }));
+  });
+
+  const { error } = await supabase.from("user_notifications").upsert(rows, {
+    onConflict: "recipient_id,source_type,source_id",
+  });
   if (error) throw error;
 }

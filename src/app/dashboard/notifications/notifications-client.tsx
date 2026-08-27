@@ -17,6 +17,9 @@ import { formatStatusUpdateTime } from "@/lib/status-updates/utils";
 import type { UserNotification } from "@/types/database";
 
 function notificationTitle(notification: UserNotification): string {
+  if (notification.source_type === "sales_forecast_stock") {
+    return "Sales forecast exceeds stock";
+  }
   const actor = notification.actor_name ?? "Someone";
   if (notification.source_type === "status_update_reply") {
     return `${actor} mentioned you in a reply`;
@@ -24,8 +27,14 @@ function notificationTitle(notification: UserNotification): string {
   return `${actor} mentioned you in a status update`;
 }
 
-function statusUpdateHref(statusUpdateId: string): string {
-  return `/dashboard/status-updates?note=${statusUpdateId}`;
+function notificationHref(notification: UserNotification): string {
+  if (notification.source_type === "sales_forecast_stock") {
+    return notification.link_path || "/dashboard/sales-forecast";
+  }
+  if (notification.status_update_id) {
+    return `/dashboard/status-updates?note=${notification.status_update_id}`;
+  }
+  return "/dashboard/notifications";
 }
 
 export function NotificationsPageClient() {
@@ -101,7 +110,7 @@ export function NotificationsPageClient() {
         // still navigate
       }
     }
-    router.push(statusUpdateHref(notification.status_update_id));
+    router.push(notificationHref(notification));
   }
 
   return (
@@ -116,7 +125,7 @@ export function NotificationsPageClient() {
               Notifications
             </h1>
             <p className="text-sm text-stone-600">
-              Mentions from status updates and replies across the supply chain.
+              Mentions from status updates and sales-forecast stock alerts.
             </p>
           </div>
         </div>
@@ -198,7 +207,9 @@ export function NotificationsPageClient() {
                         </p>
                         <p className="mt-2 text-xs text-stone-400">
                           {formatStatusUpdateTime(notification.created_at)}
-                          {notification.source_type === "status_update_reply"
+                          {notification.source_type === "sales_forecast_stock"
+                            ? " · Sales forecast"
+                            : notification.source_type === "status_update_reply"
                             ? " · Reply"
                             : " · Status update"}
                         </p>
