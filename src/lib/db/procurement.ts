@@ -9,6 +9,7 @@ import type {
 import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
 import { deletePoDocuments } from "@/lib/db/po-documents";
 import { buildCommittedPatchFromPayment } from "@/lib/procurement/committed-payment-amounts";
+import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
 
 export interface NewPoLineInput {
   sku_id: string;
@@ -496,6 +497,11 @@ export async function createPurchaseOrder(
     .insert(lineRows);
   if (linesError) throw linesError;
 
+  await syncSkuLastPurchaseCosts(
+    supabase,
+    input.lines.map((l) => l.sku_id),
+  );
+
   const created = await getPurchaseOrder(supabase, po.id);
   if (!created) throw new Error("Failed to load created purchase order.");
   return created;
@@ -656,6 +662,14 @@ export async function updatePurchaseOrder(
         .insert(toInsert);
       if (error) throw error;
     }
+
+    await syncSkuLastPurchaseCosts(
+      supabase,
+      [
+        ...existingLines.map((l) => l.sku_id),
+        ...input.lines.map((l) => l.sku_id),
+      ],
+    );
   }
 
   if (!manualStatus) {

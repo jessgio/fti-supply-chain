@@ -1,8 +1,22 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Input } from "@/components/ui/input";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "@/lib/utils";
+
+/** Matches Input h-10 / text-sm; grows to at most 2 lines when the label wraps. */
+const FIELD_MIN_HEIGHT_PX = 40;
+const FIELD_LINE_HEIGHT_PX = 20;
+const FIELD_VERTICAL_PADDING_PX = 16;
+const FIELD_MAX_LINES = 2;
+const FIELD_MAX_HEIGHT_PX =
+  FIELD_VERTICAL_PADDING_PX + FIELD_LINE_HEIGHT_PX * FIELD_MAX_LINES;
 
 export interface SkuSearchOption {
   id: string;
@@ -98,6 +112,7 @@ export function SkuSearchInput({
 }: SkuSearchInputProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [query, setQuery] = useState(value ? optionLabel(value) : "");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -105,6 +120,18 @@ export function SkuSearchInput({
   useEffect(() => {
     setQuery(value ? optionLabel(value) : "");
   }, [value]);
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const next = Math.min(
+      Math.max(el.scrollHeight, FIELD_MIN_HEIGHT_PX),
+      FIELD_MAX_HEIGHT_PX,
+    );
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > FIELD_MAX_HEIGHT_PX ? "auto" : "hidden";
+  }, [query]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -161,7 +188,9 @@ export function SkuSearchInput({
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
-      <Input
+      <textarea
+        ref={textareaRef}
+        rows={1}
         value={query}
         disabled={disabled}
         placeholder={placeholder}
@@ -169,6 +198,10 @@ export function SkuSearchInput({
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
+        className={cn(
+          "min-h-10 w-full resize-none rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm leading-5 text-stone-900 break-words [overflow-wrap:anywhere] placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50",
+          value && "pr-14",
+        )}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -196,7 +229,7 @@ export function SkuSearchInput({
       {value && (
         <button
           type="button"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-stone-400 hover:text-stone-600"
+          className="absolute right-2 top-2.5 text-xs text-stone-400 hover:text-stone-600"
           onClick={clearSelection}
           aria-label="Clear selection"
         >

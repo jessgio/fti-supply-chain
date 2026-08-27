@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { SkuSearchInput } from "@/components/packaging/sku-search-input";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,11 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import type { PoSkuOption } from "@/components/procurement/edit-po-dialog";
+import {
+  formatUnitCostInput,
+  LastPurchaseCostSuggestion,
+  useLastPurchaseCosts,
+} from "@/components/procurement/last-purchase-cost-hint";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -131,6 +136,28 @@ export function CreatePoDialog({
   const [newSupplier, setNewSupplier] = useState("");
   const [addingSupplier, setAddingSupplier] = useState(false);
 
+  const lineSkuIds = useMemo(
+    () => lines.map((l) => l.sku_id).filter(Boolean),
+    [lines],
+  );
+  const { costsBySkuId } = useLastPurchaseCosts(lineSkuIds, currency);
+
+  // Prefill empty unit costs once last purchase price is known for the currency.
+  useEffect(() => {
+    if (costsBySkuId.size === 0) return;
+    setLines((prev) => {
+      let changed = false;
+      const next = prev.map((line) => {
+        if (!line.sku_id || line.unit_cost.trim()) return line;
+        const last = costsBySkuId.get(line.sku_id);
+        if (!last) return line;
+        changed = true;
+        return { ...line, unit_cost: formatUnitCostInput(last.unit_cost) };
+      });
+      return changed ? next : prev;
+    });
+  }, [costsBySkuId]);
+
   const previewTotals = useMemo(() => {
     const cleanLines = lines
       .filter((l) => l.sku_id && Number(l.qty_ordered) > 0)
@@ -158,6 +185,25 @@ export function CreatePoDialog({
   function updateLine(idx: number, patch: Partial<DraftLine>) {
     setLines((prev) =>
       prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
+    );
+  }
+
+  function handleSkuChange(idx: number, skuId: string) {
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== idx) return l;
+        const next: DraftLine = { ...l, sku_id: skuId };
+        if (skuId && !l.unit_cost.trim()) {
+          const last = costsBySkuId.get(skuId);
+          if (last) {
+            next.unit_cost = formatUnitCostInput(last.unit_cost);
+          }
+        }
+        if (!skuId) {
+          // Keep unit cost if user clears SKU? Clear suggestion context only.
+        }
+        return next;
+      }),
     );
   }
 
@@ -422,44 +468,53 @@ export function CreatePoDialog({
             </Button>
           </div>
           {lines.map((line, idx) => (
-            <div key={idx} className="flex gap-2">
-              <SkuSearchInput
-                className="flex-1"
-                options={skus}
-                value={skus.find((s) => s.id === line.sku_id) ?? null}
-                onChange={(option) =>
-                  updateLine(idx, { sku_id: option?.id ?? "" })
-                }
-                placeholder="Search SKU or name…"
-              />
-              <Input
-                className="w-24"
-                type="number"
-                min="0"
-                placeholder="Qty"
-                value={line.qty_ordered}
-                onChange={(e) =>
-                  updateLine(idx, { qty_ordered: e.target.value })
-                }
-              />
-              <Input
-                className="w-28"
-                type="number"
-                min="0"
-                step={PO_UNIT_COST_STEP}
-                placeholder="Unit cost"
-                value={line.unit_cost}
-                onChange={(e) => updateLine(idx, { unit_cost: e.target.value })}
-              />
-              {lines.length > 1 && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => removeLine(idx)}
-                >
-                  Remove
-                </Button>
-              )}
+            <div key={idx} className="space-y-1">
+              <div className="flex gap-2">
+                <SkuSearchInput
+                  className="flex-1"
+                  options={skus}
+                  value={skus.find((s) => s.id === line.sku_id) ?? null}
+                  onChange={(option) =>
+                    handleSkuChange(idx, option?.id ?? "")
+                  }
+                  placeholder="Search SKU or name…"
+                />
+                <Input
+                  className="w-24"
+                  type="number"
+                  min="0"
+                  placeholder="Qty"
+                  value={line.qty_ordered}
+                  onChange={(e) =>
+                    updateLine(idx, { qty_ordered: e.target.value })
+                  }
+                />
+                <Input
+                  className="w-28"
+                  type="number"
+                  min="0"
+                  step={PO_UNIT_COST_STEP}
+                  placeholder="Unit cost"
+                  value={line.unit_cost}
+                  onChange={(e) => updateLine(idx, { unit_cost: e.target.value })}
+                />
+                {lines.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeLine(idx)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {line.sku_id ? (
+                <LastPurchaseCostSuggestion
+                  cost={costsBySkuId.get(line.sku_id)}
+                  currentUnitCost={line.unit_cost}
+                  onApply={(unitCost) => updateLine(idx, { unit_cost: unitCost })}
+                />
+              ) : null}
             </div>
           ))}
         </div>

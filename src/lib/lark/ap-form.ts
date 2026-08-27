@@ -1,4 +1,5 @@
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { formatSupplierPaymentDetails } from "@/lib/procurement/supplier-po-notes";
 import type { PurchaseOrder, Supplier } from "@/types/database";
 
@@ -283,10 +284,19 @@ export function isApPaymentPlanScope(
 
 /** True when the PO has a split down-payment / balance schedule. */
 export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
+  const schedule = resolvePaymentSchedule(po);
+  if (schedule.isCommitted) {
+    return schedule.downPayment > 0 && schedule.balance > 0;
+  }
   const dpPct = computePoInvoiceTotals(po).downPaymentPct;
   return dpPct > 0 && dpPct < 100;
 }
 
+/**
+ * Default AP Form payment plan rows.
+ * Once payment amounts are committed (prior AP / logged payment), use those
+ * frozen figures — not live PO line qty/price totals.
+ */
 export function buildPaymentPlanRows(
   po: PurchaseOrder,
   scope: ApPaymentPlanScope = "both",
@@ -298,25 +308,40 @@ export function buildPaymentPlanRows(
     );
   }
 
-  const totals = computePoInvoiceTotals(po);
+  const live = computePoInvoiceTotals(po);
+  const schedule = resolvePaymentSchedule(po);
   const today = localTodayYmd();
-  const dpPct = totals.downPaymentPct;
+  const dpPct = live.downPaymentPct;
   const dpDate = dueDateYmd(po.order_date) ?? today;
   const balanceDate = dueDateYmd(po.expected_date) ?? today;
 
-  if (dpPct > 0 && dpPct < 100) {
-    const balancePct = 100 - dpPct;
+  const downAmount = roundMoney(schedule.downPayment, currency);
+  const balanceAmount = roundMoney(schedule.balance, currency);
+  const invoiceAmount = roundMoney(schedule.invoiceTotal, currency);
+
+  const isSplit = schedule.isCommitted
+    ? downAmount > 0 && balanceAmount > 0
+    : dpPct > 0 && dpPct < 100;
+
+  if (isSplit) {
+    const balancePct = Math.max(0, 100 - dpPct);
+    const downLabel = schedule.isCommitted
+      ? "Down payment"
+      : `Down payment ${dpPct}%`;
+    const balanceLabel = schedule.isCommitted
+      ? "Balance"
+      : `Balance ${balancePct}%`;
     const downPaymentRow: PaymentPlanRow = {
       dateYmd: dpDate,
-      amount: roundMoney(totals.downPayment, currency),
+      amount: downAmount,
       currency,
-      remarks: buildPaymentPlanRemark(`Down payment ${dpPct}%`, po),
+      remarks: buildPaymentPlanRemark(downLabel, po),
     };
     const balanceRow: PaymentPlanRow = {
       dateYmd: balanceDate,
-      amount: roundMoney(totals.finalPayment, currency),
+      amount: balanceAmount,
       currency,
-      remarks: buildPaymentPlanRemark(`Balance ${balancePct}%`, po),
+      remarks: buildPaymentPlanRemark(balanceLabel, po),
     };
 
     if (scope === "down_payment") return [downPaymentRow];
@@ -327,7 +352,7 @@ export function buildPaymentPlanRows(
   return [
     {
       dateYmd: balanceDate,
-      amount: roundMoney(totals.invoiceTotal, currency),
+      amount: invoiceAmount,
       currency,
       remarks: buildPaymentPlanRemark("Full payment", po),
     },
@@ -349,13 +374,72 @@ export function paymentAmountForApScope(
   }
 }
 
-/** Prefer the frozen amount stored on an AP submission over live PO totals. */
+function amountFromPlanRowsSnapshot(
+  planRows: unknown,
+  fallbackCurrency: string,
+): { amount: number; currency: string } | null {
+  if (!Array.isArray(planRows) || planRows.length === 0) return null;
+  let amount = 0;
+  let currency = fallbackCurrency;
+  let sawAmount = false;
+  for (const item of planRows) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const rowAmount = Number(row.amount);
+    if (!Number.isFinite(rowAmount)) continue;
+    amount += rowAmount;
+    sawAmount = true;
+    if (typeof row.currency === "string" && row.currency.trim()) {
+      currency = row.currency.trim().toUpperCase();
+    }
+  }
+  if (!sawAmount) return null;
+  return { amount, currency };
+}
+
+function amountFromCommittedScope(
+  po: PurchaseOrder,
+  scope: ApPaymentPlanScope,
+): { amount: number; currency: string } | null {
+  const currency = po.currency ?? "IDR";
+  if (scope === "down_payment" && po.committed_down_payment != null) {
+    return { amount: Number(po.committed_down_payment), currency };
+  }
+  if (scope === "balance" && po.committed_balance != null) {
+    return { amount: Number(po.committed_balance), currency };
+  }
+  if (scope === "both") {
+    if (po.committed_invoice_total != null) {
+      return { amount: Number(po.committed_invoice_total), currency };
+    }
+    if (
+      po.committed_down_payment != null &&
+      po.committed_balance != null
+    ) {
+      return {
+        amount:
+          Number(po.committed_down_payment) + Number(po.committed_balance),
+        currency,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Prefer the frozen amount stored on an AP submission (or committed PO schedule)
+ * over live PO line totals.
+ */
 export function paymentAmountForApSubmission(
   po: PurchaseOrder,
   submission: {
     payment_scope: ApPaymentPlanScope | string;
     submitted_amount?: number | null;
     submitted_currency?: string | null;
+    plan_rows?: Array<{
+      amount?: number;
+      currency?: string;
+    }> | null;
   },
 ): { amount: number; currency: string } | null {
   if (
@@ -370,12 +454,21 @@ export function paymentAmountForApSubmission(
         "IDR",
     };
   }
-  return paymentAmountForApScope(
-    po,
-    isApPaymentPlanScope(submission.payment_scope)
-      ? submission.payment_scope
-      : "both",
+
+  const fromPlan = amountFromPlanRowsSnapshot(
+    submission.plan_rows,
+    po.currency ?? "IDR",
   );
+  if (fromPlan) return fromPlan;
+
+  const scope = isApPaymentPlanScope(submission.payment_scope)
+    ? submission.payment_scope
+    : "both";
+
+  const fromCommitted = amountFromCommittedScope(po, scope);
+  if (fromCommitted) return fromCommitted;
+
+  return paymentAmountForApScope(po, scope);
 }
 
 export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] {

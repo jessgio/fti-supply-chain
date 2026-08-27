@@ -974,6 +974,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                 type="button"
                 onClick={() => {
                   setShowLinkForm(false);
+                  applyPaymentPlanScope(paymentPlanScope);
                   setShowSubmitForm(true);
                   setError(null);
                 }}
@@ -1057,6 +1058,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               type="button"
               onClick={() => {
                 setShowLinkForm(false);
+                applyPaymentPlanScope(
+                  alreadySubmitted ? nextPaymentScopeHint() : paymentPlanScope,
+                );
                 setShowSubmitForm(true);
                 setError(null);
               }}
