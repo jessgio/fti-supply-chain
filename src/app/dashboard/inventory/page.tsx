@@ -27,7 +27,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { formatNumber } from "@/lib/utils";
@@ -117,11 +117,14 @@ type SortKey =
 
 type SortDir = "asc" | "desc";
 
+type ExtraMetric = "stockoutSoon" | "onOrder" | "seasonalUplift";
+
 interface ColumnFilters {
-  status: StockStatus | "";
-  velocity: VelocityClass | "";
-  pattern: DemandPattern | "";
-  confidence: RestockRecommendation["confidence"] | "";
+  status: StockStatus[];
+  velocity: VelocityClass[];
+  pattern: DemandPattern[];
+  confidence: RestockRecommendation["confidence"][];
+  extra: ExtraMetric[];
   franchise: string;
 }
 
@@ -138,59 +141,124 @@ type MetricKey =
   | "overstock";
 
 const EMPTY_COLUMN_FILTERS: ColumnFilters = {
-  status: "",
-  velocity: "",
-  pattern: "",
-  confidence: "",
+  status: [],
+  velocity: [],
+  pattern: [],
+  confidence: [],
+  extra: [],
   franchise: "",
 };
 
-function matchesMetric(
+const STATUS_FILTER_OPTIONS: { value: StockStatus; label: string }[] = [
+  { value: "reorder", label: "Reorder now" },
+  { value: "watch", label: "Watch" },
+  { value: "on_order", label: "On order" },
+  { value: "overstock", label: "Overstock" },
+  { value: "clearance", label: "Clearance" },
+  { value: "healthy", label: "Healthy" },
+];
+
+const VELOCITY_FILTER_OPTIONS: { value: VelocityClass; label: string }[] = [
+  { value: "fast", label: "Fast" },
+  { value: "normal", label: "Normal" },
+  { value: "slow", label: "Slow" },
+];
+
+const PATTERN_FILTER_OPTIONS: { value: DemandPattern; label: string }[] = [
+  { value: "npd", label: "NPD" },
+  { value: "volatile", label: "Volatile" },
+  { value: "steady", label: "Steady" },
+];
+
+const CONFIDENCE_FILTER_OPTIONS: {
+  value: RestockRecommendation["confidence"];
+  label: string;
+}[] = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
+function toggleInArray<T extends string>(values: T[], item: T): T[] {
+  return values.includes(item)
+    ? values.filter((value) => value !== item)
+    : [...values, item];
+}
+
+function matchesExtraMetric(
   row: RestockRecommendation,
-  metric: MetricKey,
+  metric: ExtraMetric,
 ): boolean {
   switch (metric) {
-    case "total":
-      return true;
-    case "fast":
-      return row.velocity_class === "fast";
-    case "slow":
-      return row.velocity_class === "slow";
-    case "npd":
-      return row.demand_pattern === "npd";
-    case "volatile":
-      return row.demand_pattern === "volatile";
     case "seasonalUplift":
       return row.seasonal_uplift_multiplier > 1;
-    case "reorder":
-      return riskOf(row) === "reorder";
     case "stockoutSoon":
       return (
         row.days_until_stockout !== null && row.days_until_stockout <= 30
       );
     case "onOrder":
       return row.on_order_qty > 0;
-    case "overstock":
-      return riskOf(row) === "overstock";
   }
 }
 
-function columnFiltersForMetric(metric: MetricKey): ColumnFilters {
+function toggleMetricFilter(
+  filters: ColumnFilters,
+  metric: MetricKey,
+): ColumnFilters {
   switch (metric) {
     case "reorder":
-      return { ...EMPTY_COLUMN_FILTERS, status: "reorder" };
+      return { ...filters, status: toggleInArray(filters.status, "reorder") };
     case "overstock":
-      return { ...EMPTY_COLUMN_FILTERS, status: "overstock" };
+      return {
+        ...filters,
+        status: toggleInArray(filters.status, "overstock"),
+      };
     case "fast":
-      return { ...EMPTY_COLUMN_FILTERS, velocity: "fast" };
+      return {
+        ...filters,
+        velocity: toggleInArray(filters.velocity, "fast"),
+      };
     case "slow":
-      return { ...EMPTY_COLUMN_FILTERS, velocity: "slow" };
+      return {
+        ...filters,
+        velocity: toggleInArray(filters.velocity, "slow"),
+      };
     case "npd":
-      return { ...EMPTY_COLUMN_FILTERS, pattern: "npd" };
+      return { ...filters, pattern: toggleInArray(filters.pattern, "npd") };
     case "volatile":
-      return { ...EMPTY_COLUMN_FILTERS, pattern: "volatile" };
+      return {
+        ...filters,
+        pattern: toggleInArray(filters.pattern, "volatile"),
+      };
+    case "stockoutSoon":
+    case "onOrder":
+    case "seasonalUplift":
+      return { ...filters, extra: toggleInArray(filters.extra, metric) };
     default:
-      return EMPTY_COLUMN_FILTERS;
+      return filters;
+  }
+}
+
+function isMetricActive(metric: MetricKey, filters: ColumnFilters): boolean {
+  switch (metric) {
+    case "reorder":
+      return filters.status.includes("reorder");
+    case "overstock":
+      return filters.status.includes("overstock");
+    case "fast":
+      return filters.velocity.includes("fast");
+    case "slow":
+      return filters.velocity.includes("slow");
+    case "npd":
+      return filters.pattern.includes("npd");
+    case "volatile":
+      return filters.pattern.includes("volatile");
+    case "stockoutSoon":
+    case "onOrder":
+    case "seasonalUplift":
+      return filters.extra.includes(metric);
+    default:
+      return false;
   }
 }
 
@@ -343,30 +411,27 @@ export default function InventoryPage() {
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(
     EMPTY_COLUMN_FILTERS,
   );
-  const [activeMetric, setActiveMetric] = useState<MetricKey | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
 
   function handleMetricClick(metric: MetricKey) {
-    if (metric === "total" || activeMetric === metric) {
+    if (metric === "total") {
       clearAllFilters();
+      tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
-    setActiveMetric(metric);
-    setColumnFilters(columnFiltersForMetric(metric));
+    setColumnFilters((filters) => toggleMetricFilter(filters, metric));
     tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function handleColumnFilterChange(
     updater: (filters: ColumnFilters) => ColumnFilters,
   ) {
-    setActiveMetric(null);
     setColumnFilters(updater);
   }
 
   function clearAllFilters() {
-    setActiveMetric(null);
     setColumnFilters(EMPTY_COLUMN_FILTERS);
   }
 
@@ -481,18 +546,30 @@ export default function InventoryPage() {
     const rows = recommendations.filter((r) => {
       if (needsActionOnly && !(r.needs_reorder && !r.covered_by_po))
         return false;
-      if (activeMetric && activeMetric !== "total" && !matchesMetric(r, activeMetric))
-        return false;
-      if (columnFilters.status && riskOf(r) !== columnFilters.status)
-        return false;
       if (
-        columnFilters.velocity &&
-        r.velocity_class !== columnFilters.velocity
+        columnFilters.status.length > 0 &&
+        !columnFilters.status.includes(riskOf(r))
       )
         return false;
-      if (columnFilters.pattern && r.demand_pattern !== columnFilters.pattern)
+      if (
+        columnFilters.velocity.length > 0 &&
+        !columnFilters.velocity.includes(r.velocity_class)
+      )
         return false;
-      if (columnFilters.confidence && r.confidence !== columnFilters.confidence)
+      if (
+        columnFilters.pattern.length > 0 &&
+        !columnFilters.pattern.includes(r.demand_pattern)
+      )
+        return false;
+      if (
+        columnFilters.confidence.length > 0 &&
+        !columnFilters.confidence.includes(r.confidence)
+      )
+        return false;
+      if (
+        columnFilters.extra.length > 0 &&
+        !columnFilters.extra.every((metric) => matchesExtraMetric(r, metric))
+      )
         return false;
       if (
         franchiseQ &&
@@ -511,18 +588,17 @@ export default function InventoryPage() {
     recommendations,
     search,
     needsActionOnly,
-    activeMetric,
     columnFilters,
     sortKey,
     sortDir,
   ]);
 
   const hasColumnFilters =
-    activeMetric !== null ||
-    columnFilters.status !== "" ||
-    columnFilters.velocity !== "" ||
-    columnFilters.pattern !== "" ||
-    columnFilters.confidence !== "" ||
+    columnFilters.status.length > 0 ||
+    columnFilters.velocity.length > 0 ||
+    columnFilters.pattern.length > 0 ||
+    columnFilters.confidence.length > 0 ||
+    columnFilters.extra.length > 0 ||
     columnFilters.franchise.trim() !== "";
 
   return (
@@ -533,7 +609,8 @@ export default function InventoryPage() {
             Inventory & demand forecast
           </h1>
           <p className="mt-1 text-stone-600">
-            Active (franchise-mapped) SKUs only. Reorder{" "}
+            Active (franchise-mapped) finished-goods SKUs only — packaging and
+            extract SKUs stay on their own pages even after procurement inbound. Reorder{" "}
             {DEFAULT_LEAD_TIME_MONTHS + DEFAULT_SAFETY_STOCK_MONTHS} months before
             the projected stockout ({DEFAULT_LEAD_TIME_MONTHS}-month lead time +{" "}
             {DEFAULT_SAFETY_STOCK_MONTHS}-month buffer) and order a{" "}
@@ -596,14 +673,14 @@ export default function InventoryPage() {
           label="Fast-moving"
           value={formatNumber(summary.fast)}
           hint="Top third by Fcst/day"
-          active={activeMetric === "fast"}
+          active={isMetricActive("fast", columnFilters)}
           onClick={() => handleMetricClick("fast")}
         />
         <StatCard
           label="Slow-moving"
           value={formatNumber(summary.slow)}
           hint="Bottom third or no demand"
-          active={activeMetric === "slow"}
+          active={isMetricActive("slow", columnFilters)}
           onClick={() => handleMetricClick("slow")}
         />
         <StatCard
@@ -611,7 +688,7 @@ export default function InventoryPage() {
           value={formatNumber(summary.npd)}
           hint="Launched < 3 months ago"
           tone="info"
-          active={activeMetric === "npd"}
+          active={isMetricActive("npd", columnFilters)}
           onClick={() => handleMetricClick("npd")}
         />
         <StatCard
@@ -619,7 +696,7 @@ export default function InventoryPage() {
           value={formatNumber(summary.volatile)}
           hint="Erratic monthly sales"
           tone="warning"
-          active={activeMetric === "volatile"}
+          active={isMetricActive("volatile", columnFilters)}
           onClick={() => handleMetricClick("volatile")}
         />
         <StatCard
@@ -627,28 +704,28 @@ export default function InventoryPage() {
           value={formatNumber(summary.seasonalUplift)}
           hint="Ramadan or Q4 in reorder window"
           tone="warning"
-          active={activeMetric === "seasonalUplift"}
+          active={isMetricActive("seasonalUplift", columnFilters)}
           onClick={() => handleMetricClick("seasonalUplift")}
         />
         <StatCard
           label="Reorder now"
           value={formatNumber(summary.reorder)}
           tone="danger"
-          active={activeMetric === "reorder"}
+          active={isMetricActive("reorder", columnFilters)}
           onClick={() => handleMetricClick("reorder")}
         />
         <StatCard
           label="Stockout < 30 days"
           value={formatNumber(summary.stockoutSoon)}
           tone="warning"
-          active={activeMetric === "stockoutSoon"}
+          active={isMetricActive("stockoutSoon", columnFilters)}
           onClick={() => handleMetricClick("stockoutSoon")}
         />
         <StatCard
           label="SKUs on order"
           value={formatNumber(summary.onOrder)}
           tone="info"
-          active={activeMetric === "onOrder"}
+          active={isMetricActive("onOrder", columnFilters)}
           onClick={() => handleMetricClick("onOrder")}
         />
         <StatCard
@@ -656,7 +733,7 @@ export default function InventoryPage() {
           value={formatNumber(summary.overstock)}
           hint={`>${OVERSTOCK_MONTHS} mo cover`}
           tone={summary.overstock > 0 ? "info" : "default"}
-          active={activeMetric === "overstock"}
+          active={isMetricActive("overstock", columnFilters)}
           onClick={() => handleMetricClick("overstock")}
         />
       </div>
@@ -668,13 +745,14 @@ export default function InventoryPage() {
             <div>
               <CardTitle>Restock plan</CardTitle>
               <CardDescription>
-                Click column headers to sort; use filters below each label to
-                narrow results. Velocity = franchise rank by Fcst/day (includes
-                Ramadan / Q4 uplift when in the reorder window). Stockout is
-                on-hand only; Batch stockout projects when the latest incoming
-                PO batch runs out after current stock (FIFO). Restock qty is the
-                standard {DEFAULT_TARGET_STOCK_MONTHS}-month batch. Expand a SKU
-                row to see linked packaging stock and restock needs.
+                Click column headers to sort. Filters and summary cards accept
+                multiple selections at once. Velocity = franchise rank by
+                Fcst/day (includes Ramadan / Q4 uplift when in the reorder
+                window). Stockout is on-hand only; Batch stockout projects when
+                the latest incoming PO batch runs out after current stock
+                (FIFO). Restock qty is the standard{" "}
+                {DEFAULT_TARGET_STOCK_MONTHS}-month batch. Expand a SKU row to
+                see linked packaging stock and restock needs.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -728,24 +806,13 @@ export default function InventoryPage() {
                       sortDir={sortDir}
                       onSort={handleSort}
                       filter={
-                        <Select
-                          className="mt-1 h-7 w-full min-w-[6.5rem] py-0 text-xs"
+                        <MultiSelect
+                          options={STATUS_FILTER_OPTIONS}
                           value={columnFilters.status}
-                          onChange={(e) =>
-                            handleColumnFilterChange((f) => ({
-                              ...f,
-                              status: e.target.value as StockStatus | "",
-                            }))
+                          onChange={(status) =>
+                            handleColumnFilterChange((f) => ({ ...f, status }))
                           }
-                        >
-                          <option value="">All</option>
-                          <option value="reorder">Reorder now</option>
-                          <option value="watch">Watch</option>
-                          <option value="on_order">On order</option>
-                          <option value="overstock">Overstock</option>
-                          <option value="clearance">Clearance</option>
-                          <option value="healthy">Healthy</option>
-                        </Select>
+                        />
                       }
                     />
                     <SortableHeader
@@ -782,21 +849,17 @@ export default function InventoryPage() {
                       sortDir={sortDir}
                       onSort={handleSort}
                       filter={
-                        <Select
-                          className="mt-1 h-7 w-full min-w-[5.5rem] py-0 text-xs"
+                        <MultiSelect
+                          className="min-w-[5.5rem]"
+                          options={VELOCITY_FILTER_OPTIONS}
                           value={columnFilters.velocity}
-                          onChange={(e) =>
+                          onChange={(velocity) =>
                             handleColumnFilterChange((f) => ({
                               ...f,
-                              velocity: e.target.value as VelocityClass | "",
+                              velocity,
                             }))
                           }
-                        >
-                          <option value="">All</option>
-                          <option value="fast">Fast</option>
-                          <option value="normal">Normal</option>
-                          <option value="slow">Slow</option>
-                        </Select>
+                        />
                       }
                     />
                     <SortableHeader
@@ -806,21 +869,17 @@ export default function InventoryPage() {
                       sortDir={sortDir}
                       onSort={handleSort}
                       filter={
-                        <Select
-                          className="mt-1 h-7 w-full min-w-[5.5rem] py-0 text-xs"
+                        <MultiSelect
+                          className="min-w-[5.5rem]"
+                          options={PATTERN_FILTER_OPTIONS}
                           value={columnFilters.pattern}
-                          onChange={(e) =>
+                          onChange={(pattern) =>
                             handleColumnFilterChange((f) => ({
                               ...f,
-                              pattern: e.target.value as DemandPattern | "",
+                              pattern,
                             }))
                           }
-                        >
-                          <option value="">All</option>
-                          <option value="npd">NPD</option>
-                          <option value="volatile">Volatile</option>
-                          <option value="steady">Steady</option>
-                        </Select>
+                        />
                       }
                     />
                     <SortableHeader
@@ -900,22 +959,17 @@ export default function InventoryPage() {
                       sortDir={sortDir}
                       onSort={handleSort}
                       filter={
-                        <Select
-                          className="mt-1 h-7 w-full min-w-[5rem] py-0 text-xs"
+                        <MultiSelect
+                          className="min-w-[5rem]"
+                          options={CONFIDENCE_FILTER_OPTIONS}
                           value={columnFilters.confidence}
-                          onChange={(e) =>
+                          onChange={(confidence) =>
                             handleColumnFilterChange((f) => ({
                               ...f,
-                              confidence: e.target
-                                .value as RestockRecommendation["confidence"] | "",
+                              confidence,
                             }))
                           }
-                        >
-                          <option value="">All</option>
-                          <option value="high">High</option>
-                          <option value="medium">Medium</option>
-                          <option value="low">Low</option>
-                        </Select>
+                        />
                       }
                     />
                     <th className="sticky top-0 z-10 bg-stone-50 py-2 shadow-[inset_0_-1px_0_#e7e5e4]" />
