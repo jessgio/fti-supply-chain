@@ -400,7 +400,10 @@ export async function listExtractInboundDeliveryNotes(
     .select(NOTE_SELECT)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as ExtractInboundDeliveryNote[];
+  return attachExtractInboundLines(
+    supabase,
+    (data ?? []) as ExtractInboundDeliveryNote[],
+  );
 }
 
 export async function listExtractInboundDeliveryNotesByPo(
@@ -413,7 +416,39 @@ export async function listExtractInboundDeliveryNotesByPo(
     .eq("po_id", poId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as ExtractInboundDeliveryNote[];
+  return attachExtractInboundLines(
+    supabase,
+    (data ?? []) as ExtractInboundDeliveryNote[],
+  );
+}
+
+async function attachExtractInboundLines(
+  supabase: SupabaseClient,
+  notes: ExtractInboundDeliveryNote[],
+): Promise<ExtractInboundDeliveryNote[]> {
+  if (notes.length === 0) return notes;
+
+  const { data: lines, error } = await supabase
+    .from("extract_inbound_delivery_note_lines")
+    .select(LINE_SELECT)
+    .in(
+      "delivery_note_id",
+      notes.map((note) => note.id),
+    )
+    .order("item_code");
+  if (error) throw error;
+
+  const linesByNote = new Map<string, ExtractInboundDeliveryNoteLine[]>();
+  for (const line of (lines ?? []) as ExtractInboundDeliveryNoteLine[]) {
+    const list = linesByNote.get(line.delivery_note_id) ?? [];
+    list.push(line);
+    linesByNote.set(line.delivery_note_id, list);
+  }
+
+  return notes.map((note) => ({
+    ...note,
+    lines: linesByNote.get(note.id) ?? [],
+  }));
 }
 
 export async function getExtractInboundDeliveryNote(

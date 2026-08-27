@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FileDown, FlaskConical, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
@@ -12,6 +12,10 @@ import {
   ExtractSearchInput,
   type ExtractSearchOption,
 } from "@/components/extract-inbound-delivery-note/extract-search-input";
+import {
+  DnHistoryExpandToggle,
+  ExtractDnItemsNested,
+} from "@/components/delivery-note/dn-history-expand";
 import { formatNumber } from "@/lib/utils";
 import type {
   ExtractInboundDeliveryNote,
@@ -113,7 +117,17 @@ export function ExtractInboundDnWorkspace({
   const [editingNoteNumber, setEditingNoteNumber] = useState<string | null>(null);
   const [loadingNoteId, setLoadingNoteId] = useState<string | null>(null);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(new Set());
   const initialEditHandled = useRef(false);
+
+  const toggleExpanded = useCallback((noteId: string) => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -558,6 +572,7 @@ export function ExtractInboundDnWorkspace({
                 <table className="w-full min-w-[840px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-stone-200 text-stone-500">
+                      <th className="w-8 py-2 pr-2 font-medium" aria-label="Expand" />
                       <th className="py-2 pr-4 font-medium">DN number</th>
                       <th className="py-2 pr-4 font-medium">PO</th>
                       <th className="py-2 pr-4 font-medium">Delivery date</th>
@@ -566,62 +581,79 @@ export function ExtractInboundDnWorkspace({
                     </tr>
                   </thead>
                   <tbody>
-                    {notes.map((note) => (
-                      <tr key={note.id} className="border-b border-stone-100">
-                        <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
-                        <td className="py-3 pr-4">
-                          {note.po_id ? (
-                            <Link
-                              href={`/dashboard/procurement/${note.po_id}`}
-                              className="text-emerald-700 hover:underline"
-                            >
-                              {note.po_number}
-                            </Link>
-                          ) : (
-                            note.po_number
-                          )}
-                        </td>
-                        <td className="py-3 pr-4">{note.delivery_date}</td>
-                        <td className="py-3 pr-4">{note.recipient_name}</td>
-                        <td className="py-3">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => void startEdit(note.id)}
-                              disabled={loadingNoteId === note.id}
-                              className="inline-flex items-center gap-1 text-stone-700 hover:underline disabled:opacity-50"
-                            >
-                              {loadingNoteId === note.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                    {notes.map((note) => {
+                      const isOpen = expandedNoteIds.has(note.id);
+                      return (
+                        <Fragment key={note.id}>
+                          <tr className="border-b border-stone-100">
+                            <td className="py-3 pr-2">
+                              <DnHistoryExpandToggle
+                                expanded={isOpen}
+                                onToggle={() => toggleExpanded(note.id)}
+                              />
+                            </td>
+                            <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
+                            <td className="py-3 pr-4">
+                              {note.po_id ? (
+                                <Link
+                                  href={`/dashboard/procurement/${note.po_id}`}
+                                  className="text-emerald-700 hover:underline"
+                                >
+                                  {note.po_number}
+                                </Link>
                               ) : (
-                                <Pencil className="h-4 w-4" />
+                                note.po_number
                               )}
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(note.id, note.dn_number)}
-                              disabled={deletingNoteId === note.id}
-                              className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
-                            >
-                              {deletingNoteId === note.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                              Delete
-                            </button>
-                            <a
-                              href={`/api/extract-inbound-delivery-notes/${note.id}/pdf`}
-                              className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
-                            >
-                              <FileDown className="h-4 w-4" />
-                              Download
-                            </a>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                            </td>
+                            <td className="py-3 pr-4">{note.delivery_date}</td>
+                            <td className="py-3 pr-4">{note.recipient_name}</td>
+                            <td className="py-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => void startEdit(note.id)}
+                                  disabled={loadingNoteId === note.id}
+                                  className="inline-flex items-center gap-1 text-stone-700 hover:underline disabled:opacity-50"
+                                >
+                                  {loadingNoteId === note.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Pencil className="h-4 w-4" />
+                                  )}
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDelete(note.id, note.dn_number)}
+                                  disabled={deletingNoteId === note.id}
+                                  className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
+                                >
+                                  {deletingNoteId === note.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                  Delete
+                                </button>
+                                <a
+                                  href={`/api/extract-inbound-delivery-notes/${note.id}/pdf`}
+                                  className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                                >
+                                  <FileDown className="h-4 w-4" />
+                                  Download
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+                          {isOpen ? (
+                            <ExtractDnItemsNested
+                              lines={note.lines ?? []}
+                              colSpan={5}
+                            />
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

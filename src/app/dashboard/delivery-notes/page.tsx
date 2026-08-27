@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Copy, FileDown, Link2, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { DeliveryNoteModuleHeader } from "@/components/delivery-note/delivery-note-module-header";
+import {
+  DnHistoryExpandToggle,
+  PackagingDnItemsNested,
+} from "@/components/delivery-note/dn-history-expand";
 import type { DeliveryNote, DeliveryNotePortal } from "@/types/database";
 
 export default function DeliveryNotesDashboardPage() {
@@ -20,6 +24,16 @@ export default function DeliveryNotesDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = useCallback((noteId: string) => {
+    setExpandedNoteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -220,6 +234,7 @@ export default function DeliveryNotesDashboardPage() {
               <table className="w-full min-w-[840px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-stone-200 text-stone-500">
+                    <th className="w-8 py-2 pr-2 font-medium" aria-label="Expand" />
                     <th className="py-2 pr-4 font-medium">DN number</th>
                     <th className="py-2 pr-4 font-medium">PO</th>
                     <th className="py-2 pr-4 font-medium">Supplier</th>
@@ -230,51 +245,68 @@ export default function DeliveryNotesDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {notes.map((note) => (
-                    <tr key={note.id} className="border-b border-stone-100">
-                      <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
-                      <td className="py-3 pr-4">{note.po_number}</td>
-                      <td className="py-3 pr-4">{note.supplier_name ?? "—"}</td>
-                      <td className="py-3 pr-4">{note.delivery_date}</td>
-                      <td className="py-3 pr-4">{note.recipient_name}</td>
-                      <td className="py-3 pr-4 text-stone-500">
-                        {note.created_at
-                          ? new Date(note.created_at).toLocaleString("en-GB")
-                          : "—"}
-                      </td>
-                      <td className="py-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <Link
-                            href={`/dashboard/delivery-notes/${note.id}/edit`}
-                            className="inline-flex items-center gap-1 text-stone-700 hover:underline"
-                          >
-                            <Pencil className="h-4 w-4" />
-                            Edit
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(note.id, note.dn_number)}
-                            disabled={deletingNoteId === note.id}
-                            className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
-                          >
-                            {deletingNoteId === note.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                            Delete
-                          </button>
-                          <a
-                            href={`/api/delivery-notes/${note.id}/pdf`}
-                            className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
-                          >
-                            <FileDown className="h-4 w-4" />
-                            Download
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {notes.map((note) => {
+                    const isOpen = expandedNoteIds.has(note.id);
+                    return (
+                      <Fragment key={note.id}>
+                        <tr className="border-b border-stone-100">
+                          <td className="py-3 pr-2">
+                            <DnHistoryExpandToggle
+                              expanded={isOpen}
+                              onToggle={() => toggleExpanded(note.id)}
+                            />
+                          </td>
+                          <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
+                          <td className="py-3 pr-4">{note.po_number}</td>
+                          <td className="py-3 pr-4">{note.supplier_name ?? "—"}</td>
+                          <td className="py-3 pr-4">{note.delivery_date}</td>
+                          <td className="py-3 pr-4">{note.recipient_name}</td>
+                          <td className="py-3 pr-4 text-stone-500">
+                            {note.created_at
+                              ? new Date(note.created_at).toLocaleString("en-GB")
+                              : "—"}
+                          </td>
+                          <td className="py-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <Link
+                                href={`/dashboard/delivery-notes/${note.id}/edit`}
+                                className="inline-flex items-center gap-1 text-stone-700 hover:underline"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                Edit
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(note.id, note.dn_number)}
+                                disabled={deletingNoteId === note.id}
+                                className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50"
+                              >
+                                {deletingNoteId === note.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                                Delete
+                              </button>
+                              <a
+                                href={`/api/delivery-notes/${note.id}/pdf`}
+                                className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                              >
+                                <FileDown className="h-4 w-4" />
+                                Download
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                        {isOpen ? (
+                          <PackagingDnItemsNested
+                            lines={note.lines ?? []}
+                            colSpan={7}
+                          />
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

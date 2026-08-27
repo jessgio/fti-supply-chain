@@ -234,7 +234,7 @@ export async function listDeliveryNotes(
     .order("created_at", { ascending: false });
   if (error) throw error;
 
-  return (data ?? []).map((row) => {
+  const notes = (data ?? []).map((row) => {
     const suppliers = row.suppliers as { name: string } | { name: string }[] | null;
     const supplier = Array.isArray(suppliers) ? suppliers[0] : suppliers;
     const { suppliers: _s, ...note } = row;
@@ -243,6 +243,37 @@ export async function listDeliveryNotes(
       supplier_name: supplier?.name ?? null,
     };
   });
+
+  return attachDeliveryNoteLines(supabase, notes);
+}
+
+async function attachDeliveryNoteLines(
+  supabase: SupabaseClient,
+  notes: DeliveryNote[],
+): Promise<DeliveryNote[]> {
+  if (notes.length === 0) return notes;
+
+  const { data: lines, error } = await supabase
+    .from("delivery_note_lines")
+    .select(LINE_SELECT)
+    .in(
+      "delivery_note_id",
+      notes.map((note) => note.id),
+    )
+    .order("item_code");
+  if (error) throw error;
+
+  const linesByNote = new Map<string, DeliveryNoteLine[]>();
+  for (const line of (lines ?? []) as DeliveryNoteLine[]) {
+    const list = linesByNote.get(line.delivery_note_id) ?? [];
+    list.push(line);
+    linesByNote.set(line.delivery_note_id, list);
+  }
+
+  return notes.map((note) => ({
+    ...note,
+    lines: linesByNote.get(note.id) ?? [],
+  }));
 }
 
 export async function getDeliveryNote(

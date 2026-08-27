@@ -154,7 +154,31 @@ export async function listPrimaryPackagingDeliveryNotes(
     .select(NOTE_SELECT)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as PrimaryPackagingDeliveryNote[];
+
+  const notes = (data ?? []) as PrimaryPackagingDeliveryNote[];
+  if (notes.length === 0) return notes;
+
+  const { data: lines, error: linesError } = await supabase
+    .from("primary_packaging_delivery_note_lines")
+    .select(LINE_SELECT)
+    .in(
+      "delivery_note_id",
+      notes.map((note) => note.id),
+    )
+    .order("item_code");
+  if (linesError) throw linesError;
+
+  const linesByNote = new Map<string, PrimaryPackagingDeliveryNoteLine[]>();
+  for (const line of (lines ?? []) as PrimaryPackagingDeliveryNoteLine[]) {
+    const list = linesByNote.get(line.delivery_note_id) ?? [];
+    list.push(line);
+    linesByNote.set(line.delivery_note_id, list);
+  }
+
+  return notes.map((note) => ({
+    ...note,
+    lines: linesByNote.get(note.id) ?? [],
+  }));
 }
 
 export async function getPrimaryPackagingDeliveryNote(
