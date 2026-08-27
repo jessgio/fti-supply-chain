@@ -12,7 +12,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from("skus")
       .select(
-        "id, sku_code, name, is_bundle, is_packaging, product_franchises(name)",
+        "id, sku_code, name, is_bundle, is_packaging, is_extract, product_franchises(name)",
       )
       .order("sku_code");
     if (error) throw error;
@@ -31,6 +31,7 @@ export async function GET() {
         name: row.name,
         is_bundle: row.is_bundle,
         is_packaging: row.is_packaging,
+        is_extract: Boolean(row.is_extract),
         franchise_name: franchiseName,
       };
     });

@@ -29,6 +29,7 @@ interface SkuRow {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_extract: boolean;
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
@@ -37,25 +38,35 @@ interface SkuRow {
 
 type StatusFilter = "all" | "active" | "inactive";
 type ListTab = "mapped" | "unclassified";
-type ProductType = "single" | "bundle" | "packaging";
+type ProductType = "single" | "bundle" | "packaging" | "extract";
 
 interface FranchiseOption {
   id: string;
   name: string;
 }
 
-function skuTypeLabel(sku: Pick<SkuRow, "is_bundle" | "is_packaging">): string {
+function skuTypeLabel(
+  sku: Pick<SkuRow, "is_bundle" | "is_packaging" | "is_extract">,
+): string {
   if (sku.is_bundle) return "Bundle";
   if (sku.is_packaging) return "Packaging";
+  if (sku.is_extract) return "Extract";
   return "Single";
 }
 
-function SkuTypeBadge({ sku }: { sku: Pick<SkuRow, "is_bundle" | "is_packaging"> }) {
+function SkuTypeBadge({
+  sku,
+}: {
+  sku: Pick<SkuRow, "is_bundle" | "is_packaging" | "is_extract">;
+}) {
   if (sku.is_bundle) {
     return <Badge className="bg-stone-100 text-stone-700">Bundle</Badge>;
   }
   if (sku.is_packaging) {
     return <Badge className="bg-amber-100 text-amber-800">Packaging</Badge>;
+  }
+  if (sku.is_extract) {
+    return <Badge className="bg-teal-100 text-teal-800">Extract</Badge>;
   }
   return <Badge className="bg-sky-100 text-sky-800">Single</Badge>;
 }
@@ -194,7 +205,7 @@ export default function MappingsPage() {
     franchiseId: string,
     franchiseName?: string,
   ) {
-    if (sku.is_bundle || sku.is_packaging) return;
+    if (sku.is_bundle || sku.is_packaging || sku.is_extract) return;
     if (!franchiseName && (!franchiseId || franchiseId === sku.franchise_id)) {
       return;
     }
@@ -292,7 +303,7 @@ export default function MappingsPage() {
   }
 
   async function toggleClearance(sku: SkuRow) {
-    if (sku.is_bundle || sku.is_packaging) return;
+    if (sku.is_bundle || sku.is_packaging || sku.is_extract) return;
     setUpdatingId(sku.id);
     setError(null);
     try {
@@ -331,19 +342,21 @@ export default function MappingsPage() {
     });
   }
 
-  /** Convert a mapped single SKU to bundle or packaging (clears franchise). */
+  /** Convert a mapped single SKU to bundle, packaging, or extract (clears franchise). */
   async function changeMappedKind(
     sku: SkuRow,
-    kind: "bundle" | "packaging",
+    kind: "bundle" | "packaging" | "extract",
   ) {
-    if (sku.is_bundle || sku.is_packaging) return;
+    if (sku.is_bundle || sku.is_packaging || sku.is_extract) return;
     setUpdatingId(sku.id);
     setError(null);
     try {
       const body =
         kind === "bundle"
-          ? { is_bundle: true, is_packaging: false }
-          : { is_bundle: false, is_packaging: true };
+          ? { is_bundle: true, is_packaging: false, is_extract: false }
+          : kind === "packaging"
+            ? { is_bundle: false, is_packaging: true, is_extract: false }
+            : { is_bundle: false, is_packaging: false, is_extract: true };
       const res = await fetch(`/api/skus/${sku.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -379,9 +392,11 @@ export default function MappingsPage() {
     try {
       let body: Record<string, string | boolean>;
       if (kind === "bundle") {
-        body = { is_bundle: true, is_packaging: false };
+        body = { is_bundle: true, is_packaging: false, is_extract: false };
       } else if (kind === "packaging") {
-        body = { is_bundle: false, is_packaging: true };
+        body = { is_bundle: false, is_packaging: true, is_extract: false };
+      } else if (kind === "extract") {
+        body = { is_bundle: false, is_packaging: false, is_extract: true };
       } else {
         if (!franchiseId) {
           throw new Error("Select a franchise to classify as a single SKU.");
@@ -389,6 +404,7 @@ export default function MappingsPage() {
         body = {
           is_bundle: false,
           is_packaging: false,
+          is_extract: false,
           franchise_id: franchiseId,
         };
       }
@@ -412,6 +428,7 @@ export default function MappingsPage() {
       if (
         updated.is_bundle ||
         updated.is_packaging ||
+        updated.is_extract ||
         updated.franchise_id
       ) {
         upsertMappedSku(updated);
@@ -451,6 +468,7 @@ export default function MappingsPage() {
         sku_code,
         is_bundle: addProductType === "bundle",
         is_packaging: addProductType === "packaging",
+        is_extract: addProductType === "extract",
       };
       if (addSkuName.trim()) body.name = addSkuName.trim();
       if (addProductType === "single") {
@@ -473,11 +491,13 @@ export default function MappingsPage() {
             sku_code: string;
             is_bundle: boolean;
             is_packaging: boolean;
+            is_extract: boolean;
             franchise_id: string | null;
           };
           const isOrphan =
             !existing.is_bundle &&
             !existing.is_packaging &&
+            !existing.is_extract &&
             !existing.franchise_id;
           if (isOrphan) {
             setError(
@@ -489,7 +509,12 @@ export default function MappingsPage() {
             setError(
               `${existing.sku_code} already exists as ${skuTypeLabel(existing)}.`,
             );
-            if (existing.is_bundle || existing.franchise_id) {
+            if (
+              existing.is_bundle ||
+              existing.is_packaging ||
+              existing.is_extract ||
+              existing.franchise_id
+            ) {
               setListTab("mapped");
               setSearch(existing.sku_code);
               setHighlightSkuCode(existing.sku_code);
@@ -512,6 +537,9 @@ export default function MappingsPage() {
         setAddSuccess(
           `${created.sku_code} added as packaging.`,
         );
+      } else if (created.is_extract) {
+        upsertMappedSku(created);
+        setAddSuccess(`${created.sku_code} added as extract.`);
       } else if (created.is_bundle || created.franchise_id) {
         upsertMappedSku(created);
         setAddSuccess(`${created.sku_code} added.`);
@@ -618,6 +646,7 @@ export default function MappingsPage() {
               <option value="single">Single</option>
               <option value="bundle">Bundle</option>
               <option value="packaging">Packaging</option>
+              <option value="extract">Extract</option>
             </Select>
           </div>
 
@@ -909,7 +938,7 @@ function MappedSkuTable({
   onUpdateProductName: (sku: SkuRow, name: string) => void;
   onToggleActive: (sku: SkuRow) => void;
   onToggleClearance: (sku: SkuRow) => void;
-  onChangeKind: (sku: SkuRow, kind: "bundle" | "packaging") => void;
+  onChangeKind: (sku: SkuRow, kind: "bundle" | "packaging" | "extract") => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
@@ -946,7 +975,7 @@ function MappedSkuTable({
                 />
               </td>
               <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging ? (
+                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
                   "—"
                 ) : editingFranchiseId === sku.id ? (
                   <div className="flex min-w-[200px] flex-wrap items-center gap-2">
@@ -1016,7 +1045,7 @@ function MappedSkuTable({
                 <SkuTypeBadge sku={sku} />
               </td>
               <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging ? (
+                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
                   <span className="text-stone-500">N/A</span>
                 ) : sku.is_active ? (
                   <Badge className="bg-emerald-100 text-emerald-800">
@@ -1029,7 +1058,7 @@ function MappedSkuTable({
                 )}
               </td>
               <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging ? (
+                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
                   <span className="text-xs text-stone-400">—</span>
                 ) : sku.is_clearance ? (
                   <Badge className="bg-violet-100 text-violet-800">
@@ -1040,7 +1069,7 @@ function MappedSkuTable({
                 )}
               </td>
               <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging ? (
+                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
                   <span className="text-xs text-stone-400">—</span>
                 ) : (
                   <div className="flex flex-wrap gap-2">
@@ -1061,6 +1090,16 @@ function MappedSkuTable({
                       {updatingId === sku.id
                         ? "Saving…"
                         : "Change to packaging"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={updatingId === sku.id}
+                      onClick={() => onChangeKind(sku, "extract")}
+                    >
+                      {updatingId === sku.id
+                        ? "Saving…"
+                        : "Change to extract"}
                     </Button>
                     <Button
                       size="sm"
@@ -1192,6 +1231,14 @@ function UnclassifiedSkuTable({
                       onClick={() => onClassify(sku, "packaging")}
                     >
                       Packaging
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => onClassify(sku, "extract")}
+                    >
+                      Extract
                     </Button>
                   </div>
                 </td>

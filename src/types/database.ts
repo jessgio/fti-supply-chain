@@ -22,6 +22,8 @@ export interface Sku {
   is_active: boolean;
   /** Primary packaging material (UB, EFLUTE, JAR, PUMP, etc.) — supply chain only. */
   is_packaging: boolean;
+  /** Extract / raw material from the extract catalog — PO + extract inbound. */
+  is_extract: boolean;
   /** Flushing stock — keep visible, never recommend reorder. */
   is_clearance: boolean;
   retail_price: number | null;

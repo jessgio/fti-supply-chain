@@ -8,6 +8,7 @@ export interface CreateSkuInput {
   franchise_name?: string | null;
   is_bundle?: boolean;
   is_packaging?: boolean;
+  is_extract?: boolean;
   retail_price?: number | null;
 }
 
@@ -17,6 +18,7 @@ export interface CreatedSkuRow {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_extract: boolean;
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
@@ -29,6 +31,7 @@ export interface ExistingSkuConflict {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_extract: boolean;
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
@@ -49,6 +52,7 @@ export interface UpdateSkuInput {
   is_active?: boolean;
   is_bundle?: boolean;
   is_packaging?: boolean;
+  is_extract?: boolean;
   is_clearance?: boolean;
   franchise_id?: string | null;
   franchise_name?: string | null;
@@ -56,7 +60,7 @@ export interface UpdateSkuInput {
 }
 
 const SKU_SELECT =
-  "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id, product_franchises(name)";
+  "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, product_franchises(name)";
 
 function mapSkuRow(data: {
   id: string;
@@ -64,6 +68,7 @@ function mapSkuRow(data: {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_extract: boolean;
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
@@ -83,6 +88,7 @@ function mapSkuRow(data: {
     name: data.name,
     is_bundle: data.is_bundle,
     is_packaging: data.is_packaging,
+    is_extract: Boolean(data.is_extract),
     is_clearance: Boolean(data.is_clearance),
     is_active: data.is_active,
     franchise_id: data.franchise_id,
@@ -133,24 +139,30 @@ export async function createSku(
 
   const isBundle = Boolean(input.is_bundle);
   const isPackaging = Boolean(input.is_packaging);
-  if (isBundle && isPackaging) {
-    throw new Error("A SKU cannot be both a bundle and packaging.");
+  const isExtract = Boolean(input.is_extract);
+  const kindCount = [isBundle, isPackaging, isExtract].filter(Boolean).length;
+  if (kindCount > 1) {
+    throw new Error(
+      "A SKU cannot be more than one of bundle, packaging, or extract.",
+    );
   }
   if (
-    (isBundle || isPackaging) &&
+    (isBundle || isPackaging || isExtract) &&
     (input.franchise_id || input.franchise_name?.trim())
   ) {
     throw new Error(
       isBundle
         ? "Bundle SKUs cannot be assigned to a franchise."
-        : "Packaging SKUs cannot be assigned to a franchise.",
+        : isPackaging
+          ? "Packaging SKUs cannot be assigned to a franchise."
+          : "Extract SKUs cannot be assigned to a franchise.",
     );
   }
 
   const { data: existing, error: existingError } = await supabase
     .from("skus")
     .select(
-      "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id",
+      "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id",
     )
     .eq("sku_code", skuCode)
     .maybeSingle();
@@ -162,6 +174,7 @@ export async function createSku(
       name: existing.name,
       is_bundle: existing.is_bundle,
       is_packaging: existing.is_packaging,
+      is_extract: Boolean(existing.is_extract),
       is_clearance: Boolean(existing.is_clearance),
       is_active: existing.is_active,
       franchise_id: existing.franchise_id,
@@ -169,7 +182,7 @@ export async function createSku(
   }
 
   const franchiseId =
-    isBundle || isPackaging
+    isBundle || isPackaging || isExtract
       ? null
       : await resolveFranchiseId(
           supabase,
@@ -191,6 +204,7 @@ export async function createSku(
       franchise_id: franchiseId,
       is_bundle: isBundle,
       is_packaging: isPackaging,
+      is_extract: isExtract,
       is_active: true,
       retail_price: retailPrice,
     })
@@ -209,7 +223,7 @@ export async function updateSku(
 ): Promise<CreatedSkuRow> {
   const { data: existing, error: fetchError } = await supabase
     .from("skus")
-    .select("id, sku_code, is_bundle, is_packaging, franchise_id")
+    .select("id, sku_code, is_bundle, is_packaging, is_extract, franchise_id")
     .eq("id", id)
     .maybeSingle();
   if (fetchError) throw fetchError;
@@ -219,7 +233,8 @@ export async function updateSku(
 
   const kindChanging =
     typeof input.is_bundle === "boolean" ||
-    typeof input.is_packaging === "boolean";
+    typeof input.is_packaging === "boolean" ||
+    typeof input.is_extract === "boolean";
 
   const nextIsBundle =
     typeof input.is_bundle === "boolean" ? input.is_bundle : existing.is_bundle;
@@ -227,9 +242,18 @@ export async function updateSku(
     typeof input.is_packaging === "boolean"
       ? input.is_packaging
       : existing.is_packaging;
+  const nextIsExtract =
+    typeof input.is_extract === "boolean"
+      ? input.is_extract
+      : Boolean(existing.is_extract);
 
-  if (nextIsBundle && nextIsPackaging) {
-    throw new Error("A SKU cannot be both a bundle and packaging.");
+  const kindCount = [nextIsBundle, nextIsPackaging, nextIsExtract].filter(
+    Boolean,
+  ).length;
+  if (kindCount > 1) {
+    throw new Error(
+      "A SKU cannot be more than one of bundle, packaging, or extract.",
+    );
   }
 
   const updates: {
@@ -237,6 +261,7 @@ export async function updateSku(
     is_active?: boolean;
     is_bundle?: boolean;
     is_packaging?: boolean;
+    is_extract?: boolean;
     is_clearance?: boolean;
     franchise_id?: string | null;
     unit_cogs?: number | null;
@@ -253,19 +278,27 @@ export async function updateSku(
     updates.is_clearance = input.is_clearance;
   }
 
-  // Kind transitions: bundle/packaging clear franchise; packaging clears bundle and vice versa.
+  // Kind transitions: bundle/packaging/extract clear franchise and other kinds.
   if (kindChanging) {
     if (nextIsBundle) {
       updates.is_bundle = true;
       updates.is_packaging = false;
+      updates.is_extract = false;
       updates.franchise_id = null;
     } else if (nextIsPackaging) {
       updates.is_packaging = true;
       updates.is_bundle = false;
+      updates.is_extract = false;
+      updates.franchise_id = null;
+    } else if (nextIsExtract) {
+      updates.is_extract = true;
+      updates.is_bundle = false;
+      updates.is_packaging = false;
       updates.franchise_id = null;
     } else {
       updates.is_bundle = false;
       updates.is_packaging = false;
+      updates.is_extract = false;
     }
   }
 
@@ -275,6 +308,9 @@ export async function updateSku(
     }
     if (nextIsPackaging) {
       throw new Error("Packaging SKUs cannot be assigned to a franchise.");
+    }
+    if (nextIsExtract) {
+      throw new Error("Extract SKUs cannot be assigned to a franchise.");
     }
     const franchiseId = await resolveFranchiseId(
       supabase,
@@ -287,6 +323,7 @@ export async function updateSku(
     updates.franchise_id = franchiseId;
     updates.is_bundle = false;
     updates.is_packaging = false;
+    updates.is_extract = false;
   }
 
   if (input.unit_cogs !== undefined) {
@@ -310,4 +347,73 @@ export async function updateSku(
   if (error) throw error;
 
   return mapSkuRow(data);
+}
+
+/**
+ * Ensure a SKU exists for an extract ledger item so it can be used on POs.
+ * Creates or upgrades the row to is_extract; refuses packaging/bundle conflicts.
+ */
+export async function ensureExtractSku(
+  supabase: SupabaseClient,
+  itemNo: string,
+  description?: string | null,
+): Promise<string> {
+  const skuCode = itemNo.trim();
+  if (!skuCode) throw new Error("Extract item number is required.");
+  const name = description?.trim() || skuCode;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("skus")
+    .select("id, sku_code, name, is_bundle, is_packaging, is_extract")
+    .eq("sku_code", skuCode)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  if (existing) {
+    if (existing.is_bundle || existing.is_packaging) {
+      throw new Error(
+        `SKU "${skuCode}" is already ${existing.is_bundle ? "a bundle" : "packaging"} and cannot be marked as extract.`,
+      );
+    }
+    const updates: {
+      is_extract?: boolean;
+      franchise_id?: null;
+      name?: string;
+    } = {};
+    if (!existing.is_extract) {
+      updates.is_extract = true;
+      updates.franchise_id = null;
+    }
+    if (
+      name &&
+      name !== skuCode &&
+      (!existing.name || existing.name === existing.sku_code)
+    ) {
+      updates.name = name;
+    }
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase
+        .from("skus")
+        .update(updates)
+        .eq("id", existing.id);
+      if (error) throw error;
+    }
+    return existing.id as string;
+  }
+
+  const { data, error } = await supabase
+    .from("skus")
+    .insert({
+      sku_code: skuCode,
+      name,
+      franchise_id: null,
+      is_bundle: false,
+      is_packaging: false,
+      is_extract: true,
+      is_active: true,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id as string;
 }

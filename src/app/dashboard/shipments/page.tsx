@@ -312,6 +312,7 @@ function ShipmentsInner() {
         sku_code: sku.sku_code,
         name: sku.name,
         is_packaging: sku.is_packaging ?? false,
+        is_extract: sku.is_extract ?? false,
         is_bundle: sku.is_bundle ?? false,
       })),
       packagingLinks,

@@ -6,6 +6,7 @@ export interface PrimaryGoodSkuMeta {
   sku_code: string;
   name: string | null;
   is_packaging: boolean;
+  is_extract: boolean;
   is_bundle: boolean;
 }
 
@@ -132,7 +133,7 @@ export function classifyPoForPrimary(
     }
 
     const sku = skuById.get(line.sku_id);
-    if (sku && !sku.is_packaging && !linkedProducts.length) {
+    if (sku && !sku.is_packaging && !sku.is_extract && !linkedProducts.length) {
       hasFinished = true;
     }
   }

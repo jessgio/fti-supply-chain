@@ -30,6 +30,7 @@ export interface PoSkuOption {
   name: string | null;
   is_bundle?: boolean;
   is_packaging?: boolean;
+  is_extract?: boolean;
   franchise_name?: string | null;
 }
 

@@ -23,6 +23,8 @@ export interface SkuSearchOption {
   sku_code: string;
   name: string | null;
   is_bundle?: boolean;
+  is_packaging?: boolean;
+  is_extract?: boolean;
   is_active?: boolean;
   franchise_name?: string | null;
 }
@@ -260,6 +262,16 @@ export function SkuSearchInput({
                   {option.is_bundle && (
                     <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700">
                       Bundle
+                    </span>
+                  )}
+                  {option.is_packaging && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800">
+                      Packaging
+                    </span>
+                  )}
+                  {option.is_extract && (
+                    <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-teal-800">
+                      Extract
                     </span>
                   )}
                   {option.is_active === false && (

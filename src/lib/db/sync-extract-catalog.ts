@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { upsertExtractByItemNo } from "@/lib/db/extract-mappings";
+import { ensureExtractSku } from "@/lib/db/skus";
 import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
 
 export interface CatalogCodeRow {
@@ -137,6 +138,7 @@ export async function syncExtractFromCatalogCode(
         .from("extract_codes")
         .update({ extract_id: extractId })
         .eq("id", code.id);
+      await ensureExtractSku(supabase, itemNo, extract_name);
       return extractId;
     }
     extractId = null;
@@ -167,6 +169,8 @@ export async function syncExtractFromCatalogCode(
     .update({ extract_id: extractId })
     .eq("id", code.id);
   if (linkError) throw linkError;
+
+  await ensureExtractSku(supabase, itemNo, extract_name);
 
   return extractId;
 }

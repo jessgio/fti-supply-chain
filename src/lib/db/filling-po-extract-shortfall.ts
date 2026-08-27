@@ -14,7 +14,7 @@ type OpenFgLineRow = {
   qty_ordered: number;
   qty_received: number;
   is_closed: boolean;
-  skus: { sku_code: string; is_packaging: boolean } | null;
+  skus: { sku_code: string; is_packaging: boolean; is_extract: boolean } | null;
   purchase_orders: { id: string; status: string } | null;
 };
 
@@ -31,10 +31,11 @@ export async function getFillingPoExtractShortfalls(
     .from("purchase_order_lines")
     .select(
       "id, sku_id, qty_ordered, qty_received, is_closed, " +
-        "skus!inner(sku_code, is_packaging), " +
+        "skus!inner(sku_code, is_packaging, is_extract), " +
         "purchase_orders!inner(id, status)",
     )
     .eq("skus.is_packaging", false)
+    .eq("skus.is_extract", false)
     .in("purchase_orders.status", [...OPEN_PO_STATUSES]);
   if (error) throw error;
 
@@ -42,7 +43,7 @@ export async function getFillingPoExtractShortfalls(
   for (const row of (data ?? []) as unknown as OpenFgLineRow[]) {
     if (!row.purchase_orders) continue;
     if (row.is_closed) continue;
-    if (row.skus?.is_packaging) continue;
+    if (row.skus?.is_packaging || row.skus?.is_extract) continue;
     const openQty = Number(row.qty_ordered) - Number(row.qty_received);
     if (openQty <= 0) continue;
     lines.push({

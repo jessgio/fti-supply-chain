@@ -17,6 +17,7 @@ type SkuRow = {
   sku_code: string;
   name: string | null;
   is_packaging: boolean;
+  is_extract: boolean;
 };
 
 export interface ExtractCalculatorProductResult {
@@ -45,7 +46,7 @@ function buildProductResult(
   }>,
   balanceByExtract: Map<string, number>,
 ): ExtractCalculatorProductResult {
-  if (skuRow.is_packaging || formulas.length === 0) {
+  if (skuRow.is_packaging || skuRow.is_extract || formulas.length === 0) {
     return {
       product_sku_id: skuRow.id,
       product_sku_code: skuRow.sku_code,
@@ -97,7 +98,7 @@ export async function getExtractCalculatorForSkus(
 
   const { data: skus, error: skuError } = await supabase
     .from("skus")
-    .select("id, sku_code, name, is_packaging")
+    .select("id, sku_code, name, is_packaging, is_extract")
     .in("id", uniqueIds);
   if (skuError) throw skuError;
 

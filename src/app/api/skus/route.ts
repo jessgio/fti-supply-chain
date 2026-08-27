@@ -12,6 +12,7 @@ function mapSkuRow(row: {
   name: string | null;
   is_bundle: boolean;
   is_packaging: boolean;
+  is_extract: boolean;
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
@@ -30,6 +31,7 @@ function mapSkuRow(row: {
     name: row.name,
     is_bundle: row.is_bundle,
     is_packaging: row.is_packaging,
+    is_extract: Boolean(row.is_extract),
     is_clearance: Boolean(row.is_clearance),
     is_active: row.is_active,
     franchise_id: row.franchise_id,
@@ -55,6 +57,7 @@ export async function GET(request: Request) {
         .select("id", { count: "exact", head: true })
         .eq("is_bundle", false)
         .eq("is_packaging", false)
+        .eq("is_extract", false)
         .is("franchise_id", null);
       if (error) throw error;
       return NextResponse.json({ count: count ?? 0 });
@@ -63,18 +66,19 @@ export async function GET(request: Request) {
     let query = supabase
       .from("skus")
       .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_clearance, is_active, franchise_id, product_franchises(name)",
+        "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, product_franchises(name)",
       )
       .order("sku_code");
 
     if (scope === "mapped") {
       query = query.or(
-        "franchise_id.not.is.null,is_bundle.eq.true,is_packaging.eq.true",
+        "franchise_id.not.is.null,is_bundle.eq.true,is_packaging.eq.true,is_extract.eq.true",
       );
     } else if (scope === "unclassified") {
       query = query
         .eq("is_bundle", false)
         .eq("is_packaging", false)
+        .eq("is_extract", false)
         .is("franchise_id", null);
     }
 
@@ -103,9 +107,14 @@ export async function POST(request: Request) {
 
     const isBundle = Boolean(body.is_bundle);
     const isPackaging = Boolean(body.is_packaging);
-    if (isBundle && isPackaging) {
+    const isExtract = Boolean(body.is_extract);
+    const kindCount = [isBundle, isPackaging, isExtract].filter(Boolean).length;
+    if (kindCount > 1) {
       return NextResponse.json(
-        { error: "A SKU cannot be both a bundle and packaging." },
+        {
+          error:
+            "A SKU cannot be more than one of bundle, packaging, or extract.",
+        },
         { status: 400 },
       );
     }
@@ -120,6 +129,7 @@ export async function POST(request: Request) {
         typeof body.franchise_name === "string" ? body.franchise_name : null,
       is_bundle: isBundle,
       is_packaging: isPackaging,
+      is_extract: isExtract,
       retail_price:
         body.retail_price != null ? Number(body.retail_price) : null,
     });
