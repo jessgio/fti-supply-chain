@@ -28,6 +28,45 @@ export function postTaxFromWmsNet(netSales: number): number {
   return netSales / VAT_DIVISOR;
 }
 
+/**
+ * Implied average discount % from actual qty × current RSP vs WMS post-tax net.
+ * Returns null when discount cannot be inferred (no qty or RSP).
+ */
+export function impliedDiscountPct(
+  qty: number,
+  retailPrice: number | null,
+  postTax: number,
+): number | null {
+  if (
+    retailPrice == null ||
+    retailPrice <= 0 ||
+    !Number.isFinite(qty) ||
+    qty <= 0 ||
+    !Number.isFinite(postTax)
+  ) {
+    return null;
+  }
+  const listValue = qty * retailPrice;
+  if (listValue <= 0) return null;
+  const actualVatIn = postTax * VAT_DIVISOR;
+  return clampDiscountPct(100 * (1 - actualVatIn / listValue));
+}
+
+/**
+ * Weighted-average implied discount across SKUs that share a rollup cell.
+ * `listValue` is Σ(qty × RSP); `postTax` is Σ(post-tax net).
+ */
+export function impliedDiscountPctFromList(
+  listValue: number,
+  postTax: number,
+): number | null {
+  if (!Number.isFinite(listValue) || listValue <= 0 || !Number.isFinite(postTax)) {
+    return null;
+  }
+  const actualVatIn = postTax * VAT_DIVISOR;
+  return clampDiscountPct(100 * (1 - actualVatIn / listValue));
+}
+
 export function remainingYearShortfall(
   remainingYearQty: number,
   onHand: number,

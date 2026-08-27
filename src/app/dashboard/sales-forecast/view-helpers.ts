@@ -1,5 +1,6 @@
 import { MONTHS, type SopChannelGroup } from "@/lib/sales-forecast/constants";
 import {
+  impliedDiscountPct,
   postTaxNet,
   remainingYearShortfall,
   vatInclusiveNet,
@@ -208,19 +209,31 @@ export function mergeLiveSkuRows(
   currentMonth: number,
   readOnly: boolean,
 ): SopSkuRow[] {
+  const onlineById = new Map(onlineRows.map((row) => [row.sku_id, row]));
   const offlineById = new Map(offlineRows.map((row) => [row.sku_id, row]));
-  return onlineRows.map((online) => {
-    const offline = offlineById.get(online.sku_id);
+  const skuIds = [
+    ...onlineRows.map((row) => row.sku_id),
+    ...offlineRows
+      .filter((row) => !onlineById.has(row.sku_id))
+      .map((row) => row.sku_id),
+  ];
+
+  return skuIds.map((skuId) => {
+    const online = onlineById.get(skuId);
+    const offline = offlineById.get(skuId);
+    const base = online ?? offline!;
     const months: SopSkuRow["months"] = {};
     let remainingYearQty = 0;
     for (const month of MONTHS) {
-      const onlineLive = liveSkuMonthFromDrafts(
-        online,
-        month,
-        currentMonth,
-        readOnly,
-        onlineDrafts,
-      );
+      const onlineLive = online
+        ? liveSkuMonthFromDrafts(
+            online,
+            month,
+            currentMonth,
+            readOnly,
+            onlineDrafts,
+          )
+        : { qty: 0, postTax: 0, editable: !readOnly && month >= currentMonth };
       const offlineLive = offline
         ? liveSkuMonthFromDrafts(
             offline,
@@ -233,11 +246,18 @@ export function mergeLiveSkuRows(
       months[month] = {
         actual: {
           qty:
-            (online.months[month]?.actual.qty ?? 0) +
+            (online?.months[month]?.actual.qty ?? 0) +
             (offline?.months[month]?.actual.qty ?? 0),
           post_tax_net:
-            (online.months[month]?.actual.post_tax_net ?? 0) +
+            (online?.months[month]?.actual.post_tax_net ?? 0) +
             (offline?.months[month]?.actual.post_tax_net ?? 0),
+          avg_discount_pct: impliedDiscountPct(
+            (online?.months[month]?.actual.qty ?? 0) +
+              (offline?.months[month]?.actual.qty ?? 0),
+            base.retail_price,
+            (online?.months[month]?.actual.post_tax_net ?? 0) +
+              (offline?.months[month]?.actual.post_tax_net ?? 0),
+          ),
         },
         plan: {
           projected_qty: onlineLive.qty + offlineLive.qty,
@@ -247,21 +267,41 @@ export function mergeLiveSkuRows(
           upload_id: null,
         },
       };
-      if (onlineLive.editable) remainingYearQty += onlineLive.qty + offlineLive.qty;
+      if (onlineLive.editable || offlineLive.editable) {
+        remainingYearQty += onlineLive.qty + offlineLive.qty;
+      }
     }
+    const l3m_months_with_sales = Math.max(
+      online?.l3m_months_with_sales ?? 0,
+      offline?.l3m_months_with_sales ?? 0,
+    );
     return {
-      ...online,
-      l3m_qty: online.l3m_qty + (offline?.l3m_qty ?? 0),
-      l3m_post_tax: online.l3m_post_tax + (offline?.l3m_post_tax ?? 0),
-      l6m_qty: online.l6m_qty + (offline?.l6m_qty ?? 0),
-      l6m_post_tax: online.l6m_post_tax + (offline?.l6m_post_tax ?? 0),
+      ...base,
+      l3m_qty: (online?.l3m_qty ?? 0) + (offline?.l3m_qty ?? 0),
+      l3m_post_tax: (online?.l3m_post_tax ?? 0) + (offline?.l3m_post_tax ?? 0),
+      l6m_qty: (online?.l6m_qty ?? 0) + (offline?.l6m_qty ?? 0),
+      l6m_post_tax: (online?.l6m_post_tax ?? 0) + (offline?.l6m_post_tax ?? 0),
+      l3m_months_with_sales,
+      is_npd: l3m_months_with_sales < 3,
       remaining_year_qty: remainingYearQty,
       shortfall_qty: remainingYearShortfall(
         remainingYearQty,
-        online.current_stock,
-        online.on_order_qty,
+        base.current_stock,
+        base.on_order_qty,
       ),
       months,
     };
   });
+}
+
+/** Prefer online row identity; include offline-only SKUs for combined filters. */
+export function unionChannelSkuRows(
+  onlineRows: SopSkuRow[],
+  offlineRows: SopSkuRow[],
+): SopSkuRow[] {
+  const onlineIds = new Set(onlineRows.map((row) => row.sku_id));
+  return [
+    ...onlineRows,
+    ...offlineRows.filter((row) => !onlineIds.has(row.sku_id)),
+  ];
 }

@@ -5,8 +5,11 @@ export type DraftsStore = {
   notifyNow: () => void;
 };
 
-/** Versioned store so totals UI can update without re-rendering the SKU grid. */
-export function createDraftsStore(delayMs = 120): DraftsStore {
+/**
+ * Versioned store so totals UI can update without re-rendering the SKU grid.
+ * Uses trailing debounce so header/target recalculation waits until typing pauses.
+ */
+export function createDraftsStore(delayMs = 350): DraftsStore {
   let version = 0;
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -28,7 +31,7 @@ export function createDraftsStore(delayMs = 120): DraftsStore {
       return version;
     },
     notifyDebounced() {
-      if (timer != null) return;
+      if (timer != null) clearTimeout(timer);
       timer = setTimeout(flush, delayMs);
     },
     notifyNow() {

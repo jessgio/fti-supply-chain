@@ -3,7 +3,11 @@
 import { memo, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
-import { postTaxNet, vatInclusiveNet } from "@/lib/sales-forecast/math";
+import {
+  impliedDiscountPct,
+  postTaxNet,
+  vatInclusiveNet,
+} from "@/lib/sales-forecast/math";
 import { cn, formatCurrency, formatDateShort, formatNumber } from "@/lib/utils";
 import type { SopSkuRow } from "@/types/database";
 import {
@@ -11,6 +15,7 @@ import {
   FREEZE_EDGE,
   freezeBody,
   isPlanMonth,
+  rowStripeBg,
 } from "./table-utils";
 
 const CELL_INPUT_CLASS =
@@ -32,6 +37,11 @@ function livePostTax(
   );
 }
 
+function formatDiscLabel(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return "—";
+  return `${formatNumber(pct, 1)}% disc`;
+}
+
 const PlanMonthCell = memo(function PlanMonthCell({
   skuCode,
   skuId,
@@ -41,6 +51,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
   initialDisc,
   warn,
   onDraft,
+  onDraftSettle,
 }: {
   skuCode: string;
   skuId: string;
@@ -55,6 +66,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
     field: "qty" | "disc",
     value: string,
   ) => void;
+  onDraftSettle: () => void;
 }) {
   const qtyRef = useRef(initialQty);
   const discRef = useRef(initialDisc);
@@ -83,6 +95,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
             onDraft(skuId, month, "qty", value);
             paintPostTax();
           }}
+          onBlur={onDraftSettle}
           aria-label={`${skuCode} ${MONTH_LABELS[month - 1]} qty`}
           placeholder="0"
           inputMode="decimal"
@@ -101,6 +114,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
             onDraft(skuId, month, "disc", value);
             paintPostTax();
           }}
+          onBlur={onDraftSettle}
           aria-label={`${skuCode} ${MONTH_LABELS[month - 1]} discount %`}
           placeholder="0"
           inputMode="decimal"
@@ -115,15 +129,18 @@ const PlanMonthCell = memo(function PlanMonthCell({
 
 export const ForecastRow = memo(function ForecastRow({
   row,
+  rowIndex,
   currentMonth,
   readOnly,
   highlight,
   combined,
   getDrafts,
   onDraft,
+  onDraftSettle,
   registerRow,
 }: {
   row: SopSkuRow;
+  rowIndex: number;
   currentMonth: number;
   readOnly: boolean;
   highlight: boolean;
@@ -135,24 +152,25 @@ export const ForecastRow = memo(function ForecastRow({
     field: "qty" | "disc",
     value: string,
   ) => void;
+  onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
 }) {
   const shortfall = row.shortfall_qty;
-  const freezeBg = highlight
-    ? "bg-emerald-50"
-    : shortfall > 0
-      ? "bg-amber-50"
-      : "bg-white";
+  const stripe = rowStripeBg(rowIndex, {
+    highlight,
+    warn: shortfall > 0,
+  });
 
   return (
     <tr
       ref={(el) => registerRow(row.sku_id, el)}
-      className={`border-t border-stone-100 ${
-        highlight ? "bg-emerald-50" : shortfall > 0 ? "bg-amber-50/60" : "bg-white"
-      }`}
+      className={cn("border-t border-stone-200", stripe.row)}
     >
       <td
-        className={cn(freezeBody(FREEZE.id, freezeBg), "font-medium text-stone-900")}
+        className={cn(
+          freezeBody(FREEZE.id, stripe.freeze),
+          "font-medium text-stone-900",
+        )}
       >
         <span className="block whitespace-nowrap">{row.sku_code}</span>
         {row.name ? (
@@ -160,14 +178,22 @@ export const ForecastRow = memo(function ForecastRow({
             {row.name}
           </span>
         ) : null}
+        {row.is_npd ? (
+          <Badge
+            className="mt-1 bg-violet-100 text-violet-800"
+            title="Fewer than 3 months with sales in L3M"
+          >
+            NPD ({row.l3m_months_with_sales}/3)
+          </Badge>
+        ) : null}
       </td>
-      <td className={freezeBody(FREEZE.stock, freezeBg)}>
+      <td className={freezeBody(FREEZE.stock, stripe.freeze)}>
         {formatNumber(row.current_stock)}
       </td>
-      <td className={freezeBody(FREEZE.l3m, freezeBg)}>
+      <td className={freezeBody(FREEZE.l3m, stripe.freeze)}>
         {formatNumber(row.l3m_qty, 1)}
       </td>
-      <td className={cn(freezeBody(FREEZE.l6m, freezeBg), FREEZE_EDGE)}>
+      <td className={cn(freezeBody(FREEZE.l6m, stripe.freeze), FREEZE_EDGE)}>
         {formatNumber(row.l6m_qty, 1)}
       </td>
       <td className="px-3 py-2.5">
@@ -195,10 +221,15 @@ export const ForecastRow = memo(function ForecastRow({
           const postTax = usePlan
             ? (plan?.post_tax_net ?? 0)
             : (actual?.post_tax_net ?? 0);
+          const disc = usePlan
+            ? plan?.avg_discount_pct ?? null
+            : (actual?.avg_discount_pct ??
+              impliedDiscountPct(qty, row.retail_price, postTax));
           return (
             <td key={month} className="px-3 py-2.5 align-top text-xs text-stone-600">
               <div>{formatNumber(qty, 1)} u</div>
               <div>{formatCurrency(postTax)}</div>
+              <div className="text-[11px] text-stone-500">{formatDiscLabel(disc)}</div>
             </td>
           );
         }
@@ -213,6 +244,7 @@ export const ForecastRow = memo(function ForecastRow({
             initialDisc={getDrafts(row.sku_id, month, "disc")}
             warn={shortfall > 0}
             onDraft={onDraft}
+            onDraftSettle={onDraftSettle}
           />
         );
       })}

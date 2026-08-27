@@ -19,6 +19,8 @@ export type SopChannelGroup = "online" | "offline";
 export interface SopMonthActual {
   qty: number;
   post_tax_net: number;
+  /** Implied avg discount % from qty × RSP vs WMS net; null if unknown. */
+  avg_discount_pct?: number | null;
 }
 
 export interface SopMonthPlan {
@@ -43,6 +45,10 @@ export interface SopSkuRow {
   l3m_post_tax: number;
   l6m_qty: number;
   l6m_post_tax: number;
+  /** Count of L3M calendar months with qty &gt; 0 (0–3). */
+  l3m_months_with_sales: number;
+  /** True when L3M has fewer than 3 months with sales. */
+  is_npd: boolean;
   remaining_year_qty: number;
   shortfall_qty: number;
   months: Record<
@@ -52,6 +58,14 @@ export interface SopSkuRow {
       plan: SopMonthPlan;
     }
   >;
+}
+
+export interface SopEligibleSkuRef {
+  sku_id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  franchise_name: string | null;
 }
 
 export interface SopMonthlyTarget {
@@ -85,6 +99,7 @@ export interface SopForecastPayload {
   targets: SopMonthlyTarget[];
   rows: SopSkuRow[];
   uploads: SopForecastUpload[];
+  inactive_sku_ids: string[];
 }
 
 export interface SopYearForecast {
@@ -93,6 +108,8 @@ export interface SopYearForecast {
   read_only: boolean;
   unmapped_channel_count: number;
   channels: SopForecastPayload["channels"];
+  eligible_skus: SopEligibleSkuRef[];
+  inactive_sku_ids: Record<SopChannelGroup, string[]>;
   groups: Record<SopChannelGroup, SopForecastPayload>;
 }
 

@@ -4,13 +4,16 @@ import { memo, useMemo, useSyncExternalStore, type MutableRefObject } from "reac
 import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
-import { remainingYearShortfall } from "@/lib/sales-forecast/math";
+import {
+  impliedDiscountPctFromList,
+  remainingYearShortfall,
+} from "@/lib/sales-forecast/math";
 import { cn, formatCurrency, formatDateShort, formatNumber } from "@/lib/utils";
 import type { SopChannelGroup, SopSkuRow, SopYearForecast } from "@/types/database";
 import type { DraftsStore } from "./drafts-store";
 import { storeServerSnapshot } from "./drafts-store";
 import { ForecastRow } from "./forecast-row";
-import { FREEZE, FREEZE_EDGE, freezeBody, isPlanMonth } from "./table-utils";
+import { FREEZE, FREEZE_EDGE, freezeBody, isPlanMonth, rowStripeBg } from "./table-utils";
 import {
   annualFromMonths,
   buildLiveGroupMonths,
@@ -97,6 +100,7 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   focusSku,
   getDrafts,
   onDraft,
+  onDraftSettle,
   registerRow,
   draftSeed,
   workspace,
@@ -112,22 +116,25 @@ export const EditableSkuBody = memo(function EditableSkuBody({
     field: "qty" | "disc",
     value: string,
   ) => void;
+  onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
   draftSeed: number;
   workspace: Workspace;
 }) {
   return (
     <tbody>
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <ForecastRow
           key={`${workspace}-${draftSeed}-${row.sku_id}`}
           row={row}
+          rowIndex={index}
           currentMonth={currentMonth}
           readOnly={readOnly}
           highlight={row.sku_code.toUpperCase() === focusSku}
           combined={false}
           getDrafts={getDrafts}
           onDraft={onDraft}
+          onDraftSettle={onDraftSettle}
           registerRow={registerRow}
         />
       ))}
@@ -143,6 +150,7 @@ export function CombinedSkuBody({
   focusSku,
   getDrafts,
   onDraft,
+  onDraftSettle,
   registerRow,
   draftSeed,
 }: {
@@ -158,6 +166,7 @@ export function CombinedSkuBody({
     field: "qty" | "disc",
     value: string,
   ) => void;
+  onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
   draftSeed: number;
 }) {
@@ -181,16 +190,18 @@ export function CombinedSkuBody({
 
   return (
     <tbody>
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <ForecastRow
           key={`combined-${draftSeed}-${row.sku_id}`}
           row={row}
+          rowIndex={index}
           currentMonth={yearData.current_month}
           readOnly
           highlight={row.sku_code.toUpperCase() === focusSku}
           combined
           getDrafts={getDrafts}
           onDraft={onDraft}
+          onDraftSettle={onDraftSettle}
           registerRow={registerRow}
         />
       ))}
@@ -296,9 +307,12 @@ export function FranchiseBody({
       let l6m_post_tax = 0;
       let remaining_year_qty = 0;
       let projected_stockout_date: string | null = null;
-      const months: Record<number, { qty: number; post_tax: number }> = {};
+      const months: Record<
+        number,
+        { qty: number; post_tax: number; list_value: number }
+      > = {};
       for (const month of MONTHS) {
-        months[month] = { qty: 0, post_tax: 0 };
+        months[month] = { qty: 0, post_tax: 0, list_value: 0 };
       }
       for (const row of rows) {
         current_stock += row.current_stock;
@@ -325,6 +339,9 @@ export function FranchiseBody({
               : (row.months[month]?.actual.post_tax_net ?? 0);
             months[month].qty += qty;
             months[month].post_tax += postTax;
+            if (row.retail_price != null && row.retail_price > 0) {
+              months[month].list_value += qty * row.retail_price;
+            }
             if (usePlan && !yearData.read_only) remaining_year_qty += qty;
           } else {
             const live = liveSkuMonthFromDrafts(
@@ -336,6 +353,9 @@ export function FranchiseBody({
             );
             months[month].qty += live.qty;
             months[month].post_tax += live.postTax;
+            if (row.retail_price != null && row.retail_price > 0) {
+              months[month].list_value += live.qty * row.retail_price;
+            }
             if (live.editable) remaining_year_qty += live.qty;
           }
         }
@@ -384,30 +404,28 @@ export function FranchiseBody({
 
   return (
     <tbody>
-      {franchiseRows.map((row) => {
-        const freezeBg = row.shortfall_qty > 0 ? "bg-amber-50" : "bg-white";
+      {franchiseRows.map((row, index) => {
+        const stripe = rowStripeBg(index, { warn: row.shortfall_qty > 0 });
         return (
           <tr
             key={row.key}
-            className={`border-t border-stone-100 ${
-              row.shortfall_qty > 0 ? "bg-amber-50/60" : "bg-white"
-            }`}
+            className={cn("border-t border-stone-200", stripe.row)}
           >
             <td
               className={cn(
-                freezeBody(FREEZE.id, freezeBg),
+                freezeBody(FREEZE.id, stripe.freeze),
                 "font-medium text-stone-900",
               )}
             >
               {row.name}
             </td>
-            <td className={freezeBody(FREEZE.stock, freezeBg)}>
+            <td className={freezeBody(FREEZE.stock, stripe.freeze)}>
               {formatNumber(row.current_stock)}
             </td>
-            <td className={freezeBody(FREEZE.l3m, freezeBg)}>
+            <td className={freezeBody(FREEZE.l3m, stripe.freeze)}>
               {formatNumber(row.l3m_qty, 1)}
             </td>
-            <td className={cn(freezeBody(FREEZE.l6m, freezeBg), FREEZE_EDGE)}>
+            <td className={cn(freezeBody(FREEZE.l6m, stripe.freeze), FREEZE_EDGE)}>
               {formatNumber(row.l6m_qty, 1)}
             </td>
             <td className="px-3 py-2.5">{row.skuCount}</td>
@@ -417,15 +435,25 @@ export function FranchiseBody({
             </td>
             <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
             <td className="px-3 py-2.5">{formatCurrency(row.l6m_post_tax)}</td>
-            {MONTHS.map((month) => (
-              <td
-                key={month}
-                className="px-3 py-2.5 align-top text-xs text-stone-600"
-              >
-                <div>{formatNumber(row.months[month]?.qty ?? 0, 1)} u</div>
-                <div>{formatCurrency(row.months[month]?.post_tax ?? 0)}</div>
-              </td>
-            ))}
+            {MONTHS.map((month) => {
+              const cell = row.months[month];
+              const disc = impliedDiscountPctFromList(
+                cell?.list_value ?? 0,
+                cell?.post_tax ?? 0,
+              );
+              return (
+                <td
+                  key={month}
+                  className="px-3 py-2.5 align-top text-xs text-stone-600"
+                >
+                  <div>{formatNumber(cell?.qty ?? 0, 1)} u</div>
+                  <div>{formatCurrency(cell?.post_tax ?? 0)}</div>
+                  <div className="text-[11px] text-stone-500">
+                    {disc == null ? "—" : `${formatNumber(disc, 1)}% disc`}
+                  </div>
+                </td>
+              );
+            })}
           </tr>
         );
       })}

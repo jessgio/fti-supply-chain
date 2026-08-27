@@ -8,13 +8,14 @@ import {
   type SopChannelGroup,
 } from "@/lib/sales-forecast/constants";
 import {
+  impliedDiscountPct,
   postTaxFromWmsNet,
   postTaxNet,
   remainingYearShortfall,
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
 import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { fetchAllRows, fetchAllRpc } from "@/lib/supabase/fetch-all";
 import type {
   SopForecastPayload,
   SopForecastUpload,
@@ -30,13 +31,6 @@ interface EligibleSku {
   is_bundle: boolean;
   retail_price: number | null;
   franchise_name: string | null;
-}
-
-function monthKey(date: string): { year: number; month: number } {
-  return {
-    year: Number(date.slice(0, 4)),
-    month: Number(date.slice(5, 7)),
-  };
 }
 
 export function isSopGroup(value: string): value is SopChannelGroup {
@@ -177,6 +171,25 @@ function windowAverage(
   return { qty: qty / months, post_tax: postTax / months };
 }
 
+/** How many calendar months in the window have qty &gt; 0. */
+function monthsWithSales(
+  actualBySkuMonth: Map<string, { qty: number; post_tax: number }>,
+  skuId: string,
+  start: string,
+  months: number,
+): number {
+  let count = 0;
+  const startYear = Number(start.slice(0, 4));
+  const startMonth = Number(start.slice(5, 7));
+  for (let i = 0; i < months; i += 1) {
+    const date = new Date(startYear, startMonth - 1 + i, 1);
+    const key = `${skuId}:${date.getFullYear()}-${date.getMonth() + 1}`;
+    const actual = actualBySkuMonth.get(key);
+    if ((actual?.qty ?? 0) > 0) count += 1;
+  }
+  return count;
+}
+
 function buildGroupRows(
   skus: EligibleSku[],
   year: number,
@@ -197,6 +210,12 @@ function buildGroupRows(
   const rows: SopSkuRow[] = skus.map((sku) => {
     const l3m = windowAverage(actualBySkuMonth, sku.id, l3mStart, 3);
     const l6m = windowAverage(actualBySkuMonth, sku.id, l6mStart, 6);
+    const l3m_months_with_sales = monthsWithSales(
+      actualBySkuMonth,
+      sku.id,
+      l3mStart,
+      3,
+    );
     const months: SopSkuRow["months"] = {};
     let remainingYearQty = 0;
     for (const month of MONTHS) {
@@ -220,7 +239,15 @@ function buildGroupRows(
         upload_id: stored?.upload_id ?? null,
       };
       months[month] = {
-        actual: { qty: actual.qty, post_tax_net: actual.post_tax },
+        actual: {
+          qty: actual.qty,
+          post_tax_net: actual.post_tax,
+          avg_discount_pct: impliedDiscountPct(
+            actual.qty,
+            sku.retail_price,
+            actual.post_tax,
+          ),
+        },
         plan,
       };
       plannedByMonth.set(
@@ -248,6 +275,8 @@ function buildGroupRows(
       l3m_post_tax: l3m.post_tax,
       l6m_qty: l6m.qty,
       l6m_post_tax: l6m.post_tax,
+      l3m_months_with_sales,
+      is_npd: l3m_months_with_sales < 3,
       remaining_year_qty: remainingYearQty,
       shortfall_qty: remainingYearShortfall(
         remainingYearQty,
@@ -277,36 +306,82 @@ export async function loadSopYearForecast(
   const channelGroup = new Map(
     channels.map((c) => [c.id, c.sop_group] as const),
   );
-  const mappedChannelIds = channels
-    .filter((c) => c.sop_group)
-    .map((c) => c.id);
+  const mappedChannelIds = new Set(
+    channels.filter((c) => c.sop_group).map((c) => c.id),
+  );
 
-  const [skus, stockBySku, onOrderBySku, targetsRes, plansRes, uploadsRes] =
-    await Promise.all([
-      listEligibleSkus(supabase),
-      loadStockBySkuId(supabase),
-      loadOnOrderBySkuId(supabase),
-      supabase
-        .from("sop_monthly_targets")
-        .select("month, target_net_sales_post_tax, sop_group")
-        .eq("year", year),
-      supabase
-        .from("sop_sku_month_plans")
-        .select(
-          "sku_id, month, projected_qty, avg_discount_pct, upload_id, sop_group",
-        )
-        .eq("year", year),
-      supabase
-        .from("sop_forecast_uploads")
-        .select(
-          "id, sop_group, year, filename, row_count, uploaded_by, created_at",
-        )
-        .eq("year", year)
-        .order("created_at", { ascending: false }),
-    ]);
+  const yearStart = `${year}-01-01`;
+  const today = format(now, "yyyy-MM-dd");
+  const historyStart = l6mStart < yearStart ? l6mStart : yearStart;
+
+  const [
+    skus,
+    stockBySku,
+    onOrderBySku,
+    targetsRes,
+    plansRes,
+    uploadsRes,
+    monthlyActualsRes,
+    restockResult,
+    inactiveRes,
+  ] = await Promise.all([
+    listEligibleSkus(supabase),
+    loadStockBySkuId(supabase),
+    loadOnOrderBySkuId(supabase),
+    supabase
+      .from("sop_monthly_targets")
+      .select("month, target_net_sales_post_tax, sop_group")
+      .eq("year", year),
+    supabase
+      .from("sop_sku_month_plans")
+      .select(
+        "sku_id, month, projected_qty, avg_discount_pct, upload_id, sop_group",
+      )
+      .eq("year", year),
+    supabase
+      .from("sop_forecast_uploads")
+      .select(
+        "id, sop_group, year, filename, row_count, uploaded_by, created_at",
+      )
+      .eq("year", year)
+      .order("created_at", { ascending: false }),
+    mappedChannelIds.size > 0
+      ? fetchAllRpc<{
+          sku_id: string;
+          channel_id: string;
+          sale_year: number;
+          sale_month: number;
+          qty: number;
+          net_sales: number;
+        }>(supabase, "get_sop_monthly_actuals", {
+          p_start: historyStart,
+          p_end: today,
+        }).then((data) => ({ data, error: null as null }))
+      : Promise.resolve({
+          data: [] as Array<{
+            sku_id: string;
+            channel_id: string;
+            sale_year: number;
+            sale_month: number;
+            qty: number;
+            net_sales: number;
+          }>,
+          error: null as null,
+        }),
+    loadRestockRecommendations(supabase).catch(() => ({
+      recommendations: [] as Awaited<
+        ReturnType<typeof loadRestockRecommendations>
+      >["recommendations"],
+      skuCount: 0,
+    })),
+    supabase
+      .from("sop_sku_channel_inactive")
+      .select("sku_id, sop_group"),
+  ]);
   if (targetsRes.error) throw targetsRes.error;
   if (plansRes.error) throw plansRes.error;
   if (uploadsRes.error) throw uploadsRes.error;
+  if (inactiveRes.error) throw inactiveRes.error;
 
   const skuIds = new Set(skus.map((s) => s.id));
   const actualByGroup = {
@@ -314,49 +389,25 @@ export async function loadSopYearForecast(
     offline: new Map<string, { qty: number; post_tax: number }>(),
   };
 
-  if (mappedChannelIds.length > 0 && skuIds.size > 0) {
-    const yearStart = `${year}-01-01`;
-    const today = format(now, "yyyy-MM-dd");
-    const historyStart = l6mStart < yearStart ? l6mStart : yearStart;
-
-    const sales = await fetchAllRows<{
-      sku_id: string;
-      channel_id: string;
-      sale_date: string;
-      qty_sold: number;
-      net_sales: number;
-    }>(() =>
-      supabase
-        .from("sales_records")
-        .select("sku_id, channel_id, sale_date, qty_sold, net_sales")
-        .in("channel_id", mappedChannelIds)
-        .gte("sale_date", historyStart)
-        .lte("sale_date", today),
-    );
-
-    for (const row of sales) {
-      if (!skuIds.has(row.sku_id)) continue;
-      const group = channelGroup.get(row.channel_id);
-      if (group !== "online" && group !== "offline") continue;
-      const { year: y, month } = monthKey(row.sale_date);
-      const key = `${row.sku_id}:${y}-${month}`;
-      const bucket = actualByGroup[group];
-      const prev = bucket.get(key) ?? { qty: 0, post_tax: 0 };
-      prev.qty += Number(row.qty_sold);
-      prev.post_tax += postTaxFromWmsNet(Number(row.net_sales));
-      bucket.set(key, prev);
-    }
+  for (const row of monthlyActualsRes.data) {
+    if (!skuIds.has(row.sku_id)) continue;
+    if (!mappedChannelIds.has(row.channel_id)) continue;
+    const group = channelGroup.get(row.channel_id);
+    if (group !== "online" && group !== "offline") continue;
+    const key = `${row.sku_id}:${row.sale_year}-${row.sale_month}`;
+    const bucket = actualByGroup[group];
+    const prev = bucket.get(key) ?? { qty: 0, post_tax: 0 };
+    prev.qty += Number(row.qty);
+    prev.post_tax += postTaxFromWmsNet(Number(row.net_sales));
+    bucket.set(key, prev);
   }
 
-  let oosByCode = new Map<string, string | null>();
-  try {
-    const { recommendations } = await loadRestockRecommendations(supabase);
-    oosByCode = new Map(
-      recommendations.map((r) => [r.sku_code, r.projected_stockout_date]),
-    );
-  } catch {
-    oosByCode = new Map();
-  }
+  const oosByCode = new Map(
+    restockResult.recommendations.map((r) => [
+      r.sku_code,
+      r.projected_stockout_date,
+    ]),
+  );
 
   const plansByGroup = {
     online: new Map<
@@ -393,10 +444,34 @@ export async function loadSopYearForecast(
 
   const uploads = (uploadsRes.data ?? []) as SopForecastUpload[];
 
+  const inactive_sku_ids: Record<SopChannelGroup, string[]> = {
+    online: [],
+    offline: [],
+  };
+  const inactiveByGroup = {
+    online: new Set<string>(),
+    offline: new Set<string>(),
+  };
+  for (const row of inactiveRes.data ?? []) {
+    const group = row.sop_group as SopChannelGroup;
+    if (group !== "online" && group !== "offline") continue;
+    inactiveByGroup[group].add(row.sku_id as string);
+    inactive_sku_ids[group].push(row.sku_id as string);
+  }
+
+  const eligible_skus = skus.map((sku) => ({
+    sku_id: sku.id,
+    sku_code: sku.sku_code,
+    name: sku.name,
+    is_bundle: sku.is_bundle,
+    franchise_name: sku.franchise_name,
+  }));
+
   const groups = {} as Record<SopChannelGroup, SopForecastPayload>;
   for (const group of SOP_GROUPS) {
+    const groupSkus = skus.filter((sku) => !inactiveByGroup[group].has(sku.id));
     const { rows, plannedByMonth } = buildGroupRows(
-      skus,
+      groupSkus,
       year,
       currentYear,
       currentMonth,
@@ -427,6 +502,7 @@ export async function loadSopYearForecast(
       }),
       rows,
       uploads: uploads.filter((u) => u.sop_group === group),
+      inactive_sku_ids: inactive_sku_ids[group],
     };
   }
 
@@ -436,6 +512,8 @@ export async function loadSopYearForecast(
     read_only,
     unmapped_channel_count,
     channels,
+    eligible_skus,
+    inactive_sku_ids,
     groups,
   };
 }
@@ -571,4 +649,36 @@ export async function deleteForecastUpload(
     .delete()
     .eq("id", id);
   if (error) throw error;
+}
+
+/** Replace the inactive SKU set for one Online/Offline group. */
+export async function replaceChannelInactiveSkus(
+  supabase: SupabaseClient,
+  input: {
+    group: SopChannelGroup;
+    skuIds: string[];
+    userId: string | null;
+  },
+): Promise<string[]> {
+  const uniqueIds = [...new Set(input.skuIds.filter(Boolean))];
+
+  const { error: deleteError } = await supabase
+    .from("sop_sku_channel_inactive")
+    .delete()
+    .eq("sop_group", input.group);
+  if (deleteError) throw deleteError;
+
+  if (uniqueIds.length === 0) return [];
+
+  const rows = uniqueIds.map((sku_id) => ({
+    sku_id,
+    sop_group: input.group,
+    updated_by: input.userId,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error: insertError } = await supabase
+    .from("sop_sku_channel_inactive")
+    .insert(rows);
+  if (insertError) throw insertError;
+  return uniqueIds;
 }

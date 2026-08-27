@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
   type Dispatch,
   type MutableRefObject,
@@ -30,6 +32,31 @@ import {
 } from "./view-helpers";
 
 type Workspace = SopChannelGroup | "combined";
+
+/** Local-state input so typing does not rebuild the whole targets card. */
+function TargetMonthInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+
+  return (
+    <Input
+      className="h-8 px-2 text-xs"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        if (local !== value) onCommit(local);
+      }}
+    />
+  );
+}
 
 export function TargetsCard({
   store,
@@ -211,15 +238,14 @@ export function TargetsCard({
                         return (
                           <td key={month} className="py-1 pr-3 align-top">
                             {row.editable && row.group ? (
-                              <Input
-                                className="h-8 px-2 text-xs"
+                              <TargetMonthInput
                                 value={targetDrafts[row.group][month] ?? "0"}
-                                onChange={(e) => {
-                                  const value = e.target.value;
+                                onCommit={(value) => {
+                                  const group = row.group!;
                                   setTargetDrafts((d) => ({
                                     ...d,
-                                    [row.group!]: {
-                                      ...d[row.group!],
+                                    [group]: {
+                                      ...d[group],
                                       [month]: value,
                                     },
                                   }));

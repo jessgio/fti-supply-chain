@@ -21,6 +21,23 @@ export function freezeBody(col: string, bg: string): string {
   return cn("sticky z-20 py-2.5", col, bg);
 }
 
+/** Stronger zebra contrast for dense forecast grids. */
+export function rowStripeBg(
+  index: number,
+  opts?: { highlight?: boolean; warn?: boolean },
+): { row: string; freeze: string } {
+  if (opts?.highlight) {
+    return { row: "bg-emerald-50", freeze: "bg-emerald-50" };
+  }
+  if (opts?.warn) {
+    return { row: "bg-amber-50/80", freeze: "bg-amber-50" };
+  }
+  if (index % 2 === 1) {
+    return { row: "bg-stone-100", freeze: "bg-stone-100" };
+  }
+  return { row: "bg-white", freeze: "bg-white" };
+}
+
 export function draftKey(skuId: string, month: number): string {
   return `${skuId}:${month}`;
 }

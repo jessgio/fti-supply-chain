@@ -63,19 +63,48 @@ export function formatDateShort(value: string | null | undefined): string {
 
 // ─── number / currency helpers ────────────────────────────────────────────────
 
+const currencyFormatters = new Map<string, Intl.NumberFormat>();
+const numberFormatters = new Map<number, Intl.NumberFormat>();
+
+function currencyFormatter(currency: string): Intl.NumberFormat {
+  let formatter = currencyFormatters.get(currency);
+  if (!formatter) {
+    try {
+      formatter = new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      });
+    } catch {
+      formatter = new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        maximumFractionDigits: 0,
+      });
+    }
+    currencyFormatters.set(currency, formatter);
+  }
+  return formatter;
+}
+
+function numberFormatter(decimals: number): Intl.NumberFormat {
+  let formatter = numberFormatters.get(decimals);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("id-ID", {
+      maximumFractionDigits: decimals,
+    });
+    numberFormatters.set(decimals, formatter);
+  }
+  return formatter;
+}
+
 /** Format IDR (default) or any currency. Falls back to IDR if currency is unknown. */
 export function formatCurrency(value: number, currency = "IDR"): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(value);
+  return currencyFormatter(currency).format(value);
 }
 
 export function formatNumber(value: number, decimals = 0): string {
-  return new Intl.NumberFormat("id-ID", {
-    maximumFractionDigits: decimals,
-  }).format(value);
+  return numberFormatter(decimals).format(value);
 }
 
 export function formatPct(value: number | null): string {
