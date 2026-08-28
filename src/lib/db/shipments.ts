@@ -103,7 +103,7 @@ const SHIPMENT_SELECT = `
       po_id,
       sku_id,
       qty_ordered,
-      skus ( sku_code, name ),
+      skus!sku_id ( sku_code, name ),
       purchase_orders ( id, po_number )
     )
   )
@@ -309,7 +309,7 @@ export async function getLineAllocations(
   const { data: lines, error: linesError } = await supabase
     .from("purchase_order_lines")
     .select(
-      "id, po_id, sku_id, qty_ordered, is_closed, skus(sku_code, name), purchase_orders!inner(id, po_number)",
+      "id, po_id, sku_id, qty_ordered, is_closed, skus!sku_id(sku_code, name), purchase_orders!inner(id, po_number)",
     )
     .in("po_id", poIds);
   if (linesError) throw linesError;
@@ -473,7 +473,7 @@ async function getLineAllocationsForLines(
 > {
   const { data: lines, error: linesError } = await supabase
     .from("purchase_order_lines")
-    .select("id, qty_ordered, is_closed, skus(sku_code)")
+    .select("id, qty_ordered, is_closed, skus!sku_id(sku_code)")
     .in("id", lineIds);
   if (linesError) throw linesError;
 

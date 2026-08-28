@@ -411,7 +411,7 @@ const PO_SELECT =
   PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
-  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), original_sku:original_sku_id(sku_code, name))";
+  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus!sku_id(sku_code, name, is_packaging), original_sku:skus!original_sku_id(sku_code, name))";
 
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
@@ -420,7 +420,7 @@ const PO_DETAIL_SELECT =
   PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
-  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), original_sku:original_sku_id(sku_code, name), " +
+  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus!sku_id(sku_code, name, is_packaging), original_sku:skus!original_sku_id(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
@@ -820,7 +820,7 @@ export async function listOpenPoBatchesBySkus(
   const { data, error } = await supabase
     .from("purchase_order_lines")
     .select(
-      "id, sku_id, qty_ordered, qty_received, is_closed, skus(sku_code), purchase_orders!inner(id, expected_date, status)",
+      "id, sku_id, qty_ordered, qty_received, is_closed, skus!sku_id(sku_code), purchase_orders!inner(id, expected_date, status)",
     )
     .in("sku_id", skuIds)
     .in("purchase_orders.status", [

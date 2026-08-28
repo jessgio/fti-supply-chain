@@ -31,7 +31,7 @@ export async function getFillingPoExtractShortfalls(
     .from("purchase_order_lines")
     .select(
       "id, sku_id, qty_ordered, qty_received, is_closed, " +
-        "skus!inner(sku_code, is_packaging, is_extract), " +
+        "skus!sku_id!inner(sku_code, is_packaging, is_extract), " +
         "purchase_orders!inner(id, status)",
     )
     .eq("skus.is_packaging", false)

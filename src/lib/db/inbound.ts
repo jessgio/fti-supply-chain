@@ -126,7 +126,7 @@ const INBOUND_SELECT = `
     ordered_qty,
     received_qty,
     discrepancy,
-    skus ( sku_code, name )
+    skus!sku_id ( sku_code, name )
   )
 `;
 
@@ -603,7 +603,7 @@ export async function listOngoingPosForTimeline(
         qty_received,
         is_closed,
         unit_cost,
-        skus ( sku_code, name )
+        skus!sku_id ( sku_code, name )
       ),
       po_payments ( payment_date, purpose, amount, currency ),
       shipment_purchase_orders (
@@ -617,7 +617,7 @@ export async function listOngoingPosForTimeline(
           shipment_items (
             quantity,
             purchase_order_lines (
-              skus ( sku_code, name )
+              skus!sku_id ( sku_code, name )
             )
           )
         )
@@ -745,7 +745,7 @@ const PO_TIMELINE_SELECT = `
     qty_received,
     is_closed,
     unit_cost,
-    skus ( sku_code, name )
+    skus!sku_id ( sku_code, name )
   ),
   po_payments ( payment_date, purpose, amount, currency ),
   shipment_purchase_orders (
@@ -759,7 +759,7 @@ const PO_TIMELINE_SELECT = `
       shipment_items (
         quantity,
         purchase_order_lines (
-          skus ( sku_code, name )
+          skus!sku_id ( sku_code, name )
         )
       )
     )

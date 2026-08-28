@@ -187,7 +187,7 @@ export async function listOpenPosForExtractInbound(
   const { data, error } = await supabase
     .from("purchase_orders")
     .select(
-      "id, po_number, status, order_date, purchase_order_lines ( skus ( name, sku_code ) )",
+      "id, po_number, status, order_date, purchase_order_lines ( skus!sku_id ( name, sku_code ) )",
     )
     .not("status", "in", '("received","cancelled")')
     .order("order_date", { ascending: false });

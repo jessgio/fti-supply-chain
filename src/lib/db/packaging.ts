@@ -162,7 +162,7 @@ export async function listOpenPackagingPoLines(
   const { data, error } = await supabase
     .from("purchase_order_lines")
     .select(
-      "qty_ordered, qty_received, skus(sku_code), " +
+      "qty_ordered, qty_received, skus!sku_id(sku_code), " +
         "purchase_orders!inner(id, po_number, status, expected_date, suppliers(name))",
     )
     .in("sku_id", packagingSkuIds)

@@ -113,7 +113,7 @@ export async function listStockBatches(
     .from("po_receipts")
     .select(
       "id, qty_received, received_date, location, batch_code, expiry_date, " +
-        "purchase_order_lines!inner(sku_id, skus(sku_code, name), purchase_orders(po_number))",
+        "purchase_order_lines!inner(sku_id, skus!sku_id(sku_code, name), purchase_orders(po_number))",
     );
 
   if (params.batchCode?.trim()) {
