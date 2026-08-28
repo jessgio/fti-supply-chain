@@ -503,6 +503,10 @@ export interface PurchaseOrderLine {
   sku_id: string;
   sku_code?: string;
   sku_name?: string | null;
+  /** First placeholder SKU if this line was later remapped to an official SKU. */
+  original_sku_id?: string | null;
+  original_sku_code?: string | null;
+  original_sku_name?: string | null;
   qty_ordered: number;
   qty_received: number;
   is_closed: boolean;

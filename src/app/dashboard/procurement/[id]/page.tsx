@@ -8,6 +8,7 @@ import {
   FileText,
   FlaskConical,
   Pencil,
+  Repeat2,
   Trash2,
   Truck,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
   EditPoDialog,
   type PoSkuOption,
 } from "@/components/procurement/edit-po-dialog";
+import { ReplacePoSkusDialog } from "@/components/procurement/replace-po-skus-dialog";
 import { SinglePoGantt } from "@/components/procurement/single-po-gantt";
 import type { FillingPoExtractShortfall } from "@/lib/extracts/filling-po-extract-shortfall";
 import {
@@ -73,6 +75,7 @@ export default function PurchaseOrderPage() {
   const [busy, setBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [replaceSkusOpen, setReplaceSkusOpen] = useState(false);
 
   const loadPo = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -299,6 +302,17 @@ export default function PurchaseOrderPage() {
               <Pencil className="h-3.5 w-3.5" />
               Edit
             </Button>
+            {(po.lines ?? []).length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setReplaceSkusOpen(true)}
+                disabled={busy}
+              >
+                <Repeat2 className="h-3.5 w-3.5" />
+                Replace SKUs
+              </Button>
+            )}
             {canDelete && (
               <Button
                 size="sm"
@@ -377,8 +391,17 @@ export default function PurchaseOrderPage() {
           )}
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base">Line items</CardTitle>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setReplaceSkusOpen(true)}
+                disabled={busy}
+              >
+                <Repeat2 className="h-3.5 w-3.5" />
+                Replace SKUs
+              </Button>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -407,6 +430,16 @@ export default function PurchaseOrderPage() {
                               {line.sku_name}
                             </span>
                           )}
+                          {line.original_sku_code &&
+                          line.original_sku_id &&
+                          line.original_sku_id !== line.sku_id ? (
+                            <span className="mt-0.5 block text-xs text-stone-500">
+                              Was {line.original_sku_code}
+                              {line.original_sku_name
+                                ? ` · ${line.original_sku_name}`
+                                : ""}
+                            </span>
+                          ) : null}
                           {closedShort && (
                             <span className="mt-0.5 block text-xs text-rose-700">
                               Closed short · received less than ordered
@@ -512,6 +545,18 @@ export default function PurchaseOrderPage() {
             void loadPo();
           }}
           onSupplierCreated={(s) => setSuppliers((prev) => [...prev, s])}
+        />
+      )}
+      {replaceSkusOpen && po && (
+        <ReplacePoSkusDialog
+          po={po}
+          skus={skus}
+          onClose={() => setReplaceSkusOpen(false)}
+          onSaved={(updated) => {
+            setPo(updated);
+            setReplaceSkusOpen(false);
+            void loadPo();
+          }}
         />
       )}
     </PageShell>

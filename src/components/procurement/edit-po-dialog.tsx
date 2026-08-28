@@ -444,6 +444,12 @@ export function EditPoDialog({
                         </Button>
                       )}
                     </div>
+                    {lockedLine ? (
+                      <p className="text-xs text-stone-500">
+                        Received lines keep their SKU here. Use Replace SKUs on
+                        the PO to swap a placeholder for the official code.
+                      </p>
+                    ) : null}
                     {line.sku_id ? (
                       <LastPurchaseCostSuggestion
                         cost={costsBySkuId.get(line.sku_id)}

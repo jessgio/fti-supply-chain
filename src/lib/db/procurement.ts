@@ -276,11 +276,13 @@ type PoRow = {
   purchase_order_lines: {
     id: string;
     sku_id: string;
+    original_sku_id: string | null;
     qty_ordered: number;
     qty_received: number;
     is_closed: boolean;
     unit_cost: number | null;
     skus: { sku_code: string; name: string | null; is_packaging: boolean } | null;
+    original_sku: { sku_code: string; name: string | null } | null;
     po_receipts?: {
       id: string;
       qty_received: number;
@@ -327,6 +329,9 @@ function mapPoRow(row: PoRow): PurchaseOrder {
       sku_id: l.sku_id,
       sku_code: l.skus?.sku_code,
       sku_name: l.skus?.name ?? null,
+      original_sku_id: l.original_sku_id ?? null,
+      original_sku_code: l.original_sku?.sku_code ?? null,
+      original_sku_name: l.original_sku?.name ?? null,
       qty_ordered: Number(l.qty_ordered),
       qty_received: Number(l.qty_received),
       is_closed: Boolean(l.is_closed),
@@ -406,7 +411,7 @@ const PO_SELECT =
   PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging))";
+  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), original_sku:original_sku_id(sku_code, name))";
 
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
@@ -415,7 +420,7 @@ const PO_DETAIL_SELECT =
   PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
-  "purchase_order_lines(id, sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), " +
+  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus(sku_code, name, is_packaging), original_sku:original_sku_id(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
@@ -679,6 +684,88 @@ export async function updatePurchaseOrder(
   const updated = await getPurchaseOrder(supabase, id);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
+}
+
+export interface PoLineSkuReplacementInput {
+  po_line_id: string;
+  new_sku_id: string;
+}
+
+export interface PoLineSkuReplacementResult {
+  po_line_id: string;
+  from_sku_id: string;
+  to_sku_id: string;
+  inbound_items: number;
+  production_lines: number;
+  status_notes: number;
+  receipt_qty_moved: number;
+}
+
+export async function replacePurchaseOrderLineSkus(
+  supabase: SupabaseClient,
+  poId: string,
+  replacements: PoLineSkuReplacementInput[],
+  changedBy?: string | null,
+): Promise<{
+  purchaseOrder: PurchaseOrder;
+  replaced: PoLineSkuReplacementResult[];
+}> {
+  const existing = await getPurchaseOrder(supabase, poId);
+  if (!existing) throw new Error("Purchase order not found.");
+
+  const lineById = new Map((existing.lines ?? []).map((line) => [line.id, line]));
+  const clean: PoLineSkuReplacementInput[] = [];
+  const skuIdsToSync: string[] = [];
+
+  for (const item of replacements) {
+    const lineId = String(item.po_line_id ?? "").trim();
+    const newSkuId = String(item.new_sku_id ?? "").trim();
+    if (!lineId || !newSkuId) {
+      throw new Error("Each replacement needs a line and a new SKU.");
+    }
+    const line = lineById.get(lineId);
+    if (!line) {
+      throw new Error("One of the lines is not on this purchase order.");
+    }
+    if (line.sku_id === newSkuId) continue;
+    clean.push({ po_line_id: lineId, new_sku_id: newSkuId });
+    skuIdsToSync.push(line.sku_id, newSkuId);
+  }
+
+  if (clean.length === 0) {
+    throw new Error(
+      "No SKU changes to apply. Pick a different SKU for at least one line.",
+    );
+  }
+
+  const { data, error } = await supabase.rpc("replace_po_line_skus", {
+    p_po_id: poId,
+    p_replacements: clean,
+    p_changed_by: changedBy ?? null,
+  });
+  if (error) throw error;
+
+  const lineIds = clean.map((item) => item.po_line_id);
+  const { error: costDeleteError } = await supabase
+    .from("sku_last_purchase_costs")
+    .delete()
+    .in("po_line_id", lineIds);
+  if (costDeleteError) throw costDeleteError;
+
+  await syncSkuLastPurchaseCosts(supabase, skuIdsToSync);
+
+  const purchaseOrder = await getPurchaseOrder(supabase, poId);
+  if (!purchaseOrder) throw new Error("Purchase order not found.");
+
+  const payload =
+    data && typeof data === "object" && "replaced" in data
+      ? (data as { replaced: PoLineSkuReplacementResult[] })
+      : { replaced: [] };
+
+  return {
+    purchaseOrder,
+    replaced: Array.isArray(payload.replaced) ? payload.replaced : [],
+  };
 }
 
 export async function deletePurchaseOrder(
