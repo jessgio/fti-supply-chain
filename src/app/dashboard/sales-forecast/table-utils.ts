@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
+import type { SopSkuRow } from "@/types/database";
 
 /** Sticky left offsets: identity + stock + L3M qty + L6M qty. */
 export const FREEZE = {
-  id: "left-0 min-w-[18rem] w-[18rem] px-5",
-  stock: "left-[18rem] min-w-[5.75rem] w-[5.75rem] px-3 tabular-nums",
-  l3m: "left-[23.75rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
-  l6m: "left-[30rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
+  id: "left-0 min-w-[24rem] w-[24rem] px-3",
+  stock: "left-[24rem] min-w-[5.75rem] w-[5.75rem] px-3 tabular-nums",
+  l3m: "left-[29.75rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
+  l6m: "left-[36rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
 } as const;
 
 export const FREEZE_EDGE = "shadow-[4px_0_8px_-4px_rgba(28,25,23,0.18)]";
@@ -21,13 +22,39 @@ export function freezeBody(col: string, bg: string): string {
   return cn("sticky z-20 py-2.5", col, bg);
 }
 
-/** Stronger zebra contrast for dense forecast grids. */
+export function hasMissingRsp(row: Pick<SopSkuRow, "retail_price">): boolean {
+  return row.retail_price == null || row.retail_price <= 0;
+}
+
+/** Stock on hand below 3× L3M monthly avg (established SKUs only). */
+export function hasLowL3mCover(
+  row: Pick<SopSkuRow, "is_npd" | "l3m_qty" | "current_stock">,
+): boolean {
+  if (row.is_npd) return false;
+  if (!Number.isFinite(row.l3m_qty) || row.l3m_qty <= 0) return false;
+  return row.current_stock < 3 * row.l3m_qty;
+}
+
+/**
+ * Row background priority: focus → no RSP → low L3M cover → year shortfall → zebra.
+ */
 export function rowStripeBg(
   index: number,
-  opts?: { highlight?: boolean; warn?: boolean },
+  opts?: {
+    highlight?: boolean;
+    missingRsp?: boolean;
+    lowCover?: boolean;
+    warn?: boolean;
+  },
 ): { row: string; freeze: string } {
   if (opts?.highlight) {
     return { row: "bg-emerald-50", freeze: "bg-emerald-50" };
+  }
+  if (opts?.missingRsp) {
+    return { row: "bg-rose-100/90", freeze: "bg-rose-100" };
+  }
+  if (opts?.lowCover) {
+    return { row: "bg-sky-100/90", freeze: "bg-sky-100" };
   }
   if (opts?.warn) {
     return { row: "bg-amber-50/80", freeze: "bg-amber-50" };
@@ -55,4 +82,13 @@ export function isPlanMonth(
 ): boolean {
   if (readOnly) return false;
   return month >= currentMonth;
+}
+
+/** True when `year`/`month` is the real calendar month happening today. */
+export function isCurrentCalendarMonth(
+  year: number,
+  month: number,
+  now: Date = new Date(),
+): boolean {
+  return year === now.getFullYear() && month === now.getMonth() + 1;
 }

@@ -277,6 +277,7 @@ export function mergeLiveSkuRows(
     );
     return {
       ...base,
+      bom_components: base.bom_components ?? [],
       l3m_qty: (online?.l3m_qty ?? 0) + (offline?.l3m_qty ?? 0),
       l3m_post_tax: (online?.l3m_post_tax ?? 0) + (offline?.l3m_post_tax ?? 0),
       l6m_qty: (online?.l6m_qty ?? 0) + (offline?.l6m_qty ?? 0),

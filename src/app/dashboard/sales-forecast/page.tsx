@@ -21,6 +21,10 @@ import {
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
+import {
+  franchisesForRow,
+  rowMatchesFranchiseFilter,
+} from "@/lib/sales-forecast/franchise-rollup";
 import { FORECAST_CSV_HEADERS, MONTHS } from "@/lib/sales-forecast/constants";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn, formatDateShort } from "@/lib/utils";
@@ -35,12 +39,19 @@ import {
   CombinedSkuBody,
   EditableSkuBody,
   FranchiseBody,
+  InactiveMonthHeaders,
+  InactiveSkuBody,
   SavePlanButton,
   SkuMonthHeaders,
 } from "./live-panels";
 import { FREEZE, FREEZE_EDGE, freezeHead } from "./table-utils";
 import { TargetsCard } from "./targets-card";
-import { collectDirtyLines, draftsFromRows, type GroupDrafts, unionChannelSkuRows } from "./view-helpers";
+import {
+  collectDirtyLines,
+  draftsFromRows,
+  type GroupDrafts,
+  unionChannelSkuRows,
+} from "./view-helpers";
 
 type SortKey =
   | "sku_code"
@@ -53,10 +64,7 @@ type TypeFilter = "single" | "bundle";
 type NpdFilter = "npd" | "established";
 type ViewMode = "sku" | "franchise";
 type Workspace = SopChannelGroup | "combined";
-
-function franchiseLabel(row: SopSkuRow): string {
-  return row.is_bundle ? "Bundles" : (row.franchise_name ?? "Unmapped");
-}
+type InactiveScope = SopChannelGroup | "both";
 
 function emptyTargetMap(): Record<number, string> {
   return Object.fromEntries(MONTHS.map((month) => [month, "0"]));
@@ -121,10 +129,12 @@ function SalesForecastClient() {
     Record<string, SopChannelGroup | "">
   >({});
   const [inactiveOpen, setInactiveOpen] = useState(false);
-  const [inactiveGroup, setInactiveGroup] =
-    useState<SopChannelGroup>("online");
+  const [inactiveGroup, setInactiveGroup] = useState<InactiveScope>("online");
   const [inactiveDraft, setInactiveDraft] = useState<Set<string>>(new Set());
   const [inactiveSearch, setInactiveSearch] = useState("");
+  const [pendingInactiveIds, setPendingInactiveIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const draftsRef = useRef<Record<SopChannelGroup, GroupDrafts>>({
@@ -196,13 +206,25 @@ function SalesForecastClient() {
     [draftsStore],
   );
 
+  function inactiveDraftForScope(
+    scope: InactiveScope,
+    data: SopYearForecast | null,
+  ): Set<string> {
+    if (!data) return new Set();
+    if (scope === "both") {
+      return new Set([
+        ...data.inactive_sku_ids.online,
+        ...data.inactive_sku_ids.offline,
+      ]);
+    }
+    return new Set(data.inactive_sku_ids[scope] ?? []);
+  }
+
   function openInactiveDialog() {
-    const group: SopChannelGroup =
+    const group: InactiveScope =
       workspace === "offline" ? "offline" : "online";
     setInactiveGroup(group);
-    setInactiveDraft(
-      new Set(yearData?.inactive_sku_ids[group] ?? []),
-    );
+    setInactiveDraft(inactiveDraftForScope(group, yearData));
     setInactiveSearch("");
     setInactiveOpen(true);
   }
@@ -226,6 +248,10 @@ function SalesForecastClient() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on year change
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setPendingInactiveIds(new Set());
+  }, [workspace, year]);
 
   const payload = yearData
     ? combined
@@ -256,37 +282,52 @@ function SalesForecastClient() {
     return yearData.groups[workspace].rows;
   }, [yearData, workspace, combined]);
 
+  const inactiveTableRows = useMemo(() => {
+    if (!yearData) return [];
+    if (combined) {
+      return unionChannelSkuRows(
+        yearData.groups.online.inactive_rows ?? [],
+        yearData.groups.offline.inactive_rows ?? [],
+      );
+    }
+    return yearData.groups[workspace].inactive_rows ?? [];
+  }, [yearData, workspace, combined]);
+
   const franchises = useMemo(() => {
     const names = new Set<string>();
     for (const row of tableRows) {
-      if (row.is_bundle) names.add("Bundles");
-      else if (row.franchise_name) names.add(row.franchise_name);
-      else names.add("Unmapped");
+      for (const name of franchisesForRow(row)) names.add(name);
     }
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [tableRows]);
 
+  const filterSkuRows = useCallback(
+    (rows: typeof tableRows) => {
+      const q = debouncedSearch.trim().toLowerCase();
+      return rows.filter((row) => {
+        if (typeFilter.length === 1) {
+          if (typeFilter[0] === "bundle" && !row.is_bundle) return false;
+          if (typeFilter[0] === "single" && row.is_bundle) return false;
+        }
+        if (npdFilter.length === 1) {
+          if (npdFilter[0] === "npd" && !row.is_npd) return false;
+          if (npdFilter[0] === "established" && row.is_npd) return false;
+        }
+        if (!rowMatchesFranchiseFilter(row, franchiseFilter)) return false;
+        if (!q) return true;
+        const franchiseHay = franchisesForRow(row).join(" ").toLowerCase();
+        return (
+          row.sku_code.toLowerCase().includes(q) ||
+          (row.name ?? "").toLowerCase().includes(q) ||
+          franchiseHay.includes(q)
+        );
+      });
+    },
+    [debouncedSearch, typeFilter, npdFilter, franchiseFilter],
+  );
+
   const filteredRows = useMemo(() => {
-    const q = debouncedSearch.trim().toLowerCase();
-    const rows = tableRows.filter((row) => {
-      if (typeFilter.length === 1) {
-        if (typeFilter[0] === "bundle" && !row.is_bundle) return false;
-        if (typeFilter[0] === "single" && row.is_bundle) return false;
-      }
-      if (npdFilter.length === 1) {
-        if (npdFilter[0] === "npd" && !row.is_npd) return false;
-        if (npdFilter[0] === "established" && row.is_npd) return false;
-      }
-      if (franchiseFilter.length > 0) {
-        if (!franchiseFilter.includes(franchiseLabel(row))) return false;
-      }
-      if (!q) return true;
-      return (
-        row.sku_code.toLowerCase().includes(q) ||
-        (row.name ?? "").toLowerCase().includes(q) ||
-        (row.franchise_name ?? "").toLowerCase().includes(q)
-      );
-    });
+    const rows = filterSkuRows(tableRows);
     return [...rows].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -294,9 +335,7 @@ function SalesForecastClient() {
           cmp = a.sku_code.localeCompare(b.sku_code);
           break;
         case "franchise_name":
-          cmp = (a.franchise_name ?? (a.is_bundle ? "Bundles" : "")).localeCompare(
-            b.franchise_name ?? (b.is_bundle ? "Bundles" : ""),
-          );
+          cmp = franchisesForRow(a)[0]!.localeCompare(franchisesForRow(b)[0]!);
           break;
         case "current_stock":
           cmp = a.current_stock - b.current_stock;
@@ -310,15 +349,12 @@ function SalesForecastClient() {
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [
-    tableRows,
-    debouncedSearch,
-    typeFilter,
-    npdFilter,
-    franchiseFilter,
-    sortKey,
-    sortDir,
-  ]);
+  }, [tableRows, filterSkuRows, sortKey, sortDir]);
+
+  const filteredInactiveRows = useMemo(() => {
+    const rows = filterSkuRows(inactiveTableRows);
+    return [...rows].sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+  }, [inactiveTableRows, filterSkuRows]);
 
   const onDraft = useCallback(
     (skuId: string, month: number, field: "qty" | "disc", value: string) => {
@@ -467,6 +503,69 @@ function SalesForecastClient() {
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to save inactive SKUs",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function togglePendingInactive(skuId: string) {
+    setPendingInactiveIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(skuId)) next.delete(skuId);
+      else next.add(skuId);
+      return next;
+    });
+  }
+
+  async function savePendingInactive(scope: InactiveScope) {
+    if (!yearData || yearData.read_only) return;
+    if (pendingInactiveIds.size === 0) return;
+
+    const n = pendingInactiveIds.size;
+    const scopeLabel =
+      scope === "both"
+        ? "Online and Offline"
+        : scope === "online"
+          ? "Online"
+          : "Offline";
+    if (
+      !confirm(
+        `Mark ${n} SKU${n === 1 ? "" : "s"} inactive for ${scopeLabel}? They will leave that channel’s forecast table.`,
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const groups: SopChannelGroup[] =
+        scope === "both" ? ["online", "offline"] : [scope];
+      let lastForecast: SopYearForecast | null = null;
+      for (const group of groups) {
+        const nextIds = [
+          ...new Set([
+            ...(yearData.inactive_sku_ids[group] ?? []),
+            ...pendingInactiveIds,
+          ]),
+        ];
+        const res = await fetch("/api/sales-forecast/inactive-skus", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ year, group, sku_ids: nextIds }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to mark SKUs inactive");
+        }
+        if (data.forecast) lastForecast = data.forecast as SopYearForecast;
+      }
+      if (lastForecast) applyYearData(lastForecast);
+      else await load();
+      setPendingInactiveIds(new Set());
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to mark SKUs inactive",
       );
     } finally {
       setSaving(false);
@@ -729,6 +828,7 @@ function SalesForecastClient() {
                     : "Month headers show the running total of entered values. Past months are actuals."
                   : "Read-only sum of SKU plans and history. Edit quantities on the SKU view."}
               </CardDescription>
+              <ForecastRowLegend className="mt-3" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
@@ -791,15 +891,48 @@ function SalesForecastClient() {
                   onSave={() => void saveLines()}
                 />
               ) : null}
+              {viewMode === "sku" &&
+              !combined &&
+              !readOnly &&
+              pendingInactiveIds.size > 0 &&
+              activeGroup ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => setPendingInactiveIds(new Set())}
+                  >
+                    Clear ({pendingInactiveIds.size})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => void savePendingInactive(activeGroup)}
+                  >
+                    Mark inactive ({activeGroup === "online" ? "Online" : "Offline"})
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={saving}
+                    onClick={() => void savePendingInactive("both")}
+                  >
+                    Mark inactive (both)
+                  </Button>
+                </>
+              ) : null}
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
             <p className="p-5 text-sm text-stone-500">Loading forecast…</p>
-          ) : !yearData || filteredRows.length === 0 ? (
+          ) : !yearData ? (
+            <p className="p-5 text-sm text-stone-500">No forecast data.</p>
+          ) : filteredRows.length === 0 ? (
             <p className="p-5 text-sm text-stone-500">
-              No SKUs match the current filters.
+              No active SKUs match the current filters.
             </p>
           ) : viewMode === "franchise" ? (
             <div className="max-h-[min(70vh,calc(100vh-12rem))] overflow-auto">
@@ -866,6 +999,7 @@ function SalesForecastClient() {
                   filteredRows={filteredRows}
                   workspace={workspace}
                   combined={combined}
+                  franchiseFilter={franchiseFilter}
                   sortKey={sortKey}
                   sortDir={sortDir}
                 />
@@ -954,6 +1088,7 @@ function SalesForecastClient() {
                 ) : (
                   <EditableSkuBody
                     rows={filteredRows}
+                    year={yearData.year}
                     currentMonth={yearData.current_month}
                     readOnly={readOnly}
                     focusSku={focusSku}
@@ -963,6 +1098,10 @@ function SalesForecastClient() {
                     registerRow={registerRow}
                     draftSeed={draftSeed}
                     workspace={workspace}
+                    pendingInactiveIds={pendingInactiveIds}
+                    onTogglePendingInactive={
+                      readOnly || combined ? undefined : togglePendingInactive
+                    }
                   />
                 )}
               </table>
@@ -970,6 +1109,67 @@ function SalesForecastClient() {
           )}
         </CardContent>
       </Card>
+
+      {viewMode === "sku" &&
+      yearData &&
+      !loading &&
+      filteredInactiveRows.length > 0 ? (
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-stone-200">
+            <CardTitle>Inactive SKUs (sales reference)</CardTitle>
+            <CardDescription>
+              Hidden from the main plan table for this channel, but sales history
+              and L3M/L6M remain available for reference. Re-enable via Inactive
+              SKUs.
+            </CardDescription>
+            <ForecastRowLegend className="mt-3" />
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="max-h-[min(50vh,calc(100vh-16rem))] overflow-auto">
+              <table className="w-full min-w-[90rem] border-separate border-spacing-0 text-left text-sm">
+                <thead>
+                  <tr className="text-stone-500">
+                    <th className={freezeHead(FREEZE.id)}>SKU</th>
+                    <th className={freezeHead(FREEZE.stock)}>Stock</th>
+                    <th className={freezeHead(FREEZE.l3m)}>L3M qty</th>
+                    <th className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}>
+                      L6M qty
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Type
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Franchise
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      RSP
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      On order
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      OOS
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      L3M post-tax
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      L6M post-tax
+                    </th>
+                    <InactiveMonthHeaders year={yearData.year} />
+                  </tr>
+                </thead>
+                <InactiveSkuBody
+                  rows={filteredInactiveRows}
+                  year={yearData.year}
+                  currentMonth={yearData.current_month}
+                  draftSeed={draftSeed}
+                />
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Dialog
         open={mapOpen}
@@ -1020,35 +1220,30 @@ function SalesForecastClient() {
         open={inactiveOpen}
         onClose={() => setInactiveOpen(false)}
         title="Inactive SKUs by channel"
-        description="Inactive SKUs are hidden from that channel’s main forecast table. Online and Offline are independent."
+        description="Inactive SKUs are hidden from that channel’s main forecast table. Choose Both to edit one list applied to Online and Offline together."
         className="max-w-xl"
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant={inactiveGroup === "online" ? "default" : "outline"}
-              onClick={() => {
-                setInactiveGroup("online");
-                setInactiveDraft(
-                  new Set(yearData?.inactive_sku_ids.online ?? []),
-                );
-              }}
-            >
-              Online
-            </Button>
-            <Button
-              size="sm"
-              variant={inactiveGroup === "offline" ? "default" : "outline"}
-              onClick={() => {
-                setInactiveGroup("offline");
-                setInactiveDraft(
-                  new Set(yearData?.inactive_sku_ids.offline ?? []),
-                );
-              }}
-            >
-              Offline
-            </Button>
+            {(
+              [
+                ["online", "Online"],
+                ["offline", "Offline"],
+                ["both", "Both"],
+              ] as const
+            ).map(([id, label]) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={inactiveGroup === id ? "default" : "outline"}
+                onClick={() => {
+                  setInactiveGroup(id);
+                  setInactiveDraft(inactiveDraftForScope(id, yearData));
+                }}
+              >
+                {label}
+              </Button>
+            ))}
           </div>
           <Input
             className="h-8 w-44 text-xs"
@@ -1058,6 +1253,7 @@ function SalesForecastClient() {
           />
           <span className="text-xs text-stone-500">
             {inactiveDraft.size} inactive
+            {inactiveGroup === "both" ? " (both channels)" : ""}
           </span>
         </div>
         <div className="max-h-80 space-y-1 overflow-auto">
@@ -1116,11 +1312,49 @@ function SalesForecastClient() {
             Cancel
           </Button>
           <Button disabled={saving} onClick={() => void saveInactiveSkus()}>
-            Save inactive set
+            {inactiveGroup === "both"
+              ? "Save for both channels"
+              : "Save inactive set"}
           </Button>
         </div>
       </Dialog>
     </PageShell>
+  );
+}
+
+function LegendSwatch({ className }: { className: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-block h-3 w-3 shrink-0 rounded-sm border border-stone-300",
+        className,
+      )}
+      aria-hidden
+    />
+  );
+}
+
+function ForecastRowLegend({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-stone-600",
+        className,
+      )}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <LegendSwatch className="bg-rose-100 border-rose-200" />
+        No RSP recorded
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <LegendSwatch className="bg-sky-100 border-sky-200" />
+        Stock &lt; 3 months of L3M (excl. NPD)
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <LegendSwatch className="bg-amber-50 border-amber-200" />
+        Remaining-year shortfall (plan &gt; stock + on order)
+      </span>
+    </div>
   );
 }
 

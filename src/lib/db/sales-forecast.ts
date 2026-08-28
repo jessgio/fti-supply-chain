@@ -17,6 +17,7 @@ import {
 import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
 import { fetchAllRows, fetchAllRpc } from "@/lib/supabase/fetch-all";
 import type {
+  SopBomComponent,
   SopForecastPayload,
   SopForecastUpload,
   SopMonthPlan,
@@ -190,6 +191,23 @@ function monthsWithSales(
   return count;
 }
 
+/** Buildable bundle units = min over BOM of floor(component stock / qty per bundle). */
+function bundleStockFromBom(
+  components: SopBomComponent[],
+  stockBySku: Map<string, number>,
+): number {
+  if (components.length === 0) return 0;
+  let min = Infinity;
+  for (const component of components) {
+    const qtyPer = component.qty_per_bundle;
+    if (!Number.isFinite(qtyPer) || qtyPer <= 0) continue;
+    const onHand = stockBySku.get(component.sku_id) ?? 0;
+    const buildable = Math.floor(onHand / qtyPer);
+    if (buildable < min) min = buildable;
+  }
+  return Number.isFinite(min) ? Math.max(0, min) : 0;
+}
+
 function buildGroupRows(
   skus: EligibleSku[],
   year: number,
@@ -205,6 +223,7 @@ function buildGroupRows(
   stockBySku: Map<string, number>,
   onOrderBySku: Map<string, number>,
   oosByCode: Map<string, string | null>,
+  bomByBundle: Map<string, SopBomComponent[]>,
 ): { rows: SopSkuRow[]; plannedByMonth: Map<number, number> } {
   const plannedByMonth = new Map<number, number>();
   const rows: SopSkuRow[] = skus.map((sku) => {
@@ -259,13 +278,19 @@ function buildGroupRows(
         (year === currentYear && month >= currentMonth);
       if (isRemaining) remainingYearQty += projected_qty;
     }
-    const current_stock = stockBySku.get(sku.id) ?? 0;
+    const bom_components = sku.is_bundle
+      ? (bomByBundle.get(sku.id) ?? [])
+      : [];
+    const current_stock = sku.is_bundle
+      ? bundleStockFromBom(bom_components, stockBySku)
+      : (stockBySku.get(sku.id) ?? 0);
     const on_order_qty = onOrderBySku.get(sku.id) ?? 0;
     return {
       sku_id: sku.id,
       sku_code: sku.sku_code,
       name: sku.name,
       is_bundle: sku.is_bundle,
+      bom_components,
       franchise_name: sku.franchise_name,
       retail_price: sku.retail_price,
       current_stock,
@@ -324,6 +349,7 @@ export async function loadSopYearForecast(
     monthlyActualsRes,
     restockResult,
     inactiveRes,
+    bomRows,
   ] = await Promise.all([
     listEligibleSkus(supabase),
     loadStockBySkuId(supabase),
@@ -377,11 +403,58 @@ export async function loadSopYearForecast(
     supabase
       .from("sop_sku_channel_inactive")
       .select("sku_id, sop_group"),
+    fetchAllRows<{
+      bundle_sku_id: string;
+      component_sku_id: string;
+      qty_per_bundle: number;
+      component: {
+        sku_code: string;
+        retail_price: number | null;
+        product_franchises: { name: string } | { name: string }[] | null;
+      } | {
+        sku_code: string;
+        retail_price: number | null;
+        product_franchises: { name: string } | { name: string }[] | null;
+      }[] | null;
+    }>(() =>
+      supabase
+        .from("bundle_components")
+        .select(
+          "bundle_sku_id, component_sku_id, qty_per_bundle, component:component_sku_id(sku_code, retail_price, product_franchises(name))",
+        )
+        .order("created_at"),
+    ),
   ]);
   if (targetsRes.error) throw targetsRes.error;
   if (plansRes.error) throw plansRes.error;
   if (uploadsRes.error) throw uploadsRes.error;
   if (inactiveRes.error) throw inactiveRes.error;
+
+  const bomByBundle = new Map<string, SopBomComponent[]>();
+  for (const row of bomRows) {
+    const component = Array.isArray(row.component)
+      ? row.component[0]
+      : row.component;
+    const code = component?.sku_code;
+    if (!code || !row.component_sku_id) continue;
+    const franchise = component?.product_franchises;
+    const franchiseName = Array.isArray(franchise)
+      ? (franchise[0]?.name ?? null)
+      : (franchise?.name ?? null);
+    const list = bomByBundle.get(row.bundle_sku_id) ?? [];
+    list.push({
+      sku_id: row.component_sku_id,
+      sku_code: code,
+      qty_per_bundle: Number(row.qty_per_bundle),
+      franchise_name: franchiseName,
+      retail_price:
+        component?.retail_price == null ? null : Number(component.retail_price),
+    });
+    bomByBundle.set(row.bundle_sku_id, list);
+  }
+  for (const [, list] of bomByBundle) {
+    list.sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+  }
 
   const skuIds = new Set(skus.map((s) => s.id));
   const actualByGroup = {
@@ -469,9 +542,10 @@ export async function loadSopYearForecast(
 
   const groups = {} as Record<SopChannelGroup, SopForecastPayload>;
   for (const group of SOP_GROUPS) {
-    const groupSkus = skus.filter((sku) => !inactiveByGroup[group].has(sku.id));
+    const activeSkus = skus.filter((sku) => !inactiveByGroup[group].has(sku.id));
+    const inactiveSkus = skus.filter((sku) => inactiveByGroup[group].has(sku.id));
     const { rows, plannedByMonth } = buildGroupRows(
-      groupSkus,
+      activeSkus,
       year,
       currentYear,
       currentMonth,
@@ -482,6 +556,21 @@ export async function loadSopYearForecast(
       stockBySku,
       onOrderBySku,
       oosByCode,
+      bomByBundle,
+    );
+    const { rows: inactive_rows } = buildGroupRows(
+      inactiveSkus,
+      year,
+      currentYear,
+      currentMonth,
+      l3mStart,
+      l6mStart,
+      actualByGroup[group],
+      plansByGroup[group],
+      stockBySku,
+      onOrderBySku,
+      oosByCode,
+      bomByBundle,
     );
     groups[group] = {
       year,
@@ -501,6 +590,7 @@ export async function loadSopYearForecast(
         };
       }),
       rows,
+      inactive_rows,
       uploads: uploads.filter((u) => u.sop_group === group),
       inactive_sku_ids: inactive_sku_ids[group],
     };

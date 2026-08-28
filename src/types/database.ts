@@ -31,11 +31,23 @@ export interface SopMonthPlan {
   upload_id: string | null;
 }
 
+export interface SopBomComponent {
+  sku_id: string;
+  sku_code: string;
+  qty_per_bundle: number;
+  /** Component franchise; null when unmapped / packaging / unknown. */
+  franchise_name: string | null;
+  /** Component RSP for allocating bundle net sales across franchises. */
+  retail_price: number | null;
+}
+
 export interface SopSkuRow {
   sku_id: string;
   sku_code: string;
   name: string | null;
   is_bundle: boolean;
+  /** BOM lines for bundles; empty for singles. */
+  bom_components: SopBomComponent[];
   franchise_name: string | null;
   retail_price: number | null;
   current_stock: number;
@@ -98,6 +110,8 @@ export interface SopForecastPayload {
   }>;
   targets: SopMonthlyTarget[];
   rows: SopSkuRow[];
+  /** Channel-inactive SKUs kept for sales reference (not in the main plan table). */
+  inactive_rows: SopSkuRow[];
   uploads: SopForecastUpload[];
   inactive_sku_ids: string[];
 }
@@ -111,6 +125,65 @@ export interface SopYearForecast {
   eligible_skus: SopEligibleSkuRef[];
   inactive_sku_ids: Record<SopChannelGroup, string[]>;
   groups: Record<SopChannelGroup, SopForecastPayload>;
+}
+
+export interface SalesAccuracySkuRow {
+  sku_id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  franchise_name: string | null;
+  plan_qty: number;
+  actual_qty: number;
+  plan_post_tax: number;
+  actual_post_tax: number;
+  wmape_qty: number | null;
+  bias_qty: number | null;
+  wmape_post_tax: number | null;
+  bias_post_tax: number | null;
+  sku_month_count: number;
+}
+
+/** Team (or SKU-set) accuracy metrics for one period. */
+export interface SalesAccuracyMetrics {
+  plan_qty: number;
+  actual_qty: number;
+  plan_post_tax: number;
+  actual_post_tax: number;
+  wmape_qty: number | null;
+  bias_qty: number | null;
+  wmape_post_tax: number | null;
+  bias_post_tax: number | null;
+  sku_count: number;
+  sku_month_count: number;
+}
+
+export interface SalesAccuracyMonthSlice extends SalesAccuracyMetrics {
+  month: number;
+  skus: SalesAccuracySkuRow[];
+}
+
+/** Cumulative YTD accuracy through `through_month` (team totals only). */
+export interface SalesAccuracyYtdRunningSlice extends SalesAccuracyMetrics {
+  through_month: number;
+}
+
+export interface SalesAccuracyGroupSummary extends SalesAccuracyMetrics {
+  group: SopChannelGroup | "combined";
+  /** Full year-to-date (all completed months) SKU drill-down. */
+  skus: SalesAccuracySkuRow[];
+  /** One slice per completed calendar month. */
+  months: SalesAccuracyMonthSlice[];
+  /** Running annual: cumulative metrics after each completed month. */
+  ytd_running: SalesAccuracyYtdRunningSlice[];
+}
+
+export interface SalesAccuracyPayload {
+  year: number;
+  current_month: number;
+  completed_months: number[];
+  groups: Record<SopChannelGroup, SalesAccuracyGroupSummary>;
+  combined: SalesAccuracyGroupSummary;
 }
 
 export interface Sku {

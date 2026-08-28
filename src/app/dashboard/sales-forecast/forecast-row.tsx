@@ -1,10 +1,13 @@
 "use client";
 
-import { memo, useRef } from "react";
+import { memo, useRef, type ReactNode, type RefObject } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
 import {
+  eomProjectionFromMtd,
+  eomVsForecastPct,
   impliedDiscountPct,
+  pctVsBaseline,
   postTaxNet,
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
@@ -14,6 +17,9 @@ import {
   FREEZE,
   FREEZE_EDGE,
   freezeBody,
+  hasLowL3mCover,
+  hasMissingRsp,
+  isCurrentCalendarMonth,
   isPlanMonth,
   rowStripeBg,
 } from "./table-utils";
@@ -42,21 +48,78 @@ function formatDiscLabel(pct: number | null | undefined): string {
   return `${formatNumber(pct, 1)}% disc`;
 }
 
+function formatPctVsL3m(pct: number | null, label: string): string {
+  if (pct == null) return `${label} — vs L3M`;
+  const sign = pct > 0 ? "+" : "";
+  return `${label} ${sign}${formatNumber(pct, 0)}% vs L3M`;
+}
+
+function pctCueClass(pct: number | null): string {
+  if (pct == null) return "text-stone-400";
+  return pct >= 0 ? "text-emerald-700" : "text-amber-700";
+}
+
+function formatEomProgress(pct: number | null): string {
+  if (pct == null) return "—";
+  return `${formatNumber(pct, 0)}%`;
+}
+
+function eomProgressClass(pct: number | null): string {
+  if (pct == null) return "text-stone-400";
+  if (pct >= 100) return "text-emerald-700";
+  if (pct >= 80) return "text-amber-700";
+  return "text-rose-700";
+}
+
+function ReadonlyMetricCell({
+  qty,
+  postTax,
+  disc,
+  footer,
+  className,
+}: {
+  qty: number;
+  postTax: number;
+  disc: number | null | undefined;
+  footer?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <td
+      className={cn(
+        "px-3 py-2.5 align-top text-xs text-stone-600",
+        className,
+      )}
+    >
+      <div>{formatNumber(qty, 1)} u</div>
+      <div>{formatCurrency(postTax)}</div>
+      <div className="text-[11px] text-stone-500">{formatDiscLabel(disc)}</div>
+      {footer}
+    </td>
+  );
+}
+
 const PlanMonthCell = memo(function PlanMonthCell({
   skuCode,
   skuId,
   month,
   retailPrice,
+  l3mQty,
+  l3mPostTax,
   initialQty,
   initialDisc,
   warn,
   onDraft,
   onDraftSettle,
+  eomPostTax,
+  progressRef,
 }: {
   skuCode: string;
   skuId: string;
   month: number;
   retailPrice: number | null;
+  l3mQty: number;
+  l3mPostTax: number;
   initialQty: string;
   initialDisc: string;
   warn: boolean;
@@ -67,18 +130,56 @@ const PlanMonthCell = memo(function PlanMonthCell({
     value: string,
   ) => void;
   onDraftSettle: () => void;
+  /** When set, live-update EOM vs plan % in the paired progress cell. */
+  eomPostTax?: number;
+  progressRef?: RefObject<HTMLParagraphElement | null>;
 }) {
   const qtyRef = useRef(initialQty);
   const discRef = useRef(initialDisc);
   const postTaxRef = useRef<HTMLParagraphElement>(null);
+  const qtyCueRef = useRef<HTMLParagraphElement>(null);
+  const netCueRef = useRef<HTMLParagraphElement>(null);
 
-  function paintPostTax() {
-    const el = postTaxRef.current;
-    if (!el) return;
-    el.textContent = formatCurrency(
-      livePostTax(qtyRef.current, discRef.current, retailPrice),
-    );
+  function paintCues() {
+    const qtyNum = Number(qtyRef.current || 0);
+    const qty = Number.isFinite(qtyNum) ? qtyNum : 0;
+    const postTax = livePostTax(qtyRef.current, discRef.current, retailPrice);
+    const qtyPct = pctVsBaseline(qty, l3mQty);
+    const netPct = pctVsBaseline(postTax, l3mPostTax);
+
+    if (postTaxRef.current) {
+      postTaxRef.current.textContent = formatCurrency(postTax);
+    }
+    if (qtyCueRef.current) {
+      qtyCueRef.current.textContent = formatPctVsL3m(qtyPct, "Qty");
+      qtyCueRef.current.className = cn(
+        "mt-0.5 text-[10px] leading-tight",
+        pctCueClass(qtyPct),
+      );
+    }
+    if (netCueRef.current) {
+      netCueRef.current.textContent = formatPctVsL3m(netPct, "Net");
+      netCueRef.current.className = cn(
+        "text-[10px] leading-tight",
+        pctCueClass(netPct),
+      );
+    }
+    if (progressRef?.current && eomPostTax != null) {
+      const progress = eomVsForecastPct(eomPostTax, postTax);
+      progressRef.current.textContent = formatEomProgress(progress);
+      progressRef.current.className = cn(
+        "text-sm font-semibold tabular-nums",
+        eomProgressClass(progress),
+      );
+    }
   }
+
+  const initialPostTax = livePostTax(initialQty, initialDisc, retailPrice);
+  const initialQtyPct = pctVsBaseline(
+    Number(initialQty || 0) || 0,
+    l3mQty,
+  );
+  const initialNetPct = pctVsBaseline(initialPostTax, l3mPostTax);
 
   return (
     <td className={`px-3 py-2.5 align-top ${warn ? "bg-amber-100/80" : ""}`}>
@@ -93,7 +194,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
             const value = e.target.value;
             qtyRef.current = value;
             onDraft(skuId, month, "qty", value);
-            paintPostTax();
+            paintCues();
           }}
           onBlur={onDraftSettle}
           aria-label={`${skuCode} ${MONTH_LABELS[month - 1]} qty`}
@@ -112,7 +213,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
             const value = e.target.value;
             discRef.current = value;
             onDraft(skuId, month, "disc", value);
-            paintPostTax();
+            paintCues();
           }}
           onBlur={onDraftSettle}
           aria-label={`${skuCode} ${MONTH_LABELS[month - 1]} discount %`}
@@ -121,7 +222,19 @@ const PlanMonthCell = memo(function PlanMonthCell({
         />
       </label>
       <p ref={postTaxRef} className="mt-1 text-[11px] text-stone-500">
-        {formatCurrency(livePostTax(initialQty, initialDisc, retailPrice))}
+        {formatCurrency(initialPostTax)}
+      </p>
+      <p
+        ref={qtyCueRef}
+        className={cn("mt-0.5 text-[10px] leading-tight", pctCueClass(initialQtyPct))}
+      >
+        {formatPctVsL3m(initialQtyPct, "Qty")}
+      </p>
+      <p
+        ref={netCueRef}
+        className={cn("text-[10px] leading-tight", pctCueClass(initialNetPct))}
+      >
+        {formatPctVsL3m(initialNetPct, "Net")}
       </p>
     </td>
   );
@@ -130,6 +243,7 @@ const PlanMonthCell = memo(function PlanMonthCell({
 export const ForecastRow = memo(function ForecastRow({
   row,
   rowIndex,
+  year,
   currentMonth,
   readOnly,
   highlight,
@@ -138,9 +252,12 @@ export const ForecastRow = memo(function ForecastRow({
   onDraft,
   onDraftSettle,
   registerRow,
+  pendingInactive,
+  onTogglePendingInactive,
 }: {
   row: SopSkuRow;
   rowIndex: number;
+  year: number;
   currentMonth: number;
   readOnly: boolean;
   highlight: boolean;
@@ -154,38 +271,116 @@ export const ForecastRow = memo(function ForecastRow({
   ) => void;
   onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
+  /** Staged for deactivation (not saved yet). */
+  pendingInactive?: boolean;
+  onTogglePendingInactive?: (skuId: string) => void;
 }) {
   const shortfall = row.shortfall_qty;
+  const bomComponents = row.bom_components ?? [];
+  const missingRsp = hasMissingRsp(row);
+  const lowCover = hasLowL3mCover(row);
   const stripe = rowStripeBg(rowIndex, {
     highlight,
+    missingRsp,
+    lowCover,
     warn: shortfall > 0,
   });
+  const canStageInactive =
+    Boolean(onTogglePendingInactive) && !combined && !readOnly;
+  const progressRef = useRef<HTMLParagraphElement>(null);
+
+  const bomLabel = bomComponents
+    .map(
+      (c) =>
+        `${c.sku_code}×${
+          Number.isInteger(c.qty_per_bundle)
+            ? c.qty_per_bundle
+            : formatNumber(c.qty_per_bundle, 2)
+        }`,
+    )
+    .join(" · ");
 
   return (
     <tr
       ref={(el) => registerRow(row.sku_id, el)}
-      className={cn("border-t border-stone-200", stripe.row)}
+      className={cn(
+        "border-t border-stone-200",
+        stripe.row,
+        pendingInactive ? "bg-amber-50/80" : null,
+      )}
     >
       <td
         className={cn(
           freezeBody(FREEZE.id, stripe.freeze),
-          "font-medium text-stone-900",
+          "align-top font-medium text-stone-900",
         )}
       >
-        <span className="block whitespace-nowrap">{row.sku_code}</span>
-        {row.name ? (
-          <span className="mt-0.5 block text-xs font-normal leading-snug text-stone-500">
-            {row.name}
-          </span>
-        ) : null}
-        {row.is_npd ? (
-          <Badge
-            className="mt-1 bg-violet-100 text-violet-800"
-            title="Fewer than 3 months with sales in L3M"
-          >
-            NPD ({row.l3m_months_with_sales}/3)
-          </Badge>
-        ) : null}
+        <div className="flex items-start gap-2">
+          {canStageInactive ? (
+            <button
+              type="button"
+              className={cn(
+                "mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                pendingInactive
+                  ? "border-amber-600 bg-amber-100 text-amber-900"
+                  : "border-stone-300 bg-white text-stone-500 hover:border-stone-400 hover:text-stone-700",
+              )}
+              title={
+                pendingInactive
+                  ? "Queued to mark inactive — click again to undo"
+                  : "Queue this SKU to mark inactive for this channel"
+              }
+              aria-pressed={pendingInactive}
+              aria-label={
+                pendingInactive
+                  ? `Undo queue inactive for ${row.sku_code}`
+                  : `Queue ${row.sku_code} inactive`
+              }
+              onClick={() => onTogglePendingInactive?.(row.sku_id)}
+            >
+              {pendingInactive ? "Off" : "On"}
+            </button>
+          ) : null}
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <span className="block break-all text-[13px] leading-snug">
+              {row.sku_code}
+            </span>
+            {row.name ? (
+              <span className="mt-0.5 block break-words text-xs font-normal leading-snug text-stone-500">
+                {row.name}
+              </span>
+            ) : null}
+            {row.is_bundle && bomComponents.length > 0 ? (
+              <div
+                className="mt-1 flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] italic leading-snug text-stone-500"
+                title={bomLabel}
+              >
+                {bomComponents.map((c, i) => {
+                  const qty = Number.isInteger(c.qty_per_bundle)
+                    ? String(c.qty_per_bundle)
+                    : formatNumber(c.qty_per_bundle, 2);
+                  return (
+                    <span key={`${c.sku_code}-${i}`} className="inline">
+                      <span className="break-all">{c.sku_code}</span>
+                      <span className="not-italic">×{qty}</span>
+                      {i < bomComponents.length - 1 ? (
+                        <span className="text-stone-400"> ·</span>
+                      ) : null}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+            {row.is_npd ? (
+              <Badge
+                className="mt-1 bg-violet-100 text-violet-800"
+                title="Fewer than 3 months with sales in L3M"
+              >
+                NPD ({row.l3m_months_with_sales}/3)
+              </Badge>
+            ) : null}
+          </div>
+        </div>
       </td>
       <td className={freezeBody(FREEZE.stock, stripe.freeze)}>
         {formatNumber(row.current_stock)}
@@ -212,25 +407,87 @@ export const ForecastRow = memo(function ForecastRow({
       <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l6m_post_tax)}</td>
       {MONTHS.map((month) => {
-        const editable = !combined && isPlanMonth(month, currentMonth, readOnly);
+        const actual = row.months[month]?.actual;
+        const plan = row.months[month]?.plan;
+        const isCurrent = isCurrentCalendarMonth(year, month);
+        const editable =
+          !combined && isPlanMonth(month, currentMonth, readOnly);
+
+        if (isCurrent) {
+          const mtdQty = actual?.qty ?? 0;
+          const mtdPostTax = actual?.post_tax_net ?? 0;
+          const mtdDisc =
+            actual?.avg_discount_pct ??
+            impliedDiscountPct(mtdQty, row.retail_price, mtdPostTax);
+          const eomQty = eomProjectionFromMtd(mtdQty);
+          const eomPostTax = eomProjectionFromMtd(mtdPostTax);
+          const eomDisc =
+            eomQty > 0
+              ? impliedDiscountPct(eomQty, row.retail_price, eomPostTax)
+              : mtdDisc;
+
+          const planQty = editable
+            ? Number(getDrafts(row.sku_id, month, "qty") || 0) || 0
+            : (plan?.projected_qty ?? 0);
+          const planPostTax = editable
+            ? livePostTax(
+                getDrafts(row.sku_id, month, "qty"),
+                getDrafts(row.sku_id, month, "disc"),
+                row.retail_price,
+              )
+            : (plan?.post_tax_net ?? 0);
+          const planDisc = editable
+            ? Number(getDrafts(row.sku_id, month, "disc") || 0) || null
+            : (plan?.avg_discount_pct ?? null);
+          const progress = eomVsForecastPct(eomPostTax, planPostTax);
+
+          return (
+            <CurrentMonthFragment
+              key={month}
+              skuCode={row.sku_code}
+              skuId={row.sku_id}
+              month={month}
+              retailPrice={row.retail_price}
+              l3mQty={row.l3m_qty}
+              l3mPostTax={row.l3m_post_tax}
+              mtdQty={mtdQty}
+              mtdPostTax={mtdPostTax}
+              mtdDisc={mtdDisc}
+              eomQty={eomQty}
+              eomPostTax={eomPostTax}
+              eomDisc={eomDisc}
+              editable={editable}
+              planQty={planQty}
+              planPostTax={planPostTax}
+              planDisc={planDisc}
+              initialQty={getDrafts(row.sku_id, month, "qty")}
+              initialDisc={getDrafts(row.sku_id, month, "disc")}
+              warn={shortfall > 0}
+              progress={progress}
+              progressRef={progressRef}
+              onDraft={onDraft}
+              onDraftSettle={onDraftSettle}
+            />
+          );
+        }
+
         if (!editable) {
-          const actual = row.months[month]?.actual;
-          const plan = row.months[month]?.plan;
           const usePlan = combined && isPlanMonth(month, currentMonth, false);
           const qty = usePlan ? (plan?.projected_qty ?? 0) : (actual?.qty ?? 0);
           const postTax = usePlan
             ? (plan?.post_tax_net ?? 0)
             : (actual?.post_tax_net ?? 0);
           const disc = usePlan
-            ? plan?.avg_discount_pct ?? null
+            ? (plan?.avg_discount_pct ?? null)
             : (actual?.avg_discount_pct ??
               impliedDiscountPct(qty, row.retail_price, postTax));
           return (
-            <td key={month} className="px-3 py-2.5 align-top text-xs text-stone-600">
-              <div>{formatNumber(qty, 1)} u</div>
-              <div>{formatCurrency(postTax)}</div>
-              <div className="text-[11px] text-stone-500">{formatDiscLabel(disc)}</div>
-            </td>
+            <ReadonlyMetricCell
+              key={month}
+              qty={qty}
+              postTax={postTax}
+              disc={disc}
+            />
           );
         }
         return (
@@ -240,6 +497,8 @@ export const ForecastRow = memo(function ForecastRow({
             skuId={row.sku_id}
             month={month}
             retailPrice={row.retail_price}
+            l3mQty={row.l3m_qty}
+            l3mPostTax={row.l3m_post_tax}
             initialQty={getDrafts(row.sku_id, month, "qty")}
             initialDisc={getDrafts(row.sku_id, month, "disc")}
             warn={shortfall > 0}
@@ -251,3 +510,115 @@ export const ForecastRow = memo(function ForecastRow({
     </tr>
   );
 });
+
+/** Four cells for the live calendar month: MTD · EOM · Plan · %. */
+function CurrentMonthFragment({
+  skuCode,
+  skuId,
+  month,
+  retailPrice,
+  l3mQty,
+  l3mPostTax,
+  mtdQty,
+  mtdPostTax,
+  mtdDisc,
+  eomQty,
+  eomPostTax,
+  eomDisc,
+  editable,
+  planQty,
+  planPostTax,
+  planDisc,
+  initialQty,
+  initialDisc,
+  warn,
+  progress,
+  progressRef,
+  onDraft,
+  onDraftSettle,
+}: {
+  skuCode: string;
+  skuId: string;
+  month: number;
+  retailPrice: number | null;
+  l3mQty: number;
+  l3mPostTax: number;
+  mtdQty: number;
+  mtdPostTax: number;
+  mtdDisc: number | null | undefined;
+  eomQty: number;
+  eomPostTax: number;
+  eomDisc: number | null | undefined;
+  editable: boolean;
+  planQty: number;
+  planPostTax: number;
+  planDisc: number | null;
+  initialQty: string;
+  initialDisc: string;
+  warn: boolean;
+  progress: number | null;
+  progressRef: RefObject<HTMLParagraphElement | null>;
+  onDraft: (
+    skuId: string,
+    month: number,
+    field: "qty" | "disc",
+    value: string,
+  ) => void;
+  onDraftSettle: () => void;
+}) {
+  return (
+    <>
+      <ReadonlyMetricCell
+        qty={mtdQty}
+        postTax={mtdPostTax}
+        disc={mtdDisc}
+        className="bg-sky-50/60"
+      />
+      <ReadonlyMetricCell
+        qty={eomQty}
+        postTax={eomPostTax}
+        disc={eomDisc}
+        className="bg-sky-50/40"
+        footer={
+          <div className="mt-0.5 text-[10px] text-stone-400">run-rate</div>
+        }
+      />
+      {editable ? (
+        <PlanMonthCell
+          skuCode={skuCode}
+          skuId={skuId}
+          month={month}
+          retailPrice={retailPrice}
+          l3mQty={l3mQty}
+          l3mPostTax={l3mPostTax}
+          initialQty={initialQty}
+          initialDisc={initialDisc}
+          warn={warn}
+          onDraft={onDraft}
+          onDraftSettle={onDraftSettle}
+          eomPostTax={eomPostTax}
+          progressRef={progressRef}
+        />
+      ) : (
+        <ReadonlyMetricCell
+          qty={planQty}
+          postTax={planPostTax}
+          disc={planDisc}
+        />
+      )}
+      <td className="px-3 py-2.5 align-top">
+        <p
+          ref={progressRef}
+          className={cn(
+            "text-sm font-semibold tabular-nums",
+            eomProgressClass(progress),
+          )}
+          title="EOM projected post-tax ÷ plan post-tax"
+        >
+          {formatEomProgress(progress)}
+        </p>
+        <div className="mt-0.5 text-[10px] text-stone-400">EOM vs plan</div>
+      </td>
+    </>
+  );
+}

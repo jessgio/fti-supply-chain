@@ -74,3 +74,44 @@ export function remainingYearShortfall(
 ): number {
   return Math.max(0, remainingYearQty - onHand - onOrder);
 }
+
+/**
+ * Percent change vs a baseline (e.g. L3M monthly average).
+ * Positive = above baseline (bullish); negative = below (conservative).
+ * Returns null when baseline ≤ 0.
+ */
+export function pctVsBaseline(value: number, baseline: number): number | null {
+  if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) {
+    return null;
+  }
+  return ((value - baseline) / baseline) * 100;
+}
+
+/**
+ * Linear EOM run-rate from month-to-date: (mtd / dayOfMonth) × daysInMonth.
+ */
+export function eomProjectionFromMtd(
+  mtd: number,
+  asOf: Date = new Date(),
+): number {
+  if (!Number.isFinite(mtd) || mtd < 0) return 0;
+  const day = asOf.getDate();
+  if (day <= 0) return 0;
+  const daysInMonth = new Date(
+    asOf.getFullYear(),
+    asOf.getMonth() + 1,
+    0,
+  ).getDate();
+  return (mtd / day) * daysInMonth;
+}
+
+/** EOM projection as % of forecast input (100 = on track to hit plan). */
+export function eomVsForecastPct(
+  eomProjected: number,
+  forecast: number,
+): number | null {
+  if (!Number.isFinite(eomProjected) || !Number.isFinite(forecast) || forecast <= 0) {
+    return null;
+  }
+  return (eomProjected / forecast) * 100;
+}

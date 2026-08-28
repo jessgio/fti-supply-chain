@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/sales-forecast";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
+import type { SopChannelGroup } from "@/types/database";
 
 export async function GET(request: Request) {
   try {
@@ -42,9 +43,15 @@ export async function PUT(request: Request) {
 
     const body = await request.json();
     const group = body?.group;
-    if (!isSopGroup(group)) {
+    const groups: SopChannelGroup[] =
+      group === "both"
+        ? ["online", "offline"]
+        : isSopGroup(group)
+          ? [group]
+          : [];
+    if (groups.length === 0) {
       return NextResponse.json(
-        { error: "group must be online or offline." },
+        { error: "group must be online, offline, or both." },
         { status: 400 },
       );
     }
@@ -60,21 +67,28 @@ export async function PUT(request: Request) {
 
     const year = Number(body?.year ?? new Date().getFullYear());
     const supabase = createAdminClient();
-    const inactive = await replaceChannelInactiveSkus(supabase, {
-      group,
-      skuIds,
-      userId: profile?.id ?? null,
-    });
+    for (const g of groups) {
+      await replaceChannelInactiveSkus(supabase, {
+        group: g,
+        skuIds,
+        userId: profile?.id ?? null,
+      });
+    }
 
     if (Number.isInteger(year) && year >= 2000 && year <= 2100) {
       const forecast = await loadSopYearForecast(supabase, year);
       return NextResponse.json({
-        inactive_sku_ids: inactive,
+        inactive_sku_ids: forecast.inactive_sku_ids,
         forecast,
       });
     }
 
-    return NextResponse.json({ inactive_sku_ids: inactive });
+    return NextResponse.json({
+      inactive_sku_ids:
+        group === "both"
+          ? { online: skuIds, offline: skuIds }
+          : skuIds,
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
