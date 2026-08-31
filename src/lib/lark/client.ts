@@ -380,6 +380,8 @@ export type ApprovalInstanceDetails = {
   status?: string;
   approval_name?: string;
   open_id?: string;
+  /** Approval form control JSON string (or already-parsed array). */
+  form?: string | unknown;
   comment_list?: {
     id?: string;
     user_id?: string;
@@ -705,6 +707,8 @@ export type SyncedApprovalDetails = {
   serialNumber: string | null;
   status: string | null;
   comments: ApprovalInstanceComment[];
+  /** Raw Lark `form` payload — JSON string or parsed widget array. */
+  form: string | unknown | null;
 };
 
 /** Fetch serial + status + comments, with short retries right after create. */
@@ -717,6 +721,7 @@ export async function getApprovalInstanceDetails(
     serialNumber: null,
     status: null,
     comments: [],
+    form: null,
   };
 
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -733,6 +738,7 @@ export async function getApprovalInstanceDetails(
         serialNumber: details.serial_number?.trim() || null,
         status: details.status?.trim().toUpperCase() || null,
         comments,
+        form: details.form ?? null,
       };
       if (last.serialNumber || last.status) return last;
     } catch {

@@ -397,43 +397,165 @@ function amountFromPlanRowsSnapshot(
   return { amount, currency };
 }
 
-function amountFromCommittedScope(
-  po: PurchaseOrder,
-  scope: ApPaymentPlanScope,
-): { amount: number; currency: string } | null {
-  const currency = po.currency ?? "IDR";
-  if (scope === "down_payment" && po.committed_down_payment != null) {
-    return { amount: Number(po.committed_down_payment), currency };
+function parseLarkFormWidgets(form: unknown): Record<string, unknown>[] {
+  if (Array.isArray(form)) {
+    return form.filter(
+      (item): item is Record<string, unknown> =>
+        !!item && typeof item === "object" && !Array.isArray(item),
+    );
   }
-  if (scope === "balance" && po.committed_balance != null) {
-    return { amount: Number(po.committed_balance), currency };
+  if (typeof form !== "string" || !form.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(form);
+    return parseLarkFormWidgets(parsed);
+  } catch {
+    return [];
   }
-  if (scope === "both") {
-    if (po.committed_invoice_total != null) {
-      return { amount: Number(po.committed_invoice_total), currency };
-    }
-    if (
-      po.committed_down_payment != null &&
-      po.committed_balance != null
-    ) {
-      return {
-        amount:
-          Number(po.committed_down_payment) + Number(po.committed_balance),
-        currency,
-      };
-    }
+}
+
+function widgetCurrency(
+  widget: Record<string, unknown>,
+  fallback: string,
+): string {
+  if (typeof widget.currency === "string" && widget.currency.trim()) {
+    return widget.currency.trim().toUpperCase();
   }
+  return fallback;
+}
+
+function asApFormCurrency(currency: string, fallback: string): ApFormCurrency {
+  const upper = currency.trim().toUpperCase();
+  if (isApFormCurrency(upper)) return upper;
+  if (isApFormCurrency(fallback)) return fallback;
+  return "IDR";
+}
+
+function paymentPlanFieldList(
+  widgets: Record<string, unknown>[],
+): unknown[] | null {
+  const byId = widgets.find((w) => w.id === AP_FORM_WIDGETS.paymentPlan);
+  if (byId && Array.isArray(byId.value)) return byId.value;
+  const byType = widgets.find((w) => w.type === "fieldList");
+  if (byType && Array.isArray(byType.value)) return byType.value;
   return null;
 }
 
 /**
- * Prefer the frozen amount stored on an AP submission (or committed PO schedule)
- * over live PO line totals.
+ * Payment-plan rows actually filed on a Lark AP Form instance.
+ * Used when linking an existing form so we store what was submitted, not a
+ * live PO % split.
+ */
+export function paymentPlanFromLarkForm(
+  form: unknown,
+  fallbackCurrency: string,
+): PaymentPlanRow[] {
+  const widgets = parseLarkFormWidgets(form);
+  const fieldList = paymentPlanFieldList(widgets);
+  if (!fieldList) return [];
+
+  const rows: PaymentPlanRow[] = [];
+  for (const entry of fieldList) {
+    if (!Array.isArray(entry)) continue;
+    let dateYmd = localTodayYmd();
+    let amount: number | null = null;
+    let currency = fallbackCurrency;
+    let remarks = "";
+    for (const cell of entry) {
+      if (!cell || typeof cell !== "object" || Array.isArray(cell)) continue;
+      const widget = cell as Record<string, unknown>;
+      const id = typeof widget.id === "string" ? widget.id : "";
+      const type = typeof widget.type === "string" ? widget.type : "";
+      if (id === AP_FORM_WIDGETS.datePlanned || type === "date") {
+        const ymd = dueDateYmd(String(widget.value ?? ""));
+        if (ymd) dateYmd = ymd;
+      }
+      if (id === AP_FORM_WIDGETS.amountPlanned || type === "amount") {
+        const n = Number(widget.value);
+        if (Number.isFinite(n)) {
+          amount = n;
+          currency = widgetCurrency(widget, currency);
+        }
+      }
+      if (
+        id === AP_FORM_WIDGETS.planRemarks ||
+        type === "input" ||
+        type === "textarea"
+      ) {
+        if (typeof widget.value === "string") remarks = widget.value;
+      }
+    }
+    if (amount == null) continue;
+    const apCurrency = asApFormCurrency(currency, fallbackCurrency);
+    rows.push({
+      dateYmd,
+      amount: roundMoney(amount, apCurrency),
+      currency: apCurrency,
+      remarks,
+    });
+  }
+  return rows;
+}
+
+export type LarkSubmittedPayment = {
+  amount: number;
+  currency: string;
+  planRows: PaymentPlanRow[];
+};
+
+/** Total + rows from a Lark instance form, or null when no amount widgets. */
+export function submittedAmountFromLarkForm(
+  form: unknown,
+  fallbackCurrency: string,
+): LarkSubmittedPayment | null {
+  const planRows = paymentPlanFromLarkForm(form, fallbackCurrency);
+  if (planRows.length > 0) {
+    const currency = planRows[0]?.currency ?? fallbackCurrency;
+    const amount = planRows.reduce((sum, row) => sum + row.amount, 0);
+    return { amount, currency, planRows };
+  }
+
+  const widgets = parseLarkFormWidgets(form);
+  let total = 0;
+  let currency = fallbackCurrency;
+  let saw = false;
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const widget = node as Record<string, unknown>;
+    if (
+      widget.type === "amount" ||
+      widget.id === AP_FORM_WIDGETS.amountPlanned
+    ) {
+      const n = Number(widget.value);
+      if (Number.isFinite(n)) {
+        total += n;
+        currency = widgetCurrency(widget, currency);
+        saw = true;
+      }
+    }
+    if (widget.value !== undefined) walk(widget.value);
+  };
+  walk(widgets);
+  if (!saw) return null;
+  const apCurrency = asApFormCurrency(currency, fallbackCurrency);
+  return {
+    amount: roundMoney(total, apCurrency),
+    currency: apCurrency,
+    planRows: [],
+  };
+}
+
+/**
+ * Amount actually filed on this AP Form. Never falls back to a live PO
+ * percentage split — that is not what was submitted.
  */
 export function paymentAmountForApSubmission(
   po: PurchaseOrder,
   submission: {
-    payment_scope: ApPaymentPlanScope | string;
+    payment_scope?: ApPaymentPlanScope | string;
     submitted_amount?: number | null;
     submitted_currency?: string | null;
     plan_rows?: Array<{
@@ -455,20 +577,10 @@ export function paymentAmountForApSubmission(
     };
   }
 
-  const fromPlan = amountFromPlanRowsSnapshot(
+  return amountFromPlanRowsSnapshot(
     submission.plan_rows,
     po.currency ?? "IDR",
   );
-  if (fromPlan) return fromPlan;
-
-  const scope = isApPaymentPlanScope(submission.payment_scope)
-    ? submission.payment_scope
-    : "both";
-
-  const fromCommitted = amountFromCommittedScope(po, scope);
-  if (fromCommitted) return fromCommitted;
-
-  return paymentAmountForApScope(po, scope);
 }
 
 export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] {

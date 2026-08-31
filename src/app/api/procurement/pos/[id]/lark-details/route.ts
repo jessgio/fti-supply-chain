@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireReadRole } from "@/lib/auth";
-import { isLarkApprovalStatus } from "@/lib/lark/ap-form";
+import { isLarkApprovalStatus, submittedAmountFromLarkForm } from "@/lib/lark/ap-form";
 import {
   getApprovalInstanceDetails,
   type ApprovalInstanceComment,
@@ -74,7 +74,7 @@ export async function GET(
   const { data: po, error } = await supabase
     .from("purchase_orders")
     .select(
-      "id, lark_instance_code, lark_serial_number, lark_approval_status, lark_status_synced_at",
+      "id, currency, lark_instance_code, lark_serial_number, lark_approval_status, lark_status_synced_at",
     )
     .eq("id", id)
     .single();
@@ -159,6 +159,25 @@ export async function GET(
         : sub.lark_approval_status;
       const syncedAt = new Date().toISOString();
       const comments = await attachCommentAuthors(details.comments);
+      const fromLark = submittedAmountFromLarkForm(
+        details.form,
+        po.currency ?? "IDR",
+      );
+      const amountFields = fromLark
+        ? {
+            submitted_amount: fromLark.amount,
+            submitted_currency: fromLark.currency,
+            plan_rows:
+              fromLark.planRows.length > 0
+                ? fromLark.planRows.map((row) => ({
+                    dateYmd: row.dateYmd,
+                    amount: row.amount,
+                    currency: row.currency,
+                    remarks: row.remarks,
+                  }))
+                : sub.plan_rows,
+          }
+        : {};
 
       if (sub.id !== "legacy") {
         await supabase
@@ -167,6 +186,7 @@ export async function GET(
             lark_serial_number: serialNumber,
             lark_approval_status: status,
             lark_status_synced_at: syncedAt,
+            ...amountFields,
           })
           .eq("id", sub.id);
       }
@@ -176,6 +196,7 @@ export async function GET(
         lark_serial_number: serialNumber,
         lark_approval_status: status,
         lark_status_synced_at: syncedAt,
+        ...(amountFields as Partial<PurchaseOrderLarkSubmission>),
       };
       updatedSubmissions.push(next);
 

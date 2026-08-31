@@ -675,8 +675,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     if (activeSubmission) {
       return paymentAmountForApSubmission(po, activeSubmission);
     }
+    if (alreadySubmitted) return null;
     return paymentAmountForApScope(po, "both");
-  }, [po, activeSubmission]);
+  }, [po, activeSubmission, alreadySubmitted]);
 
   return (
     <div className="space-y-4">

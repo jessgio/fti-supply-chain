@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole } from "@/lib/auth";
 import {
-  buildPaymentPlanRows,
+  isApFormCurrency,
   isApPaymentPlanScope,
   isLarkApprovalStatus,
+  localTodayYmd,
+  submittedAmountFromLarkForm,
   type ApPaymentPlanScope,
 } from "@/lib/lark/ap-form";
 import {
   buildCommittedPatchFromAp,
-  sumPlanRowAmounts,
 } from "@/lib/procurement/committed-payment-amounts";
 import {
   getApprovalInstanceDetails,
@@ -136,20 +137,42 @@ export async function POST(
       }
     }
 
-    const planRows = buildPaymentPlanRows(po, paymentScope);
-    const submittedAmount = sumPlanRowAmounts(planRows);
-    const submittedCurrency = planRows[0]?.currency ?? po.currency ?? "IDR";
-    const planRowsSnapshot = planRows.map((row) => ({
-      dateYmd: row.dateYmd,
-      amount: row.amount,
-      currency: row.currency,
-      remarks: row.remarks,
-    }));
-    const committedPatch = buildCommittedPatchFromAp(
-      po,
-      paymentScope,
-      planRows,
+    const fromLark = submittedAmountFromLarkForm(
+      details.form,
+      po.currency ?? "IDR",
     );
+    const planRows = fromLark?.planRows ?? [];
+    const submittedAmount = fromLark?.amount ?? null;
+    const submittedCurrency =
+      fromLark?.currency ?? po.currency ?? "IDR";
+    const planRowsSnapshot =
+      planRows.length > 0
+        ? planRows.map((row) => ({
+            dateYmd: row.dateYmd,
+            amount: row.amount,
+            currency: row.currency,
+            remarks: row.remarks,
+          }))
+        : null;
+    const freezeRows =
+      planRows.length > 0
+        ? planRows
+        : fromLark
+          ? [
+              {
+                dateYmd: localTodayYmd(),
+                amount: fromLark.amount,
+                currency: isApFormCurrency(fromLark.currency)
+                  ? fromLark.currency
+                  : "IDR",
+                remarks: "",
+              },
+            ]
+          : [];
+    const committedPatch =
+      freezeRows.length > 0
+        ? buildCommittedPatchFromAp(po, paymentScope, freezeRows)
+        : null;
 
     const { data: inserted, error: insertErr } = await supabase
       .from("purchase_order_lark_submissions")
