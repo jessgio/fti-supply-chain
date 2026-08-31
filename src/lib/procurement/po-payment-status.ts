@@ -98,7 +98,7 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
       paidTotalPoCurrency,
       poCurrency,
     ),
-    /** Live line-based totals (for reference when schedule is frozen). */
+    /** Live line-based totals (equals expectedTotal after a committed down payment). */
     liveInvoiceTotal: computePoInvoiceTotals(po).invoiceTotal,
   };
 }

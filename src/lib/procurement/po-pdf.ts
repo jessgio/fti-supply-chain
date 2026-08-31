@@ -310,7 +310,7 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     if (totals.otherCharges > 0) {
       totalRow("Other", formatCurrency(totals.otherCharges, currency));
     }
-    totalRow("Invoice total", formatCurrency(paymentSchedule.invoiceTotal, currency), true);
+    totalRow("Invoice total", formatCurrency(totals.invoiceTotal, currency), true);
     totalRow(
       paymentSchedule.isCommitted
         ? "Down payment"

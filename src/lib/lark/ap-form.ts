@@ -294,8 +294,8 @@ export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
 
 /**
  * Default AP Form payment plan rows.
- * Once payment amounts are committed (prior AP / logged payment), use those
- * frozen figures — not live PO line qty/price totals.
+ * Down payment stays at the logged/frozen amount; invoice total and remaining
+ * balance follow live PO lines and charges.
  */
 export function buildPaymentPlanRows(
   po: PurchaseOrder,

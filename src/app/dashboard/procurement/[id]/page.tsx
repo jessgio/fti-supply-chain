@@ -34,9 +34,12 @@ import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
 } from "@/lib/procurement/currencies";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import {
   computePoInvoiceTotals,
   poLineOpenQty,
+  pphLabel,
+  taxLabel,
 } from "@/lib/procurement/po-totals";
 import {
   STATUS_LABELS,
@@ -231,6 +234,7 @@ export default function PurchaseOrderPage() {
   }
 
   const totals = computePoInvoiceTotals(po);
+  const paymentSchedule = resolvePaymentSchedule(po);
   const fmt = (value: number) => formatPoMoney(value, po.currency ?? DEFAULT_PO_CURRENCY);
 
   return (
@@ -512,9 +516,45 @@ export default function PurchaseOrderPage() {
                 <span className="text-stone-600">Subtotal</span>
                 <span className="font-medium">{fmt(totals.subtotal)}</span>
               </div>
+              {totals.discount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-stone-600">Discount</span>
+                  <span className="font-medium">-{fmt(totals.discount)}</span>
+                </div>
+              )}
+              {totals.tax > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-stone-600">{taxLabel(totals.taxPct)}</span>
+                  <span className="font-medium">{fmt(totals.tax)}</span>
+                </div>
+              )}
+              {totals.pph > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-stone-600">{pphLabel(totals.pphPct)}</span>
+                  <span className="font-medium">-{fmt(totals.pph)}</span>
+                </div>
+              )}
+              {totals.otherCharges > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-stone-600">Other</span>
+                  <span className="font-medium">{fmt(totals.otherCharges)}</span>
+                </div>
+              )}
               <div className="flex justify-between border-t border-stone-200 pt-2 font-medium">
                 <span>Invoice total</span>
                 <span>{fmt(totals.invoiceTotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-600">
+                  {paymentSchedule.isCommitted
+                    ? "Down payment"
+                    : `Down payment (${totals.downPaymentPct}%)`}
+                </span>
+                <span className="font-medium">{fmt(paymentSchedule.downPayment)}</span>
+              </div>
+              <div className="flex justify-between font-medium">
+                <span>Final payment</span>
+                <span>{fmt(paymentSchedule.balance)}</span>
               </div>
             </CardContent>
           </Card>

@@ -38,7 +38,14 @@ export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
   return round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
 
-/** Payment schedule for expectations / PDF: prefer frozen amounts over live lines. */
+/**
+ * Payment schedule for PDF / expectations / remaining balance.
+ *
+ * Invoice total always follows live lines and charges. Once a down payment has
+ * been logged (or frozen on the PO), that exact amount is kept even if qty or
+ * price later change. The remaining balance is live invoice minus that down
+ * payment — never a frozen remainder, and never a fresh % of the new total.
+ */
 export function resolvePaymentSchedule(
   po: PoWithCommitted,
 ): CommittedPaymentSchedule {
@@ -62,16 +69,8 @@ export function resolvePaymentSchedule(
     po.committed_down_payment != null
       ? Number(po.committed_down_payment)
       : live.downPayment;
-  const balance =
-    po.committed_balance != null
-      ? Number(po.committed_balance)
-      : live.finalPayment;
-  const invoiceTotal =
-    po.committed_invoice_total != null
-      ? Number(po.committed_invoice_total)
-      : po.committed_down_payment != null && po.committed_balance != null
-        ? round2(downPayment + balance)
-        : live.invoiceTotal;
+  const invoiceTotal = live.invoiceTotal;
+  const balance = round2(invoiceTotal - downPayment);
 
   return {
     downPayment,
