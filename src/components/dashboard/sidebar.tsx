@@ -69,11 +69,13 @@ const links: NavItem[] = [
         href: "/dashboard/sales-forecast",
         label: "Sales Forecast",
         icon: Target,
+        roles: ["admin", "supply_chain", "sales_marketing", "viewer"],
       },
       {
         href: "/dashboard/sales-accuracy",
         label: "Sales Accuracy",
         icon: Crosshair,
+        roles: ["admin", "supply_chain", "sales_marketing", "viewer"],
       },
     ],
   },

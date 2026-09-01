@@ -6,7 +6,7 @@ import {
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
 import type { SopForecastPayload, SopSkuRow } from "@/types/database";
-import { draftKey, isPlanMonth, planDraftValue } from "./table-utils";
+import { draftKey, isPlanMonth, planDraftValue, rspForMonth } from "./table-utils";
 
 export type GroupDrafts = {
   qty: Record<string, string>;
@@ -85,7 +85,9 @@ export function liveSkuMonthFromDrafts(
   const safeDisc = Number.isFinite(disc) ? disc : 0;
   return {
     qty: safeQty,
-    postTax: postTaxNet(vatInclusiveNet(safeQty, row.retail_price, safeDisc)),
+    postTax: postTaxNet(
+      vatInclusiveNet(safeQty, rspForMonth(row, month), safeDisc),
+    ),
     editable: true,
   };
 }
@@ -254,7 +256,7 @@ export function mergeLiveSkuRows(
           avg_discount_pct: impliedDiscountPct(
             (online?.months[month]?.actual.qty ?? 0) +
               (offline?.months[month]?.actual.qty ?? 0),
-            base.retail_price,
+            rspForMonth(base, month),
             (online?.months[month]?.actual.post_tax_net ?? 0) +
               (offline?.months[month]?.actual.post_tax_net ?? 0),
           ),

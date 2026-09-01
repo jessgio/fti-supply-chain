@@ -89,6 +89,87 @@ export type FranchiseAllocation = {
   share: number;
 };
 
+export type ComponentSkuAllocation = {
+  sku_id: string;
+  sku_code: string;
+  name: string | null;
+  franchise: string;
+  qty: number;
+  post_tax: number;
+  list_value: number;
+};
+
+/** Split metrics onto single SKUs (identity for singles; BOM components for bundles). */
+export function allocateToComponentSkus(
+  row: SopSkuRow,
+  qty: number,
+  postTax: number,
+  listValue: number,
+): ComponentSkuAllocation[] {
+  if (!row.is_bundle) {
+    return [
+      {
+        sku_id: row.sku_id,
+        sku_code: row.sku_code,
+        name: row.name,
+        franchise: row.franchise_name?.trim() || UNMAPPED_FRANCHISE,
+        qty,
+        post_tax: postTax,
+        list_value: listValue,
+      },
+    ];
+  }
+
+  const components = (row.bom_components ?? []).filter(
+    (c) => Number.isFinite(c.qty_per_bundle) && c.qty_per_bundle > 0,
+  );
+  if (components.length === 0) {
+    return [
+      {
+        sku_id: row.sku_id,
+        sku_code: row.sku_code,
+        name: row.name,
+        franchise: UNMAPPED_FRANCHISE,
+        qty,
+        post_tax: postTax,
+        list_value: listValue,
+      },
+    ];
+  }
+
+  const weights = components.map((c) => {
+    const rsp =
+      c.retail_price != null &&
+      Number.isFinite(c.retail_price) &&
+      c.retail_price > 0
+        ? c.retail_price
+        : 0;
+    return {
+      component: c,
+      qtyPerBundle: c.qty_per_bundle,
+      valueWeight: c.qty_per_bundle * rsp,
+    };
+  });
+  let valueTotal = weights.reduce((s, w) => s + w.valueWeight, 0);
+  if (valueTotal <= 0) {
+    for (const w of weights) w.valueWeight = w.qtyPerBundle;
+    valueTotal = weights.reduce((s, w) => s + w.valueWeight, 0) || 1;
+  }
+
+  return weights.map((w) => {
+    const share = w.valueWeight / valueTotal;
+    return {
+      sku_id: w.component.sku_id,
+      sku_code: w.component.sku_code,
+      name: null,
+      franchise: w.component.franchise_name?.trim() || UNMAPPED_FRANCHISE,
+      qty: qty * w.qtyPerBundle,
+      post_tax: postTax * share,
+      list_value: listValue * share,
+    };
+  });
+}
+
 /** Split a qty / post-tax / list-value triple across franchises for one SKU row. */
 export function allocateSkuMetrics(
   row: SopSkuRow,
@@ -96,30 +177,29 @@ export function allocateSkuMetrics(
   postTax: number,
   listValue: number,
 ): FranchiseAllocation[] {
-  if (!row.is_bundle) {
-    const franchise = row.franchise_name?.trim() || UNMAPPED_FRANCHISE;
-    return [
-      {
-        franchise,
-        qty,
-        post_tax: postTax,
-        list_value: listValue,
-        share: 1,
-      },
-    ];
+  const byFranchise = new Map<string, FranchiseAllocation>();
+  for (const part of allocateToComponentSkus(row, qty, postTax, listValue)) {
+    const cur = byFranchise.get(part.franchise);
+    if (cur) {
+      cur.qty += part.qty;
+      cur.post_tax += part.post_tax;
+      cur.list_value += part.list_value;
+    } else {
+      byFranchise.set(part.franchise, {
+        franchise: part.franchise,
+        qty: part.qty,
+        post_tax: part.post_tax,
+        list_value: part.list_value,
+        share: 0,
+      });
+    }
   }
-  const weights = bomFranchiseWeights(row.bom_components ?? []);
-  const valueTotal = weights.reduce((s, w) => s + w.valueWeight, 0) || 1;
-  return weights.map((w) => {
-    const share = w.valueWeight / valueTotal;
-    return {
-      franchise: w.franchise,
-      qty: qty * w.qtyPerBundle,
-      post_tax: postTax * share,
-      list_value: listValue * share,
-      share,
-    };
-  });
+  const rows = [...byFranchise.values()];
+  const valueTotal = rows.reduce((s, r) => s + r.post_tax, 0);
+  for (const r of rows) {
+    r.share = valueTotal > 0 ? r.post_tax / valueTotal : 0;
+  }
+  return rows;
 }
 
 /** Allocate a scalar (stock, on-order, …) with the same shares as net sales. */

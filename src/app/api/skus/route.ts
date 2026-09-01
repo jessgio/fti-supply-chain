@@ -16,6 +16,7 @@ function mapSkuRow(row: {
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
+  retail_price?: number | null;
   product_franchises: unknown;
 }) {
   const franchise = row.product_franchises as
@@ -36,6 +37,8 @@ function mapSkuRow(row: {
     is_active: row.is_active,
     franchise_id: row.franchise_id,
     franchise_name: franchiseName,
+    retail_price:
+      row.retail_price == null ? null : Number(row.retail_price),
   };
 }
 
@@ -66,7 +69,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from("skus")
       .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, product_franchises(name)",
+        "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, retail_price, product_franchises(name)",
       )
       .order("sku_code");
 

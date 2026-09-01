@@ -50,6 +50,8 @@ export interface SopSkuRow {
   bom_components: SopBomComponent[];
   franchise_name: string | null;
   retail_price: number | null;
+  /** RSP in force for each calendar month of the loaded year. */
+  rsp_by_month: Record<number, number | null>;
   current_stock: number;
   on_order_qty: number;
   projected_stockout_date: string | null;

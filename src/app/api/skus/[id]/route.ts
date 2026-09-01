@@ -1,29 +1,39 @@
 import { NextResponse } from "next/server";
-import { requireWriteRole } from "@/lib/auth";
+import { requireCommercialWrite, requireWriteRole } from "@/lib/auth";
 import { updateSku } from "@/lib/db/skus";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
+
+type SkuPatchBody = {
+  name?: string | null;
+  is_active?: boolean;
+  is_bundle?: boolean;
+  is_packaging?: boolean;
+  is_extract?: boolean;
+  is_clearance?: boolean;
+  franchise_id?: string | null;
+  franchise_name?: string | null;
+  retail_price?: number | string | null;
+  effective_from?: string | null;
+};
+
+function parseRetailPrice(value: number | string | null): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error("RSP must be a number greater than 0.");
+  }
+  return n === 0 ? null : n;
+}
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const denied = await requireWriteRole();
-    if (denied) return denied;
-
     const { id } = await params;
-    const body = (await request.json()) as {
-      name?: string | null;
-      is_active?: boolean;
-      is_bundle?: boolean;
-      is_packaging?: boolean;
-      is_extract?: boolean;
-      is_clearance?: boolean;
-      franchise_id?: string | null;
-      franchise_name?: string | null;
-    };
+    const body = (await request.json()) as SkuPatchBody;
 
     const input: {
       name?: string | null;
@@ -34,6 +44,8 @@ export async function PATCH(
       is_clearance?: boolean;
       franchise_id?: string | null;
       franchise_name?: string | null;
+      retail_price?: number | null;
+      effective_from?: string | null;
     } = {};
 
     if (body.name !== undefined) {
@@ -63,16 +75,31 @@ export async function PATCH(
       input.franchise_name =
         typeof body.franchise_name === "string" ? body.franchise_name : null;
     }
+    if (body.retail_price !== undefined) {
+      input.retail_price = parseRetailPrice(body.retail_price);
+    }
+    if (typeof body.effective_from === "string") {
+      input.effective_from = body.effective_from;
+    }
 
-    if (Object.keys(input).length === 0) {
+    const keys = Object.keys(input);
+    if (keys.length === 0 || (keys.length === 1 && keys[0] === "effective_from")) {
       return NextResponse.json(
         {
           error:
-            "Provide name, is_active, is_bundle, is_packaging, is_extract, is_clearance, franchise_id, and/or franchise_name",
+            "Provide name, is_active, is_bundle, is_packaging, is_extract, is_clearance, franchise_id, franchise_name, and/or retail_price",
         },
         { status: 400 },
       );
     }
+
+    const rspOnly = keys.every(
+      (key) => key === "retail_price" || key === "effective_from",
+    );
+    const denied = rspOnly
+      ? await requireCommercialWrite()
+      : await requireWriteRole();
+    if (denied) return denied;
 
     const supabase = createAdminClient();
     const sku = await updateSku(supabase, id, input);
@@ -90,7 +117,11 @@ export async function PATCH(
     return NextResponse.json({ ok: true, sku });
   } catch (error) {
     const message = errorMessage(error);
-    const status = message.includes("not found") ? 404 : 500;
+    const status = message.includes("not found")
+      ? 404
+      : message.includes("RSP must") || message.includes("effective_from")
+        ? 400
+        : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

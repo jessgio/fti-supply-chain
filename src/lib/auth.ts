@@ -11,11 +11,20 @@ export interface CurrentProfile {
 
 const WRITE_ROLES: UserRole[] = ["admin", "supply_chain"];
 const SUPPLY_CHAIN_ROLES: UserRole[] = ["admin", "supply_chain"];
+/** All signed-in roles may edit S&OP forecast / accuracy inputs. */
 const COMMERCIAL_WRITE_ROLES: UserRole[] = [
   "admin",
   "supply_chain",
   "sales_marketing",
+  "viewer",
 ];
+
+/** True when the role may edit sales forecast plans, targets, and related SOP data. */
+export function canEditSalesForecast(
+  role: UserRole | null | undefined,
+): boolean {
+  return role != null && COMMERCIAL_WRITE_ROLES.includes(role);
+}
 
 /** Admin-only: Lark user directory management. */
 export function canManageLarkUsers(role: UserRole | null | undefined): boolean {
@@ -113,7 +122,7 @@ export async function requireCommercialWrite(): Promise<NextResponse | null> {
   if (!profile) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
-  if (!COMMERCIAL_WRITE_ROLES.includes(profile.role)) {
+  if (!canEditSalesForecast(profile.role)) {
     return NextResponse.json(
       { error: "Your role does not have permission to edit the sales forecast." },
       { status: 403 },

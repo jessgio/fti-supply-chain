@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useRef, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Badge } from "@/components/ui/badge";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
 import {
@@ -22,6 +22,7 @@ import {
   isCurrentCalendarMonth,
   isPlanMonth,
   rowStripeBg,
+  rspForMonth,
 } from "./table-utils";
 
 const CELL_INPUT_CLASS =
@@ -240,6 +241,94 @@ const PlanMonthCell = memo(function PlanMonthCell({
   );
 });
 
+function RspCell({
+  skuCode,
+  skuId,
+  retailPrice,
+  editable,
+  onSave,
+  onChangeExisting,
+}: {
+  skuCode: string;
+  skuId: string;
+  retailPrice: number | null;
+  editable: boolean;
+  onSave?: (skuId: string, next: number | null) => Promise<void>;
+  onChangeExisting?: (skuId: string, skuCode: string, next: number) => void;
+}) {
+  const [value, setValue] = useState(
+    retailPrice != null ? String(retailPrice) : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(retailPrice != null ? String(retailPrice) : "");
+  }, [retailPrice]);
+
+  if (!editable || !onSave) {
+    return (
+      <td className="px-3 py-2.5">
+        {retailPrice != null ? formatCurrency(retailPrice) : "—"}
+      </td>
+    );
+  }
+
+  const save = onSave;
+
+  async function commit() {
+    const trimmed = value.trim().replace(/,/g, "");
+    let next: number | null;
+    if (trimmed === "") {
+      next = null;
+    } else {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n <= 0) {
+        setValue(retailPrice != null ? String(retailPrice) : "");
+        return;
+      }
+      next = n;
+    }
+    if (next === retailPrice) return;
+    if (
+      next != null &&
+      retailPrice != null &&
+      retailPrice > 0 &&
+      onChangeExisting
+    ) {
+      setValue(String(retailPrice));
+      onChangeExisting(skuId, skuCode, next);
+      return;
+    }
+    setSaving(true);
+    try {
+      await save(skuId, next);
+    } catch {
+      setValue(retailPrice != null ? String(retailPrice) : "");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <td className="px-3 py-2.5">
+      <input
+        className={cn(CELL_INPUT_CLASS, "min-w-[5.5rem]")}
+        value={value}
+        disabled={saving}
+        inputMode="decimal"
+        placeholder="—"
+        aria-label={`${skuCode} RSP`}
+        title="Retail selling price (incl. VAT). Set this for NPDs so planned net can be calculated before any sales exist."
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+      />
+    </td>
+  );
+}
+
 export const ForecastRow = memo(function ForecastRow({
   row,
   rowIndex,
@@ -254,6 +343,8 @@ export const ForecastRow = memo(function ForecastRow({
   registerRow,
   pendingInactive,
   onTogglePendingInactive,
+  onSaveRsp,
+  onChangeExistingRsp,
 }: {
   row: SopSkuRow;
   rowIndex: number;
@@ -274,6 +365,12 @@ export const ForecastRow = memo(function ForecastRow({
   /** Staged for deactivation (not saved yet). */
   pendingInactive?: boolean;
   onTogglePendingInactive?: (skuId: string) => void;
+  onSaveRsp?: (skuId: string, retailPrice: number | null) => Promise<void>;
+  onChangeExistingRsp?: (
+    skuId: string,
+    skuCode: string,
+    next: number,
+  ) => void;
 }) {
   const shortfall = row.shortfall_qty;
   const bomComponents = row.bom_components ?? [];
@@ -399,9 +496,14 @@ export const ForecastRow = memo(function ForecastRow({
       <td className="px-3 py-2.5 text-stone-600">
         {row.is_bundle ? "—" : (row.franchise_name ?? "—")}
       </td>
-      <td className="px-3 py-2.5">
-        {row.retail_price != null ? formatCurrency(row.retail_price) : "—"}
-      </td>
+      <RspCell
+        skuCode={row.sku_code}
+        skuId={row.sku_id}
+        retailPrice={row.retail_price}
+        editable={!combined && !readOnly}
+        onSave={onSaveRsp}
+        onChangeExisting={onChangeExistingRsp}
+      />
       <td className="px-3 py-2.5">{formatNumber(row.on_order_qty)}</td>
       <td className="px-3 py-2.5">{formatDateShort(row.projected_stockout_date)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
@@ -412,18 +514,19 @@ export const ForecastRow = memo(function ForecastRow({
         const isCurrent = isCurrentCalendarMonth(year, month);
         const editable =
           !combined && isPlanMonth(month, currentMonth, readOnly);
+        const monthRsp = rspForMonth(row, month);
 
         if (isCurrent) {
           const mtdQty = actual?.qty ?? 0;
           const mtdPostTax = actual?.post_tax_net ?? 0;
           const mtdDisc =
             actual?.avg_discount_pct ??
-            impliedDiscountPct(mtdQty, row.retail_price, mtdPostTax);
+            impliedDiscountPct(mtdQty, monthRsp, mtdPostTax);
           const eomQty = eomProjectionFromMtd(mtdQty);
           const eomPostTax = eomProjectionFromMtd(mtdPostTax);
           const eomDisc =
             eomQty > 0
-              ? impliedDiscountPct(eomQty, row.retail_price, eomPostTax)
+              ? impliedDiscountPct(eomQty, monthRsp, eomPostTax)
               : mtdDisc;
 
           const planQty = editable
@@ -433,7 +536,7 @@ export const ForecastRow = memo(function ForecastRow({
             ? livePostTax(
                 getDrafts(row.sku_id, month, "qty"),
                 getDrafts(row.sku_id, month, "disc"),
-                row.retail_price,
+                monthRsp,
               )
             : (plan?.post_tax_net ?? 0);
           const planDisc = editable
@@ -447,7 +550,7 @@ export const ForecastRow = memo(function ForecastRow({
               skuCode={row.sku_code}
               skuId={row.sku_id}
               month={month}
-              retailPrice={row.retail_price}
+              retailPrice={monthRsp}
               l3mQty={row.l3m_qty}
               l3mPostTax={row.l3m_post_tax}
               mtdQty={mtdQty}
@@ -480,7 +583,7 @@ export const ForecastRow = memo(function ForecastRow({
           const disc = usePlan
             ? (plan?.avg_discount_pct ?? null)
             : (actual?.avg_discount_pct ??
-              impliedDiscountPct(qty, row.retail_price, postTax));
+              impliedDiscountPct(qty, monthRsp, postTax));
           return (
             <ReadonlyMetricCell
               key={month}
@@ -496,7 +599,7 @@ export const ForecastRow = memo(function ForecastRow({
             skuCode={row.sku_code}
             skuId={row.sku_id}
             month={month}
-            retailPrice={row.retail_price}
+            retailPrice={monthRsp}
             l3mQty={row.l3m_qty}
             l3mPostTax={row.l3m_post_tax}
             initialQty={getDrafts(row.sku_id, month, "qty")}

@@ -89,11 +89,19 @@ export function isSalesRowEligibleForImport(
 export function mergeRetailPrice(
   retailBySku: Record<string, number>,
   row: SalesRow,
+  retailFromBySku?: Record<string, string>,
 ): void {
   if (row.retail_price && row.retail_price > 0) {
-    retailBySku[row.sku_code] = Math.max(
-      retailBySku[row.sku_code] ?? 0,
-      row.retail_price,
-    );
+    const prev = retailBySku[row.sku_code] ?? 0;
+    if (row.retail_price > prev) {
+      retailBySku[row.sku_code] = row.retail_price;
+      if (retailFromBySku) retailFromBySku[row.sku_code] = row.sale_date;
+    } else if (
+      retailFromBySku &&
+      row.retail_price === prev &&
+      row.sale_date < (retailFromBySku[row.sku_code] ?? row.sale_date)
+    ) {
+      retailFromBySku[row.sku_code] = row.sale_date;
+    }
   }
 }

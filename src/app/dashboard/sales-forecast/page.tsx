@@ -26,6 +26,7 @@ import {
   rowMatchesFranchiseFilter,
 } from "@/lib/sales-forecast/franchise-rollup";
 import { FORECAST_CSV_HEADERS, MONTHS } from "@/lib/sales-forecast/constants";
+import { startOfMonthIso } from "@/lib/db/sku-retail-prices";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn, formatDateShort } from "@/lib/utils";
 import type {
@@ -46,6 +47,10 @@ import {
 } from "./live-panels";
 import { FREEZE, FREEZE_EDGE, freezeHead } from "./table-utils";
 import { TargetsCard } from "./targets-card";
+import {
+  RspEffectiveDialog,
+  type PendingRspChange,
+} from "./rsp-effective-dialog";
 import {
   collectDirtyLines,
   draftsFromRows,
@@ -76,6 +81,48 @@ function targetsFromPayload(payload: SopForecastPayload): Record<number, string>
     next[t.month] = String(t.target_net_sales_post_tax ?? 0);
   }
   return next;
+}
+
+function patchYearDataRetailPrice(
+  prev: SopYearForecast,
+  skuId: string,
+  retailPrice: number | null,
+  effectiveFrom?: string | null,
+): SopYearForecast {
+  const from = effectiveFrom ?? "2000-01-01";
+  const now = new Date();
+  const todayStart = startOfMonthIso(now.getFullYear(), now.getMonth() + 1);
+  const mapRows = (rows: SopSkuRow[]) =>
+    rows.map((row) => {
+      if (row.sku_id !== skuId) return row;
+      const rsp_by_month = { ...(row.rsp_by_month ?? {}) };
+      if (retailPrice == null) {
+        for (const month of MONTHS) rsp_by_month[month] = null;
+        return { ...row, retail_price: null, rsp_by_month };
+      }
+      for (const month of MONTHS) {
+        if (startOfMonthIso(prev.year, month) >= from) {
+          rsp_by_month[month] = retailPrice;
+        }
+      }
+      return {
+        ...row,
+        retail_price: from <= todayStart ? retailPrice : row.retail_price,
+        rsp_by_month,
+      };
+    });
+  const mapGroup = (group: SopForecastPayload): SopForecastPayload => ({
+    ...group,
+    rows: mapRows(group.rows),
+    inactive_rows: mapRows(group.inactive_rows ?? []),
+  });
+  return {
+    ...prev,
+    groups: {
+      online: mapGroup(prev.groups.online),
+      offline: mapGroup(prev.groups.offline),
+    },
+  };
 }
 
 export default function SalesForecastPage() {
@@ -135,6 +182,8 @@ function SalesForecastClient() {
   const [pendingInactiveIds, setPendingInactiveIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [pendingRsp, setPendingRsp] = useState<PendingRspChange | null>(null);
+  const [savingRsp, setSavingRsp] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const draftsRef = useRef<Record<SopChannelGroup, GroupDrafts>>({
@@ -382,6 +431,60 @@ function SalesForecastClient() {
       return bucket[key] ?? "";
     },
     [activeGroup],
+  );
+
+  const onSaveRsp = useCallback(
+    async (
+      skuId: string,
+      retailPrice: number | null,
+      effectiveFrom?: string,
+    ) => {
+      setError(null);
+      const res = await fetch(`/api/skus/${skuId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          retail_price: retailPrice,
+          ...(effectiveFrom ? { effective_from: effectiveFrom } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message =
+          typeof data.error === "string" ? data.error : "Failed to save RSP";
+        setError(message);
+        throw new Error(message);
+      }
+      const saved =
+        data.sku?.retail_price == null
+          ? null
+          : Number(data.sku.retail_price);
+      setYearData((prev) =>
+        prev
+          ? patchYearDataRetailPrice(prev, skuId, saved, effectiveFrom)
+          : prev,
+      );
+      draftsStore.notifyNow();
+    },
+    [draftsStore],
+  );
+
+  const onChangeExistingRsp = useCallback(
+    (skuId: string, skuCode: string, next: number) => {
+      const current =
+        yearData?.groups.online.rows.find((row) => row.sku_id === skuId)
+          ?.retail_price ??
+        yearData?.groups.offline.rows.find((row) => row.sku_id === skuId)
+          ?.retail_price ??
+        0;
+      setPendingRsp({
+        skuId,
+        skuCode,
+        current: current && current > 0 ? current : next,
+        next,
+      });
+    },
+    [yearData],
   );
 
   const registerRow = useCallback(
@@ -647,7 +750,8 @@ function SalesForecastClient() {
           <p className="mt-1 max-w-3xl text-stone-600">
             Online and offline monthly targets (post-tax IDR) plus SKU and bundle
             quantity plans. Historical L3M/L6M come from raw sales uploads.
-            Planned net = qty × RSP × (1 − discount) ÷ 1.11.
+            Planned net = qty × RSP × (1 − discount) ÷ 1.11. Edit RSP on a SKU
+            row to plan new launches before any sales exist.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -825,7 +929,7 @@ function SalesForecastClient() {
                 {viewMode === "sku"
                   ? combined
                     ? "Read-only sum of online and offline qty and post-tax. Stock is not doubled."
-                    : "Month headers show the running total of entered values. Past months are actuals."
+                    : "Month headers show the running total of entered values. Past months are actuals. Edit RSP on a row to plan net for new launches."
                   : "Read-only sum of SKU plans and history. Edit quantities on the SKU view."}
               </CardDescription>
               <ForecastRowLegend className="mt-3" />
@@ -1047,7 +1151,10 @@ function SalesForecastClient() {
                       dir={sortDir}
                       onSort={handleSort}
                     />
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                    <th
+                      className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]"
+                      title="Retail selling price (incl. VAT). Type a planned RSP for NPDs with no sales yet."
+                    >
                       RSP
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
@@ -1101,6 +1208,10 @@ function SalesForecastClient() {
                     pendingInactiveIds={pendingInactiveIds}
                     onTogglePendingInactive={
                       readOnly || combined ? undefined : togglePendingInactive
+                    }
+                    onSaveRsp={readOnly || combined ? undefined : onSaveRsp}
+                    onChangeExistingRsp={
+                      readOnly || combined ? undefined : onChangeExistingRsp
                     }
                   />
                 )}
@@ -1318,6 +1429,35 @@ function SalesForecastClient() {
           </Button>
         </div>
       </Dialog>
+      {pendingRsp && yearData ? (
+        <RspEffectiveDialog
+          key={pendingRsp.skuId}
+          pending={pendingRsp}
+          year={yearData.year}
+          currentMonth={yearData.current_month}
+          saving={savingRsp}
+          onClose={() => {
+            if (!savingRsp) setPendingRsp(null);
+          }}
+          onConfirm={(effectiveFrom) => {
+            void (async () => {
+              setSavingRsp(true);
+              try {
+                await onSaveRsp(
+                  pendingRsp.skuId,
+                  pendingRsp.next,
+                  effectiveFrom,
+                );
+                setPendingRsp(null);
+              } catch {
+                /* error banner set in onSaveRsp */
+              } finally {
+                setSavingRsp(false);
+              }
+            })();
+          }}
+        />
+      ) : null}
     </PageShell>
   );
 }

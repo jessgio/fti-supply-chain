@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { setSkuRetailPrice } from "@/lib/db/sku-retail-prices";
 import { slugify } from "@/lib/utils";
 
 export interface CreateSkuInput {
@@ -23,6 +24,7 @@ export interface CreatedSkuRow {
   is_active: boolean;
   franchise_id: string | null;
   franchise_name: string | null;
+  retail_price: number | null;
 }
 
 export interface ExistingSkuConflict {
@@ -57,10 +59,13 @@ export interface UpdateSkuInput {
   franchise_id?: string | null;
   franchise_name?: string | null;
   unit_cogs?: number | null;
+  retail_price?: number | null;
+  /** YYYY-MM or YYYY-MM-DD; ignored for first-time RSP (uses base date). */
+  effective_from?: string | null;
 }
 
 const SKU_SELECT =
-  "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, product_franchises(name)";
+  "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, retail_price, product_franchises(name)";
 
 function mapSkuRow(data: {
   id: string;
@@ -72,6 +77,7 @@ function mapSkuRow(data: {
   is_clearance: boolean;
   is_active: boolean;
   franchise_id: string | null;
+  retail_price?: number | null;
   product_franchises: unknown;
 }): CreatedSkuRow {
   const franchise = data.product_franchises as
@@ -93,6 +99,8 @@ function mapSkuRow(data: {
     is_active: data.is_active,
     franchise_id: data.franchise_id,
     franchise_name: franchiseName,
+    retail_price:
+      data.retail_price == null ? null : Number(data.retail_price),
   };
 }
 
@@ -212,6 +220,10 @@ export async function createSku(
     .single();
 
   if (error) throw error;
+
+  if (retailPrice) {
+    await setSkuRetailPrice(supabase, data.id, retailPrice);
+  }
 
   return mapSkuRow(data);
 }
@@ -333,15 +345,28 @@ export async function updateSku(
     updates.unit_cogs = input.unit_cogs;
   }
 
-  if (Object.keys(updates).length === 0) {
+  if (Object.keys(updates).length === 0 && input.retail_price === undefined) {
     throw new Error("No valid fields to update.");
+  }
+
+  if (Object.keys(updates).length > 0) {
+    const { error } = await supabase.from("skus").update(updates).eq("id", id);
+    if (error) throw error;
+  }
+
+  if (input.retail_price !== undefined) {
+    await setSkuRetailPrice(
+      supabase,
+      id,
+      input.retail_price,
+      input.effective_from,
+    );
   }
 
   const { data, error } = await supabase
     .from("skus")
-    .update(updates)
-    .eq("id", id)
     .select(SKU_SELECT)
+    .eq("id", id)
     .single();
 
   if (error) throw error;

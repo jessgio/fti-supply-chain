@@ -15,6 +15,11 @@ import {
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
 import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
+import {
+  loadSkuRetailPriceHistory,
+  rspByMonthForYear,
+  type SkuPriceHistoryRow,
+} from "@/lib/db/sku-retail-prices";
 import { fetchAllRows, fetchAllRpc } from "@/lib/supabase/fetch-all";
 import type {
   SopBomComponent,
@@ -224,6 +229,7 @@ function buildGroupRows(
   onOrderBySku: Map<string, number>,
   oosByCode: Map<string, string | null>,
   bomByBundle: Map<string, SopBomComponent[]>,
+  priceHistory: Map<string, SkuPriceHistoryRow[]>,
 ): { rows: SopSkuRow[]; plannedByMonth: Map<number, number> } {
   const plannedByMonth = new Map<number, number>();
   const rows: SopSkuRow[] = skus.map((sku) => {
@@ -237,6 +243,11 @@ function buildGroupRows(
     );
     const months: SopSkuRow["months"] = {};
     let remainingYearQty = 0;
+    const rsp_by_month = rspByMonthForYear(
+      priceHistory.get(sku.id) ?? [],
+      year,
+      sku.retail_price,
+    );
     for (const month of MONTHS) {
       const actual = actualBySkuMonth.get(`${sku.id}:${year}-${month}`) ?? {
         qty: 0,
@@ -245,9 +256,10 @@ function buildGroupRows(
       const stored = planBySkuMonth.get(`${sku.id}:${month}`);
       const projected_qty = stored?.projected_qty ?? 0;
       const avg_discount_pct = stored?.avg_discount_pct ?? 0;
+      const monthRsp = rsp_by_month[month] ?? null;
       const vat_in = vatInclusiveNet(
         projected_qty,
-        sku.retail_price,
+        monthRsp,
         avg_discount_pct,
       );
       const plan: SopMonthPlan = {
@@ -263,7 +275,7 @@ function buildGroupRows(
           post_tax_net: actual.post_tax,
           avg_discount_pct: impliedDiscountPct(
             actual.qty,
-            sku.retail_price,
+            monthRsp,
             actual.post_tax,
           ),
         },
@@ -293,6 +305,7 @@ function buildGroupRows(
       bom_components,
       franchise_name: sku.franchise_name,
       retail_price: sku.retail_price,
+      rsp_by_month,
       current_stock,
       on_order_qty,
       projected_stockout_date: oosByCode.get(sku.sku_code) ?? null,
@@ -350,6 +363,7 @@ export async function loadSopYearForecast(
     restockResult,
     inactiveRes,
     bomRows,
+    priceHistory,
   ] = await Promise.all([
     listEligibleSkus(supabase),
     loadStockBySkuId(supabase),
@@ -424,6 +438,7 @@ export async function loadSopYearForecast(
         )
         .order("created_at"),
     ),
+    loadSkuRetailPriceHistory(supabase),
   ]);
   if (targetsRes.error) throw targetsRes.error;
   if (plansRes.error) throw plansRes.error;
@@ -557,6 +572,7 @@ export async function loadSopYearForecast(
       onOrderBySku,
       oosByCode,
       bomByBundle,
+      priceHistory,
     );
     const { rows: inactive_rows } = buildGroupRows(
       inactiveSkus,
@@ -571,6 +587,7 @@ export async function loadSopYearForecast(
       onOrderBySku,
       oosByCode,
       bomByBundle,
+      priceHistory,
     );
     groups[group] = {
       year,

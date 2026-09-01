@@ -15,6 +15,10 @@ import {
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
 import { listEligibleSkus, listSalesChannels } from "@/lib/db/sales-forecast";
+import {
+  loadSkuRetailPriceHistory,
+  rspByMonthForYear,
+} from "@/lib/db/sku-retail-prices";
 import { fetchAllRpc, fetchAllRows } from "@/lib/supabase/fetch-all";
 import type {
   SalesAccuracyGroupSummary,
@@ -288,7 +292,7 @@ export async function loadSalesAccuracy(
   const lastCompleted = completed_months[completed_months.length - 1]!;
   const yearEnd = format(new Date(year, lastCompleted, 0), "yyyy-MM-dd");
 
-  const [eligible, plansRes, monthlyActuals] = await Promise.all([
+  const [eligible, plansRes, monthlyActuals, priceHistory] = await Promise.all([
     listEligibleSkus(supabase),
     supabase
       .from("sop_sku_month_plans")
@@ -310,6 +314,7 @@ export async function loadSalesAccuracy(
           p_end: yearEnd,
         })
       : Promise.resolve([]),
+    loadSkuRetailPriceHistory(supabase),
   ]);
 
   if (plansRes.error) throw plansRes.error;
@@ -327,6 +332,20 @@ export async function loadSalesAccuracy(
       },
     ]),
   );
+
+  const rspCache = new Map<string, Record<number, number | null>>();
+  function rspForSkuMonth(
+    skuId: string,
+    month: number,
+    fallback: number | null,
+  ): number | null {
+    let rec = rspCache.get(skuId);
+    if (!rec) {
+      rec = rspByMonthForYear(priceHistory.get(skuId) ?? [], year, fallback);
+      rspCache.set(skuId, rec);
+    }
+    return rec[month] ?? fallback;
+  }
 
   const actualByGroup = {
     online: new Map<string, { qty: number; post_tax: number }>(),
@@ -416,10 +435,11 @@ export async function loadSalesAccuracy(
         retail_price: null,
         franchise_name: null,
       };
+      const monthRsp = rspForSkuMonth(skuId, month, meta.retail_price);
       const planPostTax = postTaxNet(
         vatInclusiveNet(
           planQty,
-          meta.retail_price,
+          monthRsp,
           plan?.avg_discount_pct ?? 0,
         ),
       );

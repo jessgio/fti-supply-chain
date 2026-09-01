@@ -34,6 +34,7 @@ interface SkuRow {
   is_active: boolean;
   franchise_id: string | null;
   franchise_name: string | null;
+  retail_price: number | null;
 }
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -95,6 +96,7 @@ export default function MappingsPage() {
   const [addFranchiseId, setAddFranchiseId] = useState("");
   const [addFranchiseName, setAddFranchiseName] = useState("");
   const [addProductType, setAddProductType] = useState<ProductType>("single");
+  const [addSkuRsp, setAddSkuRsp] = useState("");
   const [addSaving, setAddSaving] = useState(false);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
@@ -261,6 +263,45 @@ export default function MappingsPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+
+      const updated = data.sku as SkuRow;
+      setSkus((prev) =>
+        prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
+      );
+      setUnclassified((prev) =>
+        prev.map((row) => (row.id === sku.id ? { ...row, ...updated } : row)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function updateRetailPrice(sku: SkuRow, retailPrice: number | null) {
+    if (sku.retail_price === retailPrice) return;
+
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sku.retail_price != null &&
+            sku.retail_price > 0 &&
+            retailPrice != null
+            ? {
+                retail_price: retailPrice,
+                effective_from: `${new Date().getFullYear()}-${String(
+                  new Date().getMonth() + 1,
+                ).padStart(2, "0")}`,
+              }
+            : { retail_price: retailPrice },
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Update failed");
@@ -464,13 +505,21 @@ export default function MappingsPage() {
     setError(null);
     setAddSuccess(null);
     try {
-      const body: Record<string, string | boolean> = {
+      const body: Record<string, string | boolean | number> = {
         sku_code,
         is_bundle: addProductType === "bundle",
         is_packaging: addProductType === "packaging",
         is_extract: addProductType === "extract",
       };
       if (addSkuName.trim()) body.name = addSkuName.trim();
+      const rspTrim = addSkuRsp.trim().replace(/,/g, "");
+      if (rspTrim) {
+        const rsp = Number(rspTrim);
+        if (!Number.isFinite(rsp) || rsp <= 0) {
+          throw new Error("RSP must be a number greater than 0.");
+        }
+        body.retail_price = rsp;
+      }
       if (addProductType === "single") {
         if (addFranchiseName.trim()) {
           body.franchise_name = addFranchiseName.trim();
@@ -528,6 +577,7 @@ export default function MappingsPage() {
       const created = data.sku as SkuRow;
       setAddSkuCode("");
       setAddSkuName("");
+      setAddSkuRsp("");
       setAddFranchiseId("");
       setAddFranchiseName("");
       setAddProductType("single");
@@ -600,7 +650,8 @@ export default function MappingsPage() {
           <CardDescription>
             Create a SKU without uploading sales or stock files. Singles need a
             franchise for forecast; bundles need a BOM; packaging is managed
-            under Supply Chain → Packaging.
+            under Supply Chain → Packaging. Set RSP now if this is a future
+            launch with no sales yet.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -623,6 +674,17 @@ export default function MappingsPage() {
                 placeholder="Optional — defaults to SKU code"
                 value={addSkuName}
                 onChange={(e) => setAddSkuName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-stone-700">
+                RSP (incl. VAT)
+              </label>
+              <Input
+                placeholder="Optional — planned selling price"
+                value={addSkuRsp}
+                inputMode="decimal"
+                onChange={(e) => setAddSkuRsp(e.target.value)}
               />
             </div>
           </div>
@@ -808,6 +870,7 @@ export default function MappingsPage() {
                 onNewFranchiseNameChange={setNewFranchiseName}
                 onUpdateFranchise={updateFranchise}
                 onUpdateProductName={updateProductName}
+                onUpdateRetailPrice={updateRetailPrice}
                 onToggleActive={toggleActive}
                 onToggleClearance={toggleClearance}
                 onChangeKind={changeMappedKind}
@@ -917,6 +980,7 @@ function MappedSkuTable({
   onNewFranchiseNameChange,
   onUpdateFranchise,
   onUpdateProductName,
+  onUpdateRetailPrice,
   onToggleActive,
   onToggleClearance,
   onChangeKind,
@@ -936,6 +1000,7 @@ function MappedSkuTable({
     franchiseName?: string,
   ) => void;
   onUpdateProductName: (sku: SkuRow, name: string) => void;
+  onUpdateRetailPrice: (sku: SkuRow, retailPrice: number | null) => void;
   onToggleActive: (sku: SkuRow) => void;
   onToggleClearance: (sku: SkuRow) => void;
   onChangeKind: (sku: SkuRow, kind: "bundle" | "packaging" | "extract") => void;
@@ -947,6 +1012,7 @@ function MappedSkuTable({
           <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
             <th className="px-3 py-2">SKU</th>
             <th className="px-3 py-2">Product name</th>
+            <th className="px-3 py-2">RSP</th>
             <th className="px-3 py-2">Franchise</th>
             <th className="px-3 py-2">Type</th>
             <th className="px-3 py-2">Forecast</th>
@@ -972,6 +1038,15 @@ function MappedSkuTable({
                   name={sku.name}
                   disabled={updatingId === sku.id}
                   onSave={(name) => onUpdateProductName(sku, name)}
+                />
+              </td>
+              <td className="px-3 py-2">
+                <RetailPriceInput
+                  retailPrice={sku.retail_price}
+                  disabled={updatingId === sku.id}
+                  onSave={(retailPrice) =>
+                    onUpdateRetailPrice(sku, retailPrice)
+                  }
                 />
               </td>
               <td className="px-3 py-2">
@@ -1278,6 +1353,56 @@ function ProductNameInput({
       }}
       placeholder="Product name"
       className="h-8 min-w-[160px] text-xs"
+      disabled={disabled}
+    />
+  );
+}
+
+function RetailPriceInput({
+  retailPrice,
+  disabled,
+  onSave,
+}: {
+  retailPrice: number | null;
+  disabled: boolean;
+  onSave: (retailPrice: number | null) => void;
+}) {
+  const [value, setValue] = useState(
+    retailPrice != null ? String(retailPrice) : "",
+  );
+
+  useEffect(() => {
+    setValue(retailPrice != null ? String(retailPrice) : "");
+  }, [retailPrice]);
+
+  function commit() {
+    const trimmed = value.trim().replace(/,/g, "");
+    if (trimmed === "") {
+      onSave(null);
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n <= 0) {
+      setValue(retailPrice != null ? String(retailPrice) : "");
+      return;
+    }
+    onSave(n);
+  }
+
+  return (
+    <Input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.currentTarget.blur();
+        }
+      }}
+      placeholder="—"
+      inputMode="decimal"
+      title="Retail selling price (incl. VAT)"
+      className="h-8 min-w-[7rem] text-xs"
       disabled={disabled}
     />
   );

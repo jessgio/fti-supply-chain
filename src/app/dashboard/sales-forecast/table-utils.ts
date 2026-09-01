@@ -26,6 +26,15 @@ export function hasMissingRsp(row: Pick<SopSkuRow, "retail_price">): boolean {
   return row.retail_price == null || row.retail_price <= 0;
 }
 
+export function rspForMonth(
+  row: Pick<SopSkuRow, "retail_price" | "rsp_by_month">,
+  month: number,
+): number | null {
+  const byMonth = row.rsp_by_month?.[month];
+  if (byMonth !== undefined) return byMonth;
+  return row.retail_price;
+}
+
 /** Stock on hand below 3× L3M monthly avg (established SKUs only). */
 export function hasLowL3mCover(
   row: Pick<SopSkuRow, "is_npd" | "l3m_qty" | "current_stock">,
