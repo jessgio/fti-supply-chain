@@ -5,7 +5,7 @@ export function clampDiscountPct(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
-/** VAT-inclusive net sales from plan qty, RSP, and discount %. */
+/** VAT-inclusive net sales from plan qty, RSP (incl. VAT), and discount %. */
 export function vatInclusiveNet(
   qty: number,
   retailPrice: number | null,
@@ -17,19 +17,25 @@ export function vatInclusiveNet(
   return qty * retailPrice * (1 - clampDiscountPct(discountPct) / 100);
 }
 
+/** Convert VAT-inclusive planned net to post-tax (÷ 1.11). */
 export function postTaxNet(vatInclusive: number): number {
   if (!Number.isFinite(vatInclusive)) return 0;
   return vatInclusive / VAT_DIVISOR;
 }
 
-/** Convert WMS Nett Sales to the post-tax basis used in S&OP. */
+/**
+ * WMS "Nett Sales" is already post-tax (PPN excluded).
+ * Returning it unchanged keeps S&OP actuals on the same basis as the file;
+ * dividing by 1.11 here would strip VAT a second time.
+ */
 export function postTaxFromWmsNet(netSales: number): number {
   if (!Number.isFinite(netSales)) return 0;
-  return netSales / VAT_DIVISOR;
+  return netSales;
 }
 
 /**
- * Implied average discount % from actual qty × current RSP vs WMS post-tax net.
+ * Implied average discount % from actual qty × VAT-inclusive RSP vs post-tax net.
+ * Reconstructs VAT-inclusive proceeds (post-tax × 1.11) before comparing to list.
  * Returns null when discount cannot be inferred (no qty or RSP).
  */
 export function impliedDiscountPct(

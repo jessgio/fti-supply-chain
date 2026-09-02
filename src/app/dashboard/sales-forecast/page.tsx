@@ -749,8 +749,9 @@ function SalesForecastClient() {
           </h1>
           <p className="mt-1 max-w-3xl text-stone-600">
             Online and offline monthly targets (post-tax IDR) plus SKU and bundle
-            quantity plans. Historical L3M/L6M come from raw sales uploads.
-            Planned net = qty × RSP × (1 − discount) ÷ 1.11. Edit RSP on a SKU
+            quantity plans. Historical L3M/L6M and monthly actuals use WMS Nett
+            Sales as-is (already post-tax). Planned net = qty × RSP × (1 −
+            discount) ÷ 1.11. Edit RSP on a SKU
             row to plan new launches before any sales exist.
           </p>
         </div>
