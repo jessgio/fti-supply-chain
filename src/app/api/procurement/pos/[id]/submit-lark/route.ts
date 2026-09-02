@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole, getCurrentProfile } from "@/lib/auth";
 import {
+  AP_EXTRA_FILES_MAX_COUNT,
+  AP_EXTRA_FILE_MAX_BYTES,
+  AP_EXTRA_FILES_MAX_TOTAL_BYTES,
   AP_FORM_APPROVER_NODE_ID,
   DEFAULT_AP_BRAND,
   DEFAULT_AP_EXPENSE_CATEGORY,
@@ -40,10 +43,9 @@ export const runtime = "nodejs";
 /** Lark upload + approval create can exceed the default serverless limit. */
 export const maxDuration = 120;
 
-const MAX_EXTRA_FILES = 10;
-/** Keep under Vercel's ~4.5MB request body limit (PO PDF is generated server-side). */
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
-const MAX_TOTAL_EXTRA_BYTES = 4 * 1024 * 1024;
+const MAX_EXTRA_FILES = AP_EXTRA_FILES_MAX_COUNT;
+const MAX_FILE_BYTES = AP_EXTRA_FILE_MAX_BYTES;
+const MAX_TOTAL_EXTRA_BYTES = AP_EXTRA_FILES_MAX_TOTAL_BYTES;
 
 function normalizeOpenIds(ids: unknown): string[] {
   if (!Array.isArray(ids)) return [];

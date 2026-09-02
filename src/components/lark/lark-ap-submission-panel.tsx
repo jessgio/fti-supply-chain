@@ -1,8 +1,11 @@
 "use client";
 
 import { format } from "date-fns";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AP_EXTRA_FILE_MAX_BYTES,
+  AP_EXTRA_FILES_MAX_COUNT,
+  AP_EXTRA_FILES_MAX_TOTAL_BYTES,
   AP_FORM_BRANDS,
   AP_FORM_EXPENSE_CATEGORIES,
   AP_PAYMENT_PLAN_SCOPES,
@@ -79,17 +82,13 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Vercel serverless request body limit is ~4.5MB; leave headroom for form fields. */
-const MAX_EXTRA_FILE_BYTES = 4 * 1024 * 1024;
-const MAX_TOTAL_EXTRA_BYTES = 4 * 1024 * 1024;
-
 function networkErrorMessage(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const msg = err.message || fallback;
   if (/failed to fetch|networkerror|load failed|fetch failed/i.test(msg)) {
     return (
       "Network error while reaching the server. If you attached large files, " +
-      "remove them (or keep extras under 4 MB total) and try again. " +
+      `remove them (or keep extras under ${formatBytes(AP_EXTRA_FILES_MAX_TOTAL_BYTES)} total) and try again. ` +
       "The PO PDF is attached automatically on the server."
     );
   }
@@ -98,6 +97,27 @@ function networkErrorMessage(err: unknown, fallback: string): string {
 
 const fieldClass =
   "mt-1 w-full rounded-md border border-stone-300 bg-white px-2.5 py-2 text-sm text-stone-900 placeholder:text-stone-400";
+
+function PaymentPlanDateInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (ymd: string) => void;
+  disabled?: boolean;
+}) {
+  const initialValue = useRef(value);
+  return (
+    <input
+      type="date"
+      defaultValue={initialValue.current}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className={fieldClass}
+    />
+  );
+}
 
 export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated }: Props) {
   const [busy, setBusy] = useState(false);
@@ -512,15 +532,15 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       const next = [...prev];
       let total = next.reduce((sum, f) => sum + f.size, 0);
       for (const file of incoming) {
-        if (file.size > MAX_EXTRA_FILE_BYTES) {
+        if (file.size > AP_EXTRA_FILE_MAX_BYTES) {
           setError(
-            `"${file.name}" is too large (${formatBytes(file.size)}). Max ${formatBytes(MAX_EXTRA_FILE_BYTES)} per file.`,
+            `"${file.name}" is too large (${formatBytes(file.size)}). Max ${formatBytes(AP_EXTRA_FILE_MAX_BYTES)} per file.`,
           );
           continue;
         }
-        if (total + file.size > MAX_TOTAL_EXTRA_BYTES) {
+        if (total + file.size > AP_EXTRA_FILES_MAX_TOTAL_BYTES) {
           setError(
-            `Extra attachments would exceed ${formatBytes(MAX_TOTAL_EXTRA_BYTES)} total. Remove some files first.`,
+            `Extra attachments would exceed ${formatBytes(AP_EXTRA_FILES_MAX_TOTAL_BYTES)} total. Remove some files first.`,
           );
           break;
         }
@@ -535,7 +555,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           total += file.size;
         }
       }
-      return next.slice(0, 10);
+      return next.slice(0, AP_EXTRA_FILES_MAX_COUNT);
     });
   }
 
@@ -591,9 +611,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     }
 
     const extraTotal = extraFiles.reduce((sum, f) => sum + f.size, 0);
-    if (extraTotal > MAX_TOTAL_EXTRA_BYTES) {
+    if (extraTotal > AP_EXTRA_FILES_MAX_TOTAL_BYTES) {
       setError(
-        `Extra attachments are too large (${formatBytes(extraTotal)}). Keep under ${formatBytes(MAX_TOTAL_EXTRA_BYTES)}.`,
+        `Extra attachments are too large (${formatBytes(extraTotal)}). Keep under ${formatBytes(AP_EXTRA_FILES_MAX_TOTAL_BYTES)}.`,
       );
       return;
     }
@@ -1244,20 +1264,19 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
               <div className="mt-1.5 space-y-2">
                 {planRows.map((row, index) => (
                   <div
-                    key={`${row.dateYmd}-${index}`}
+                    key={`plan-${paymentPlanScope}-${index}`}
                     className="rounded-lg border border-stone-200 bg-stone-50 p-2.5 space-y-2"
                   >
                     <div className="grid grid-cols-2 gap-2">
                       <label className="block text-[11px] text-stone-500">
                         Date
-                        <input
-                          type="date"
+                        <PaymentPlanDateInput
+                          key={`plan-date-${paymentPlanScope}-${index}`}
                           value={row.dateYmd}
-                          onChange={(e) =>
-                            updatePlanRow(index, { dateYmd: e.target.value })
+                          onChange={(dateYmd) =>
+                            updatePlanRow(index, { dateYmd })
                           }
                           disabled={!currencyOk}
-                          className={fieldClass}
                         />
                       </label>
                       <label className="block text-[11px] text-stone-500">
@@ -1414,8 +1433,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             </div>
             <p className="mt-0.5 text-[11px] text-stone-500">
               PO PDF is always included automatically. Add invoices, images, or
-              other files (max 10 extra, {formatBytes(MAX_TOTAL_EXTRA_BYTES)}{" "}
-              total).
+              other files (max {AP_EXTRA_FILES_MAX_COUNT} extra,{" "}
+              {formatBytes(AP_EXTRA_FILE_MAX_BYTES)} each,{" "}
+              {formatBytes(AP_EXTRA_FILES_MAX_TOTAL_BYTES)} total).
             </p>
 
             <label
@@ -1434,7 +1454,11 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                 id={fileInputId}
                 type="file"
                 multiple
-                disabled={busy || !currencyOk || extraFiles.length >= 10}
+                disabled={
+                  busy ||
+                  !currencyOk ||
+                  extraFiles.length >= AP_EXTRA_FILES_MAX_COUNT
+                }
                 className="mt-1 block w-full cursor-pointer text-xs text-stone-600 file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-stone-900 file:px-2 file:py-1 file:text-xs file:font-medium file:text-white"
                 onChange={(e) => {
                   addExtraFiles(e.target.files);

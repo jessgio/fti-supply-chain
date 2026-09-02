@@ -19,7 +19,7 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const ALLOWED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "xls", "xlsx"]);
 
-export const PO_DOCUMENT_MAX_FILE_SIZE = 50 * 1024 * 1024;
+export const PO_DOCUMENT_MAX_FILE_SIZE = 15 * 1024 * 1024;
 
 export function isPoDocumentType(value: string): value is PoDocumentType {
   return (PO_DOCUMENT_TYPES as readonly string[]).includes(value);

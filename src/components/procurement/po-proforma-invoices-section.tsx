@@ -10,7 +10,7 @@ import { DocumentFilePreviewDialog } from "@/components/shipments/document-file-
 import {
   isPreviewableDocument,
 } from "@/lib/shipments/document-preview";
-import { PROFORMA_INVOICE_ACCEPT } from "@/lib/procurement/po-documents";
+import { PROFORMA_INVOICE_ACCEPT, PO_DOCUMENT_MAX_FILE_SIZE } from "@/lib/procurement/po-documents";
 import { formatDate } from "@/lib/utils";
 import type { PoDocument, PurchaseOrder } from "@/types/database";
 
@@ -64,6 +64,14 @@ export function PoProformaInvoicesSection({
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > PO_DOCUMENT_MAX_FILE_SIZE) {
+      setError(
+        `File exceeds ${Math.floor(PO_DOCUMENT_MAX_FILE_SIZE / (1024 * 1024))} MB limit.`,
+      );
+      e.target.value = "";
+      return;
+    }
 
     setUploading(true);
     setError(null);
@@ -171,7 +179,8 @@ export function PoProformaInvoicesSection({
       <CardContent className="space-y-4">
         <p className="text-sm text-stone-600">
           Attach the supplier&apos;s proforma invoice as PDF, JPG, or Excel
-          (XLS/XLSX). Newer uploads are kept as additional versions.
+          (XLS/XLSX), up to {Math.floor(PO_DOCUMENT_MAX_FILE_SIZE / (1024 * 1024))}{" "}
+          MB. Newer uploads are kept as additional versions.
         </p>
 
         {!readOnly && (

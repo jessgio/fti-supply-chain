@@ -125,6 +125,11 @@ export type ApExpenseCategoryValue =
 export const DEFAULT_AP_EXPENSE_CATEGORY: ApExpenseCategoryValue =
   "l1eqod7p-r2by1qduekk-1";
 
+/** Extra AP Form attachments. PO PDF is generated server-side and not counted. */
+export const AP_EXTRA_FILES_MAX_COUNT = 10;
+export const AP_EXTRA_FILE_MAX_BYTES = 15 * 1024 * 1024;
+export const AP_EXTRA_FILES_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+
 /** Amount widget on AP Form only allows these currencies. */
 export const AP_FORM_CURRENCIES = ["IDR", "USD", "CNY"] as const;
 export type ApFormCurrency = (typeof AP_FORM_CURRENCIES)[number];

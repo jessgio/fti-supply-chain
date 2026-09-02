@@ -94,7 +94,9 @@ export async function uploadPoDocument(
     throw new Error("Invalid document type.");
   }
   if (file.size > PO_DOCUMENT_MAX_FILE_SIZE) {
-    throw new Error("File exceeds 50 MB limit.");
+    throw new Error(
+      `File exceeds ${Math.floor(PO_DOCUMENT_MAX_FILE_SIZE / (1024 * 1024))} MB limit.`,
+    );
   }
   if (!isAllowedPoDocumentFile(file.name, file.type)) {
     throw new Error(

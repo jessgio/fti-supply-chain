@@ -6,6 +6,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import { isPoDocumentType } from "@/lib/procurement/po-documents";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
