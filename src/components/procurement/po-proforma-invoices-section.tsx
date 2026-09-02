@@ -10,8 +10,10 @@ import { DocumentFilePreviewDialog } from "@/components/shipments/document-file-
 import {
   isPreviewableDocument,
 } from "@/lib/shipments/document-preview";
-import { PROFORMA_INVOICE_ACCEPT, PO_DOCUMENT_MAX_FILE_SIZE } from "@/lib/procurement/po-documents";
+import { PROFORMA_INVOICE_ACCEPT, PO_DOCUMENT_MAX_FILE_SIZE, isAllowedPoDocumentFile } from "@/lib/procurement/po-documents";
 import { formatDate } from "@/lib/utils";
+import { readApiJson } from "@/lib/http";
+import { uploadToSignedDataUploads } from "@/lib/storage/browser-upload";
 import type { PoDocument, PurchaseOrder } from "@/types/database";
 
 function formatFileSize(bytes: number | null): string {
@@ -46,9 +48,9 @@ export function PoProformaInvoicesSection({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/procurement/pos/${po.id}/documents`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load documents");
+      const data = await readApiJson<{ documents?: PoDocument[] }>(
+        await fetch(`/api/procurement/pos/${po.id}/documents`),
+      );
       setDocuments(data.documents ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -72,39 +74,68 @@ export function PoProformaInvoicesSection({
       e.target.value = "";
       return;
     }
+    if (!isAllowedPoDocumentFile(file.name, file.type)) {
+      setError("Only PDF, JPG, XLS, and XLSX files are allowed for proforma invoices.");
+      e.target.value = "";
+      return;
+    }
 
     setUploading(true);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("document_type", "proforma_invoice");
-      if (notes.trim()) formData.append("notes", notes.trim());
+      const prepared = await readApiJson<{ path: string; token: string }>(
+        await fetch(`/api/procurement/pos/${po.id}/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phase: "upload-url",
+            file_name: file.name,
+            mime_type: file.type || null,
+            file_size: file.size,
+            document_type: "proforma_invoice",
+            notes: notes.trim() || null,
+          }),
+        }),
+      );
 
-      const res = await fetch(`/api/procurement/pos/${po.id}/documents`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Upload failed");
+      await uploadToSignedDataUploads(prepared.path, prepared.token, file);
+
+      await readApiJson(
+        await fetch(`/api/procurement/pos/${po.id}/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phase: "complete",
+            storage_path: prepared.path,
+            file_name: file.name,
+            mime_type: file.type || null,
+            file_size: file.size,
+            document_type: "proforma_invoice",
+            notes: notes.trim() || null,
+          }),
+        }),
+      );
 
       setNotes("");
-      e.target.value = "";
       await loadDocuments();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+      e.target.value = "";
     }
   }
 
   async function fetchDocumentUrl(documentId: string) {
-    const res = await fetch(
-      `/api/procurement/pos/${po.id}/documents/${documentId}/download`,
+    return readApiJson<{
+      url: string;
+      file_name: string;
+      mime_type: string | null;
+    }>(
+      await fetch(
+        `/api/procurement/pos/${po.id}/documents/${documentId}/download`,
+      ),
     );
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Failed to load file");
-    return data as { url: string; file_name: string; mime_type: string | null };
   }
 
   async function downloadDocument(documentId: string) {
@@ -154,12 +185,12 @@ export function PoProformaInvoicesSection({
     setDeletingId(documentId);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/procurement/pos/${po.id}/documents/${documentId}`,
-        { method: "DELETE" },
+      await readApiJson(
+        await fetch(
+          `/api/procurement/pos/${po.id}/documents/${documentId}`,
+          { method: "DELETE" },
+        ),
       );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to delete");
       await loadDocuments();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");

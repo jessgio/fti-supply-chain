@@ -29,6 +29,8 @@ import {
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
 import { formatPoMoney } from "@/lib/procurement/currencies";
+import { readApiJson } from "@/lib/http";
+import { uploadToSignedDataUploads } from "@/lib/storage/browser-upload";
 import type {
   PurchaseOrder,
   PurchaseOrderLarkSubmission,
@@ -621,8 +623,33 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     setBusy(true);
     setError(null);
     try {
-      // PO PDF is generated and attached on the server — do not upload it here
-      // (re-uploading the PDF was hitting Vercel's body size limit → "Failed to fetch").
+      const storagePaths: Array<{
+        path: string;
+        filename: string;
+        fileSize: number;
+      }> = [];
+      for (const file of extraFiles) {
+        const prepared = await readApiJson<{ path: string; token: string }>(
+          await fetch(`/api/procurement/pos/${po.id}/lark-uploads`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileName: file.name,
+              mimeType: file.type || null,
+              fileSize: file.size,
+            }),
+          }),
+        );
+        await uploadToSignedDataUploads(prepared.path, prepared.token, file);
+        storagePaths.push({
+          path: prepared.path,
+          filename: file.name,
+          fileSize: file.size,
+        });
+      }
+
+      // PO PDF is generated and attached on the server. Extra files are uploaded
+      // to storage first so the submit request stays small.
       const form = new FormData();
       form.append("expenseCategory", expenseCategory);
       form.append("brand", brand);
@@ -633,25 +660,19 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       form.append("remarks", remarks);
       form.append("paymentScope", paymentPlanScope);
       form.append("planRows", JSON.stringify(planRows));
-      for (const file of extraFiles) {
-        form.append("files", file, file.name);
-      }
+      form.append("storagePaths", JSON.stringify(storagePaths));
 
       const res = await fetch(`/api/procurement/pos/${po.id}/submit-lark`, {
         method: "POST",
         body: form,
       });
-      const data = (await res.json().catch(() => ({}))) as {
+      const data = await readApiJson<{
         error?: string;
         instanceCode?: string;
         serialNumber?: string | null;
         status?: string | null;
         purchaseOrder?: PurchaseOrder;
-      };
-      if (!res.ok) {
-        setError(data.error ?? `Submit failed (${res.status})`);
-        return;
-      }
+      }>(res);
       if (data.serialNumber) setSerialNumber(data.serialNumber);
       if (data.status) {
         setApprovalStatus(

@@ -82,26 +82,77 @@ export async function listPoDocuments(
   return (data ?? []).map((row) => mapDocument(row as DocumentRow));
 }
 
-export async function uploadPoDocument(
-  supabase: SupabaseClient,
+function poDocumentStoragePrefix(
   purchaseOrderId: string,
   documentType: PoDocumentType,
-  file: File,
-  uploadedBy: string | null,
-  notes?: string | null,
-): Promise<PoDocument> {
+): string {
+  return `purchase-orders/${purchaseOrderId}/${documentType}/`;
+}
+
+function assertPoDocumentMeta(
+  documentType: string,
+  fileName: string,
+  mimeType: string | null | undefined,
+  fileSize: number,
+): asserts documentType is PoDocumentType {
   if (!isPoDocumentType(documentType)) {
     throw new Error("Invalid document type.");
   }
-  if (file.size > PO_DOCUMENT_MAX_FILE_SIZE) {
+  if (!Number.isFinite(fileSize) || fileSize <= 0) {
+    throw new Error("File is required.");
+  }
+  if (fileSize > PO_DOCUMENT_MAX_FILE_SIZE) {
     throw new Error(
       `File exceeds ${Math.floor(PO_DOCUMENT_MAX_FILE_SIZE / (1024 * 1024))} MB limit.`,
     );
   }
-  if (!isAllowedPoDocumentFile(file.name, file.type)) {
+  if (!isAllowedPoDocumentFile(fileName, mimeType)) {
     throw new Error(
       "Only PDF, JPG, XLS, and XLSX files are allowed for proforma invoices.",
     );
+  }
+}
+
+export async function createPoDocumentSignedUpload(
+  supabase: SupabaseClient,
+  purchaseOrderId: string,
+  documentType: string,
+  fileName: string,
+  mimeType: string | null | undefined,
+  fileSize: number,
+): Promise<{ path: string; token: string }> {
+  assertPoDocumentMeta(documentType, fileName, mimeType, fileSize);
+  const safeName = sanitizeFileName(fileName);
+  const storagePath = `${poDocumentStoragePrefix(purchaseOrderId, documentType)}${Date.now()}-${safeName}`;
+  const { data, error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUploadUrl(storagePath);
+  if (error) throw error;
+  return { path: data.path, token: data.token };
+}
+
+export async function finalizePoDocumentUpload(
+  supabase: SupabaseClient,
+  purchaseOrderId: string,
+  documentType: string,
+  storagePath: string,
+  fileName: string,
+  mimeType: string | null | undefined,
+  fileSize: number,
+  uploadedBy: string | null,
+  notes?: string | null,
+): Promise<PoDocument> {
+  assertPoDocumentMeta(documentType, fileName, mimeType, fileSize);
+  const prefix = poDocumentStoragePrefix(purchaseOrderId, documentType);
+  if (!storagePath.startsWith(prefix) || storagePath.includes("..")) {
+    throw new Error("Invalid upload path.");
+  }
+
+  const { error: signError } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, 60);
+  if (signError) {
+    throw new Error("Uploaded file not found in storage.");
   }
 
   const versionNumber = await nextVersionNumber(
@@ -110,18 +161,6 @@ export async function uploadPoDocument(
     documentType,
   );
 
-  const safeName = sanitizeFileName(file.name);
-  const storagePath = `purchase-orders/${purchaseOrderId}/${documentType}/v${versionNumber}-${Date.now()}-${safeName}`;
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const { error: uploadError } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, {
-      contentType: file.type || "application/octet-stream",
-      upsert: false,
-    });
-  if (uploadError) throw uploadError;
-
   const { data, error } = await supabase
     .from("purchase_order_documents")
     .insert({
@@ -129,9 +168,9 @@ export async function uploadPoDocument(
       document_type: documentType,
       version_number: versionNumber,
       storage_path: storagePath,
-      file_name: file.name,
-      mime_type: file.type || null,
-      file_size: file.size,
+      file_name: fileName,
+      mime_type: mimeType?.trim() || null,
+      file_size: fileSize,
       uploaded_by: uploadedBy,
       notes: notes?.trim() || null,
     })

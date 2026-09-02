@@ -130,6 +130,20 @@ export const AP_EXTRA_FILES_MAX_COUNT = 10;
 export const AP_EXTRA_FILE_MAX_BYTES = 15 * 1024 * 1024;
 export const AP_EXTRA_FILES_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
 
+export function apExtraStoragePrefix(purchaseOrderId: string): string {
+  return `purchase-orders/${purchaseOrderId}/lark-temp/`;
+}
+
+export function isApExtraStoragePath(
+  purchaseOrderId: string,
+  path: string,
+): boolean {
+  const prefix = apExtraStoragePrefix(purchaseOrderId);
+  if (!path.startsWith(prefix) || path.includes("..")) return false;
+  const rest = path.slice(prefix.length);
+  return rest.length > 0 && !rest.includes("/");
+}
+
 /** Amount widget on AP Form only allows these currencies. */
 export const AP_FORM_CURRENCIES = ["IDR", "USD", "CNY"] as const;
 export type ApFormCurrency = (typeof AP_FORM_CURRENCIES)[number];

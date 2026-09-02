@@ -11,6 +11,7 @@ import {
   isApExpenseCategoryValue,
   isApFormCurrency,
   isApPaymentPlanScope,
+  isApExtraStoragePath,
   isLarkApprovalStatus,
   buildApFormControls,
   buildPaymentPlanRows,
@@ -94,9 +95,59 @@ function parsePlanRows(raw: FormDataEntryValue | null): PaymentPlanRow[] | null 
   }
 }
 
-async function fileToBytes(file: File): Promise<Uint8Array> {
-  const buf = await file.arrayBuffer();
-  return new Uint8Array(buf);
+type StoredExtra = {
+  path: string;
+  filename: string;
+  fileSize: number;
+};
+
+function parseStoredExtras(
+  raw: FormDataEntryValue | null,
+  purchaseOrderId: string,
+): StoredExtra[] | { error: string } {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return { error: "Invalid extra attachment list" };
+    }
+    if (parsed.length > MAX_EXTRA_FILES) {
+      return { error: `At most ${MAX_EXTRA_FILES} extra files allowed` };
+    }
+    const extras: StoredExtra[] = [];
+    let total = 0;
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const path = typeof row.path === "string" ? row.path.trim() : "";
+      const filename =
+        typeof row.filename === "string" && row.filename.trim()
+          ? row.filename.trim()
+          : "attachment";
+      const fileSize = Number(row.fileSize);
+      if (!isApExtraStoragePath(purchaseOrderId, path)) {
+        return { error: "Invalid extra attachment path" };
+      }
+      if (!Number.isFinite(fileSize) || fileSize <= 0) {
+        return { error: `Invalid size for ${filename}` };
+      }
+      if (fileSize > MAX_FILE_BYTES) {
+        return {
+          error: `File too large: ${filename} (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB each)`,
+        };
+      }
+      total += fileSize;
+      extras.push({ path, filename, fileSize });
+    }
+    if (total > MAX_TOTAL_EXTRA_BYTES) {
+      return {
+        error: `Extra attachments total too large (max ${Math.floor(MAX_TOTAL_EXTRA_BYTES / (1024 * 1024))} MB). Remove some files and try again.`,
+      };
+    }
+    return extras;
+  } catch {
+    return { error: "Invalid extra attachment list" };
+  }
 }
 
 export async function POST(
@@ -181,34 +232,9 @@ export async function POST(
     );
   }
 
-  const extraEntries = formData.getAll("files").filter((e): e is File => {
-    return e instanceof File && e.size > 0;
-  });
-  if (extraEntries.length > MAX_EXTRA_FILES) {
-    return NextResponse.json(
-      { error: `At most ${MAX_EXTRA_FILES} extra files allowed` },
-      { status: 400 },
-    );
-  }
-  let totalExtraBytes = 0;
-  for (const f of extraEntries) {
-    if (f.size > MAX_FILE_BYTES) {
-      return NextResponse.json(
-        {
-          error: `File too large: ${f.name} (max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB each)`,
-        },
-        { status: 400 },
-      );
-    }
-    totalExtraBytes += f.size;
-  }
-  if (totalExtraBytes > MAX_TOTAL_EXTRA_BYTES) {
-    return NextResponse.json(
-      {
-        error: `Extra attachments total too large (max ${Math.floor(MAX_TOTAL_EXTRA_BYTES / (1024 * 1024))} MB). Remove some files and try again.`,
-      },
-      { status: 400 },
-    );
+  const extraEntries = parseStoredExtras(formData.get("storagePaths"), id);
+  if (!Array.isArray(extraEntries)) {
+    return NextResponse.json({ error: extraEntries.error }, { status: 400 });
   }
 
   const supabase = createAdminClient();
@@ -277,14 +303,26 @@ export async function POST(
       }),
     );
 
-    for (const file of extraEntries) {
-      attachmentCodes.push(
-        await uploadApprovalAttachment({
-          filename: file.name || "attachment",
-          bytes: await fileToBytes(file),
-          kind: "attachment",
-        }),
-      );
+    const extraPaths = extraEntries.map((f) => f.path);
+    try {
+      for (const extra of extraEntries) {
+        const { data: blob, error: downloadError } = await supabase.storage
+          .from("data-uploads")
+          .download(extra.path);
+        if (downloadError) throw downloadError;
+        if (!blob) throw new Error(`Missing attachment ${extra.filename}`);
+        attachmentCodes.push(
+          await uploadApprovalAttachment({
+            filename: extra.filename,
+            bytes: await blob.arrayBuffer(),
+            kind: "attachment",
+          }),
+        );
+      }
+    } finally {
+      if (extraPaths.length > 0) {
+        await supabase.storage.from("data-uploads").remove(extraPaths);
+      }
     }
 
     const formControls = buildApFormControls({
