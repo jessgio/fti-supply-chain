@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,39 +47,64 @@ function errorMessage(error: string | null): string | null {
   return "Google sign-in failed. Please try again.";
 }
 
-function LoginInner() {
-  const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect");
+function safeNextPath(value: string | null): string {
+  if (
+    value &&
+    value.startsWith("/") &&
+    !value.startsWith("//") &&
+    !value.includes("\\")
+  ) {
+    return value;
+  }
+  return "/dashboard";
+}
+
+export default function LoginPage() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(
-    errorMessage(searchParams.get("error")),
-  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setError(errorMessage(params.get("error")));
+  }, []);
 
   async function handleGoogleSignIn() {
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    const next =
-      redirect && redirect.startsWith("/") && !redirect.startsWith("//")
-        ? redirect
-        : "/dashboard";
-    const redirectTo = new URL("/auth/callback", window.location.origin);
-    redirectTo.searchParams.set("next", next);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const next = safeNextPath(params.get("redirect"));
+      document.cookie = `fti-oauth-next=${encodeURIComponent(next)}; Path=/; Max-Age=600; SameSite=Lax`;
 
-    const { error: signInError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: redirectTo.toString(),
-        queryParams: {
-          hd: ALLOWED_LOGIN_DOMAIN,
-          prompt: "select_account",
+      const supabase = createClient();
+      const { data, error: signInError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          skipBrowserRedirect: true,
+          queryParams: {
+            hd: ALLOWED_LOGIN_DOMAIN,
+            prompt: "select_account",
+          },
         },
-      },
-    });
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        setError(signInError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (data.url) {
+        window.location.assign(data.url);
+        return;
+      }
+
+      setError("Google sign-in failed. Please try again.");
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed.");
       setLoading(false);
     }
   }
@@ -120,19 +144,5 @@ function LoginInner() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-stone-500">
-          Loading…
-        </div>
-      }
-    >
-      <LoginInner />
-    </Suspense>
   );
 }
