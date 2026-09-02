@@ -387,6 +387,7 @@ export async function finalizeSalesImport(
   supabase: SupabaseClient,
   retailBySku: Record<string, number> = {},
   retailFromBySku: Record<string, string> = {},
+  salesRange?: { fromDate: string; toDate: string },
 ): Promise<void> {
   const skuCodes = Object.keys(retailBySku);
   const raises: Array<{ skuId: string; price: number; effectiveFrom?: string }> =
@@ -413,6 +414,9 @@ export async function finalizeSalesImport(
 
   const { error: refreshError } = await supabase.rpc(
     "refresh_franchise_sales_daily_agg",
+    salesRange
+      ? { from_date: salesRange.fromDate, to_date: salesRange.toDate }
+      : {},
   );
   if (refreshError) throw refreshError;
 }
@@ -505,7 +509,14 @@ export async function importSalesFromBufferStreaming(
     .update({ row_count: rowCount })
     .eq("id", batchId!);
 
-  await finalizeSalesImport(supabase, retailBySku, retailFromBySku);
+  await finalizeSalesImport(
+    supabase,
+    retailBySku,
+    retailFromBySku,
+    mode === "full"
+      ? undefined
+      : { fromDate: deleteFrom, toDate: deleteTo },
+  );
 
   return {
     batchId: batchId!,
@@ -554,7 +565,10 @@ export async function importSales(
     rowCount: eligible.length,
   });
   await appendSalesImportRows(supabase, batchId, eligible);
-  await finalizeSalesImport(supabase, retailBySku, retailFromBySku);
+  await finalizeSalesImport(supabase, retailBySku, retailFromBySku, {
+    fromDate: rangeStart,
+    toDate: rangeEnd,
+  });
 
   return {
     batchId,
