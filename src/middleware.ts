@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { isAllowedLoginEmail } from "@/lib/auth-domain";
 
 export async function middleware(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -37,25 +38,38 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const allowedUser = user && isAllowedLoginEmail(user.email) ? user : null;
+  if (user && !allowedUser) {
+    await supabase.auth.signOut();
+  }
+
   const { pathname } = request.nextUrl;
   const isLogin = pathname === "/login";
   const isProtected = pathname.startsWith("/dashboard");
 
-  if (!user && isProtected) {
+  if (!allowedUser && isProtected) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(redirectUrl);
+    return redirectWithCookies(redirectUrl, response);
   }
 
-  if (user && isLogin) {
+  if (allowedUser && isLogin) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/dashboard";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    return redirectWithCookies(redirectUrl, response);
   }
 
   return response;
+}
+
+function redirectWithCookies(url: URL, from: NextResponse) {
+  const redirect = NextResponse.redirect(url);
+  from.cookies.getAll().forEach((cookie) => {
+    redirect.cookies.set(cookie);
+  });
+  return redirect;
 }
 
 export const config = {

@@ -6,3 +6,7 @@ enabled = true
 
 [db]
 major_version = 17
+
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/hook_restrict_signup_to_fti_domain"

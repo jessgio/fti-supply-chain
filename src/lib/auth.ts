@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAllowedLoginEmail } from "@/lib/auth-domain";
 import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/types/database";
 
@@ -46,7 +47,7 @@ export async function getCurrentProfile(): Promise<CurrentProfile | null> {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user || !isAllowedLoginEmail(user.email)) return null;
 
     const { data } = await supabase
       .from("profiles")
