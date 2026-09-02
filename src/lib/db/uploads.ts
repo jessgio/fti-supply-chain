@@ -1,11 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { raiseSkuRetailPrices } from "@/lib/db/sku-retail-prices";
 import {
   filterSalesRowsForFullReprocess,
   filterSalesRowsForUpload,
   getSalesUploadCutoff,
   isSalesRowEligibleForImport,
-  mergeRetailPrice,
   SALES_UPLOAD_MONTHS,
   type SalesImportMode,
 } from "@/lib/sales/upload-window";
@@ -140,26 +138,6 @@ async function ensureSkuIdsInCache(
       cache.set(row.sku_code, row.id);
     }
   }
-}
-
-async function applyRetailPrices(
-  supabase: SupabaseClient,
-  retailBySku: Map<string, number>,
-  skuCache: Map<string, string>,
-  retailFromBySku?: Map<string, string>,
-): Promise<void> {
-  const raises = [...retailBySku.entries()].flatMap(([skuCode, price]) => {
-    const skuId = skuCache.get(skuCode);
-    if (!skuId) return [];
-    return [
-      {
-        skuId,
-        price,
-        effectiveFrom: retailFromBySku?.get(skuCode),
-      },
-    ];
-  });
-  await raiseSkuRetailPrices(supabase, raises);
 }
 
 export async function importMappings(
@@ -385,33 +363,8 @@ export async function appendSalesImportRows(
 
 export async function finalizeSalesImport(
   supabase: SupabaseClient,
-  retailBySku: Record<string, number> = {},
-  retailFromBySku: Record<string, string> = {},
   salesRange?: { fromDate: string; toDate: string },
 ): Promise<void> {
-  const skuCodes = Object.keys(retailBySku);
-  const raises: Array<{ skuId: string; price: number; effectiveFrom?: string }> =
-    [];
-  for (let i = 0; i < skuCodes.length; i += SKU_LOOKUP_CHUNK) {
-    const chunk = skuCodes.slice(i, i + SKU_LOOKUP_CHUNK);
-    const { data: skus, error: skuError } = await supabase
-      .from("skus")
-      .select("id, sku_code")
-      .in("sku_code", chunk);
-    if (skuError) throw skuError;
-
-    for (const sku of skus ?? []) {
-      const nextPrice = retailBySku[sku.sku_code];
-      if (!nextPrice) continue;
-      raises.push({
-        skuId: sku.id,
-        price: nextPrice,
-        effectiveFrom: retailFromBySku[sku.sku_code],
-      });
-    }
-  }
-  await raiseSkuRetailPrices(supabase, raises);
-
   const { error: refreshError } = await supabase.rpc(
     "refresh_franchise_sales_daily_agg",
     salesRange
@@ -442,8 +395,6 @@ export async function importSalesFromBufferStreaming(
   let skippedOlder = 0;
   let rangeStart = "";
   let rangeEnd = "";
-  const retailBySku: Record<string, number> = {};
-  const retailFromBySku: Record<string, string> = {};
   const channelCache = new Map<string, string>();
   const skuCache = new Map<string, string>();
   const pending: SalesRow[] = [];
@@ -479,7 +430,6 @@ export async function importSalesFromBufferStreaming(
     rowCount++;
     if (!rangeStart || row.sale_date < rangeStart) rangeStart = row.sale_date;
     if (!rangeEnd || row.sale_date > rangeEnd) rangeEnd = row.sale_date;
-    mergeRetailPrice(retailBySku, row, retailFromBySku);
     pending.push(row);
     if (pending.length >= SALES_INSERT_BATCH) {
       queueInsert(pending.splice(0, SALES_INSERT_BATCH));
@@ -511,8 +461,6 @@ export async function importSalesFromBufferStreaming(
 
   await finalizeSalesImport(
     supabase,
-    retailBySku,
-    retailFromBySku,
     mode === "full"
       ? undefined
       : { fromDate: deleteFrom, toDate: deleteTo },
@@ -552,12 +500,6 @@ export async function importSales(
     );
   }
 
-  const retailBySku: Record<string, number> = {};
-  const retailFromBySku: Record<string, string> = {};
-  for (const row of eligible) {
-    mergeRetailPrice(retailBySku, row, retailFromBySku);
-  }
-
   const { batchId, replacedCount } = await beginSalesImport(supabase, {
     filename,
     rangeStart,
@@ -565,7 +507,7 @@ export async function importSales(
     rowCount: eligible.length,
   });
   await appendSalesImportRows(supabase, batchId, eligible);
-  await finalizeSalesImport(supabase, retailBySku, retailFromBySku, {
+  await finalizeSalesImport(supabase, {
     fromDate: rangeStart,
     toDate: rangeEnd,
   });
@@ -589,12 +531,6 @@ function aggregateStockRows(rows: StockRow[]): StockRow[] {
     const existing = map.get(key);
     if (existing) {
       existing.qty_on_hand += row.qty_on_hand;
-      if (
-        row.retail_price &&
-        (!existing.retail_price || row.retail_price > existing.retail_price)
-      ) {
-        existing.retail_price = row.retail_price;
-      }
     } else {
       map.set(key, { ...row });
     }
@@ -622,8 +558,6 @@ export async function importStock(
   if (batchError) throw batchError;
 
   const skuCache = new Map<string, string>();
-  const retailBySku = new Map<string, number>();
-  const retailFromBySku = new Map<string, string>();
   await ensureSkuIdsInCache(
     supabase,
     skuCache,
@@ -654,19 +588,6 @@ export async function importStock(
       throw new Error(`SKU not found after import: ${row.sku_code}`);
     }
 
-    if (row.retail_price && row.retail_price > 0) {
-      const current = retailBySku.get(row.sku_code) ?? 0;
-      if (row.retail_price > current) {
-        retailBySku.set(row.sku_code, row.retail_price);
-        retailFromBySku.set(row.sku_code, row.as_of_date);
-      } else if (
-        row.retail_price === current &&
-        row.as_of_date < (retailFromBySku.get(row.sku_code) ?? row.as_of_date)
-      ) {
-        retailFromBySku.set(row.sku_code, row.as_of_date);
-      }
-    }
-
     chunk.push({
       sku_id: skuId,
       location: row.location,
@@ -681,8 +602,6 @@ export async function importStock(
   }
 
   await flushChunk();
-
-  await applyRetailPrices(supabase, retailBySku, skuCache, retailFromBySku);
 
   return { batchId: batch.id, rowCount: aggregated.length };
 }

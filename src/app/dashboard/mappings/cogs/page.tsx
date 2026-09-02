@@ -183,8 +183,8 @@ export default function SkuCogsPage() {
               <CardTitle>Unit COGS by SKU</CardTitle>
               <CardDescription>
                 {filtered.length} of {skus.length} franchise-mapped single SKUs.
-                Costs in IDR. Gross margin uses RSP (Harga) from sales uploads
-                when available.
+                Costs in IDR. Gross margin uses SKU RSP from Master Data / Sales
+                forecast.
               </CardDescription>
             </div>
             <div className="relative w-full max-w-xs">

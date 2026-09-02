@@ -128,39 +128,3 @@ export async function setSkuRetailPrice(
   );
   if (error) throw error;
 }
-
-/** Raise list price only (never lower). Used by WMS sales/stock uploads. */
-export async function raiseSkuRetailPrices(
-  supabase: SupabaseClient,
-  raises: Array<{ skuId: string; price: number; effectiveFrom?: string }>,
-): Promise<void> {
-  const skuIds = [...new Set(raises.map((r) => r.skuId))];
-  if (skuIds.length === 0) return;
-
-  const current = new Map<string, number>();
-  const chunk = 200;
-  for (let i = 0; i < skuIds.length; i += chunk) {
-    const slice = skuIds.slice(i, i + chunk);
-    const { data, error } = await supabase
-      .from("skus")
-      .select("id, retail_price")
-      .in("id", slice);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      current.set(row.id, Number(row.retail_price ?? 0));
-    }
-  }
-
-  for (const raise of raises) {
-    if (!raise.price || raise.price <= (current.get(raise.skuId) ?? 0)) {
-      continue;
-    }
-    await setSkuRetailPrice(
-      supabase,
-      raise.skuId,
-      raise.price,
-      raise.effectiveFrom,
-    );
-    current.set(raise.skuId, raise.price);
-  }
-}

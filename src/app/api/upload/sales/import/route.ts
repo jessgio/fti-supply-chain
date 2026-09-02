@@ -57,6 +57,7 @@ const chunkSchema = z.object({
 const finalizeSchema = z.object({
   phase: z.literal("finalize"),
   batchId: z.string().uuid(),
+  /** Ignored. WMS Harga is not official RSP. Kept so older clients still parse. */
   retailBySku: z.record(z.string(), z.number()).optional(),
 });
 
@@ -148,7 +149,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, inserted });
     }
 
-    await finalizeSalesImport(supabase, body.retailBySku ?? {});
+    await finalizeSalesImport(supabase);
     invalidateForecastCache();
     return NextResponse.json({ ok: true, batchId: body.batchId });
   } catch (error) {
