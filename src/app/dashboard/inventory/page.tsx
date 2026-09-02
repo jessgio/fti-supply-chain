@@ -401,7 +401,7 @@ export default function InventoryPage() {
     Record<string, ProductLinkedPackagingRow[]>
   >({});
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
-  const [seasonalityEnabled, setSeasonalityEnabled] = useState(true);
+  const [seasonalityEnabled, setSeasonalityEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -655,11 +655,10 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {!seasonalityEnabled && (
+      {seasonalityEnabled && (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          Seasonality is off — Fcst/day and restock metrics use the base L3M/L6M
-          blend without Ramadan or Q4 uplift. Toggle on to compare with seasonal
-          demand.
+          Seasonality is on — Fcst/day and restock metrics include Ramadan or Q4
+          uplift. Toggle off to use the base L3M/L6M blend.
         </p>
       )}
 

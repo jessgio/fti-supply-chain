@@ -17,6 +17,7 @@ import {
   sumGrowthAcrossChannels,
   summarizeGrowth,
 } from "@/lib/analytics/growth";
+import { applySeasonalityToggle } from "@/lib/forecast/seasonality-toggle";
 import {
   isOverstock,
   monthsOfCover,
@@ -55,7 +56,9 @@ export default function CommercialPage() {
 
         const forecastData = await forecastRes.json();
         if (forecastRes.ok) {
-          setRecommendations(forecastData.recommendations ?? []);
+          setRecommendations(
+            applySeasonalityToggle(forecastData.recommendations ?? [], false),
+          );
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load");
