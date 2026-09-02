@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  SupplierUsualTermsSummary,
+  useSupplierUsualTerms,
+} from "@/components/procurement/supplier-usual-terms-hint";
 import { formatSupplierPoNotes } from "@/lib/procurement/supplier-po-notes";
 import type { Supplier } from "@/types/database";
 
@@ -116,6 +120,7 @@ export function SuppliersDialog({
     () => (form ? formToNotesPreview(form) : null),
     [form],
   );
+  const { terms: usualTerms } = useSupplierUsualTerms(editing?.id);
 
   function patchForm(patch: Partial<SupplierFormState>) {
     setForm((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -270,6 +275,7 @@ export function SuppliersDialog({
               <p className="text-sm font-medium text-stone-800">
                 Term of payment
               </p>
+              <SupplierUsualTermsSummary terms={usualTerms} />
               <label className="block space-y-1">
                 <span className="text-sm text-stone-600">1) Payment</span>
                 <Input

@@ -1,7 +1,11 @@
 import { createRequire } from "node:module";
 import type PDFDocumentType from "pdfkit";
 import type { CompanySettings, PurchaseOrder, Supplier } from "@/types/database";
-import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import {
+  downPaymentLabel,
+  finalPaymentLabel,
+  resolvePaymentSchedule,
+} from "@/lib/procurement/committed-payment-amounts";
 import { billableLineQty, computePoInvoiceTotals, pphLabel, taxLabel } from "@/lib/procurement/po-totals";
 import { composePoPdfNotes } from "@/lib/procurement/supplier-po-notes";
 import { formatPoMoney } from "@/lib/procurement/currencies";
@@ -312,12 +316,14 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
     }
     totalRow("Invoice total", formatCurrency(totals.invoiceTotal, currency), true);
     totalRow(
-      paymentSchedule.isCommitted
-        ? "Down payment"
-        : `Down payment (${totals.downPaymentPct}%)`,
+      downPaymentLabel(paymentSchedule.downPaymentPct),
       formatCurrency(paymentSchedule.downPayment, currency),
     );
-    totalRow("Final payment", formatCurrency(paymentSchedule.balance, currency), true);
+    totalRow(
+      finalPaymentLabel(paymentSchedule.finalPaymentPct),
+      formatCurrency(paymentSchedule.balance, currency),
+      true,
+    );
 
     const pdfNotes = composePoPdfNotes(po.notes, supplier);
 

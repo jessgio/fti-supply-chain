@@ -1,5 +1,4 @@
-import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
-import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { formatPaymentPct, resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { formatSupplierPaymentDetails } from "@/lib/procurement/supplier-po-notes";
 import type { PurchaseOrder, Supplier } from "@/types/database";
 
@@ -285,11 +284,7 @@ export function isApPaymentPlanScope(
 /** True when the PO has a split down-payment / balance schedule. */
 export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
   const schedule = resolvePaymentSchedule(po);
-  if (schedule.isCommitted) {
-    return schedule.downPayment > 0 && schedule.balance > 0;
-  }
-  const dpPct = computePoInvoiceTotals(po).downPaymentPct;
-  return dpPct > 0 && dpPct < 100;
+  return schedule.downPayment > 0 && schedule.balance > 0;
 }
 
 /**
@@ -308,10 +303,9 @@ export function buildPaymentPlanRows(
     );
   }
 
-  const live = computePoInvoiceTotals(po);
   const schedule = resolvePaymentSchedule(po);
   const today = localTodayYmd();
-  const dpPct = live.downPaymentPct;
+  const dpPct = schedule.downPaymentPct;
   const dpDate = dueDateYmd(po.order_date) ?? today;
   const balanceDate = dueDateYmd(po.expected_date) ?? today;
 
@@ -319,18 +313,11 @@ export function buildPaymentPlanRows(
   const balanceAmount = roundMoney(schedule.balance, currency);
   const invoiceAmount = roundMoney(schedule.invoiceTotal, currency);
 
-  const isSplit = schedule.isCommitted
-    ? downAmount > 0 && balanceAmount > 0
-    : dpPct > 0 && dpPct < 100;
+  const isSplit = downAmount > 0 && balanceAmount > 0;
 
   if (isSplit) {
-    const balancePct = Math.max(0, 100 - dpPct);
-    const downLabel = schedule.isCommitted
-      ? "Down payment"
-      : `Down payment ${dpPct}%`;
-    const balanceLabel = schedule.isCommitted
-      ? "Balance"
-      : `Balance ${balancePct}%`;
+    const downLabel = `Down payment ${formatPaymentPct(dpPct)}%`;
+    const balanceLabel = `Balance ${formatPaymentPct(schedule.finalPaymentPct)}%`;
     const downPaymentRow: PaymentPlanRow = {
       dateYmd: dpDate,
       amount: downAmount,

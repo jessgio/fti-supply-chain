@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { SkuSearchInput } from "@/components/packaging/sku-search-input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,11 @@ import {
   LastPurchaseCostSuggestion,
   useLastPurchaseCosts,
 } from "@/components/procurement/last-purchase-cost-hint";
+import {
+  SupplierUsualPctHint,
+  useSupplierUsualTerms,
+} from "@/components/procurement/supplier-usual-terms-hint";
+import { formatPctInput } from "@/lib/procurement/supplier-usual-terms";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -78,6 +83,14 @@ function PoInvoiceTotalsView({
         <span>Invoice total</span>
         <span>{fmt(totals.invoiceTotal)}</span>
       </div>
+      <div className={`${rowClassName} mt-1`}>
+        <span>Down payment ({totals.downPaymentPct}%)</span>
+        <span>{fmt(totals.downPayment)}</span>
+      </div>
+      <div className={`${rowClassName} mt-1`}>
+        <span>Final payment ({100 - totals.downPaymentPct}%)</span>
+        <span>{fmt(totals.finalPayment)}</span>
+      </div>
     </div>
   );
 }
@@ -141,6 +154,27 @@ export function CreatePoDialog({
     [lines],
   );
   const { costsBySkuId } = useLastPurchaseCosts(lineSkuIds, currency);
+  const { terms: usualTerms, loading: usualTermsLoading } =
+    useSupplierUsualTerms(supplierId || null);
+  const appliedUsualTermsFor = useRef<string>("");
+
+  // Apply this supplier's usual DP / VAT once their history has loaded.
+  useEffect(() => {
+    if (!supplierId) {
+      appliedUsualTermsFor.current = "";
+      return;
+    }
+    if (usualTermsLoading) return;
+    if (appliedUsualTermsFor.current === supplierId) return;
+    appliedUsualTermsFor.current = supplierId;
+    if (usualTerms) {
+      setDownPaymentPct(formatPctInput(usualTerms.downPayment.value));
+      setTaxPct(formatPctInput(usualTerms.vat.value));
+      return;
+    }
+    setDownPaymentPct("30");
+    setTaxPct(String(DEFAULT_PO_TAX_PCT));
+  }, [supplierId, usualTerms, usualTermsLoading]);
 
   // Prefill empty unit costs once last purchase price is known for the currency.
   useEffect(() => {
@@ -389,18 +423,26 @@ export function CreatePoDialog({
               ))}
             </Select>
           </label>
-          <label className="space-y-1">
-            <span className="text-sm font-medium text-stone-700">
-              Down payment %
-            </span>
-            <Input
-              type="number"
-              min="0"
-              max="100"
-              value={downPaymentPct}
-              onChange={(e) => setDownPaymentPct(e.target.value)}
+          <div className="space-y-1">
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-stone-700">
+                Down payment %
+              </span>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                value={downPaymentPct}
+                onChange={(e) => setDownPaymentPct(e.target.value)}
+              />
+            </label>
+            <SupplierUsualPctHint
+              term={usualTerms?.downPayment}
+              poCount={usualTerms?.poCount ?? 0}
+              currentValue={downPaymentPct}
+              onApply={setDownPaymentPct}
             />
-          </label>
+          </div>
           <label className="space-y-1">
             <span className="text-sm font-medium text-stone-700">
               Vendor discount
@@ -413,20 +455,28 @@ export function CreatePoDialog({
               onChange={(e) => setDiscountAmount(e.target.value)}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-sm font-medium text-stone-700">VAT %</span>
-            <Input
-              type="number"
-              min="0"
-              max="100"
-              value={taxPct}
-              onChange={(e) => setTaxPct(e.target.value)}
-              placeholder={String(DEFAULT_PO_TAX_PCT)}
+          <div className="space-y-1">
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-stone-700">VAT %</span>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                value={taxPct}
+                onChange={(e) => setTaxPct(e.target.value)}
+                placeholder={String(DEFAULT_PO_TAX_PCT)}
+              />
+            </label>
+            <SupplierUsualPctHint
+              term={usualTerms?.vat}
+              poCount={usualTerms?.poCount ?? 0}
+              currentValue={taxPct}
+              onApply={setTaxPct}
             />
             <span className="text-xs text-stone-500">
               Added on top of line totals. Set to 0 if the vendor does not charge VAT.
             </span>
-          </label>
+          </div>
           <label className="space-y-1">
             <span className="text-sm font-medium text-stone-700">PPh %</span>
             <Input

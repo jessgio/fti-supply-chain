@@ -27,6 +27,10 @@ import {
   EditPoDialog,
   type PoSkuOption,
 } from "@/components/procurement/edit-po-dialog";
+import {
+  SupplierUsualTermsSummary,
+  useSupplierUsualTerms,
+} from "@/components/procurement/supplier-usual-terms-hint";
 import { ReplacePoSkusDialog } from "@/components/procurement/replace-po-skus-dialog";
 import { SinglePoGantt } from "@/components/procurement/single-po-gantt";
 import type { FillingPoExtractShortfall } from "@/lib/extracts/filling-po-extract-shortfall";
@@ -34,7 +38,11 @@ import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
 } from "@/lib/procurement/currencies";
-import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import {
+  downPaymentLabel,
+  finalPaymentLabel,
+  resolvePaymentSchedule,
+} from "@/lib/procurement/committed-payment-amounts";
 import {
   computePoInvoiceTotals,
   poLineOpenQty,
@@ -156,6 +164,8 @@ export default function PurchaseOrderPage() {
     [po?.lines],
   );
 
+  const { terms: usualTerms } = useSupplierUsualTerms(po?.supplier_id);
+
   async function handleDelete() {
     if (!po) return;
     if (!canDelete) {
@@ -255,6 +265,7 @@ export default function PurchaseOrderPage() {
               {po.supplier_name ?? "No supplier"} · {po.currency ?? DEFAULT_PO_CURRENCY}
               {po.expected_date ? ` · Expected ${formatDate(po.expected_date)}` : ""}
             </p>
+            <SupplierUsualTermsSummary terms={usualTerms} className="mt-1 text-xs text-stone-500" />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={STATUS_STYLES[po.status]}>{STATUS_LABELS[po.status]}</Badge>
@@ -546,14 +557,12 @@ export default function PurchaseOrderPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-stone-600">
-                  {paymentSchedule.isCommitted
-                    ? "Down payment"
-                    : `Down payment (${totals.downPaymentPct}%)`}
+                  {downPaymentLabel(paymentSchedule.downPaymentPct)}
                 </span>
                 <span className="font-medium">{fmt(paymentSchedule.downPayment)}</span>
               </div>
               <div className="flex justify-between font-medium">
-                <span>Final payment</span>
+                <span>{finalPaymentLabel(paymentSchedule.finalPaymentPct)}</span>
                 <span>{fmt(paymentSchedule.balance)}</span>
               </div>
             </CardContent>

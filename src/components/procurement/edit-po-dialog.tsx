@@ -13,6 +13,10 @@ import {
   useLastPurchaseCosts,
 } from "@/components/procurement/last-purchase-cost-hint";
 import {
+  SupplierUsualPctHint,
+  useSupplierUsualTerms,
+} from "@/components/procurement/supplier-usual-terms-hint";
+import {
   DEFAULT_PO_CURRENCY,
   PO_CURRENCIES,
   PO_UNIT_COST_STEP,
@@ -99,6 +103,10 @@ export function EditPoDialog({
     [lines],
   );
   const { costsBySkuId } = useLastPurchaseCosts(lineSkuIds, currency);
+  const { terms: usualTerms } = useSupplierUsualTerms(
+    supplierId || null,
+    po.id,
+  );
 
   function updateLine(idx: number, patch: Partial<DraftLine>) {
     setLines((prev) =>
@@ -321,18 +329,26 @@ export function EditPoDialog({
                   ))}
                 </Select>
               </label>
-              <label className="space-y-1">
-                <span className="text-sm font-medium text-stone-700">
-                  Down payment %
-                </span>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={downPaymentPct}
-                  onChange={(e) => setDownPaymentPct(e.target.value)}
+              <div className="space-y-1">
+                <label className="space-y-1">
+                  <span className="text-sm font-medium text-stone-700">
+                    Down payment %
+                  </span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={downPaymentPct}
+                    onChange={(e) => setDownPaymentPct(e.target.value)}
+                  />
+                </label>
+                <SupplierUsualPctHint
+                  term={usualTerms?.downPayment}
+                  poCount={usualTerms?.poCount ?? 0}
+                  currentValue={downPaymentPct}
+                  onApply={setDownPaymentPct}
                 />
-              </label>
+              </div>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-stone-700">
                   Vendor discount
@@ -345,16 +361,24 @@ export function EditPoDialog({
                   onChange={(e) => setDiscountAmount(e.target.value)}
                 />
               </label>
-              <label className="space-y-1">
-                <span className="text-sm font-medium text-stone-700">VAT %</span>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={taxPct}
-                  onChange={(e) => setTaxPct(e.target.value)}
+              <div className="space-y-1">
+                <label className="space-y-1">
+                  <span className="text-sm font-medium text-stone-700">VAT %</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={taxPct}
+                    onChange={(e) => setTaxPct(e.target.value)}
+                  />
+                </label>
+                <SupplierUsualPctHint
+                  term={usualTerms?.vat}
+                  poCount={usualTerms?.poCount ?? 0}
+                  currentValue={taxPct}
+                  onApply={setTaxPct}
                 />
-              </label>
+              </div>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-stone-700">PPh %</span>
                 <Input

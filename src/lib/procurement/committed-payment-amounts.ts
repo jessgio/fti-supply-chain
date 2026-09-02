@@ -10,9 +10,47 @@ export type CommittedPaymentSchedule = {
   downPayment: number;
   balance: number;
   invoiceTotal: number;
+  /** Share of the live invoice total represented by the (possibly locked) down payment. */
+  downPaymentPct: number;
+  /** Share of the live invoice total remaining after the down payment. */
+  finalPaymentPct: number;
   /** True when at least one committed amount is stored on the PO. */
   isCommitted: boolean;
 };
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function percentsFromAmounts(
+  downPayment: number,
+  invoiceTotal: number,
+): { downPaymentPct: number; finalPaymentPct: number } {
+  if (!(invoiceTotal > 0)) {
+    return { downPaymentPct: 0, finalPaymentPct: 0 };
+  }
+  const downPaymentPct = (downPayment / invoiceTotal) * 100;
+  return {
+    downPaymentPct,
+    finalPaymentPct: ((invoiceTotal - downPayment) / invoiceTotal) * 100,
+  };
+}
+
+/** Format a payment split for labels, e.g. 30 or 27.5. */
+export function formatPaymentPct(pct: number): string {
+  if (!Number.isFinite(pct)) return "0";
+  const rounded = Math.round(pct * 10) / 10;
+  if (Object.is(rounded, -0) || rounded === 0) return "0";
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+export function downPaymentLabel(pct: number): string {
+  return `Down payment (${formatPaymentPct(pct)}%)`;
+}
+
+export function finalPaymentLabel(pct: number): string {
+  return `Final payment (${formatPaymentPct(pct)}%)`;
+}
 
 type PoWithCommitted = Pick<
   PurchaseOrder,
@@ -30,10 +68,6 @@ type PoWithCommitted = Pick<
   status?: PurchaseOrder["status"];
 };
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
 export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
   return round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
@@ -44,7 +78,7 @@ export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
  * Invoice total always follows live lines and charges. Once a down payment has
  * been logged (or frozen on the PO), that exact amount is kept even if qty or
  * price later change. The remaining balance is live invoice minus that down
- * payment — never a frozen remainder, and never a fresh % of the new total.
+ * payment. Percentages are always derived from those amounts vs the new total.
  */
 export function resolvePaymentSchedule(
   po: PoWithCommitted,
@@ -61,6 +95,8 @@ export function resolvePaymentSchedule(
       downPayment: live.downPayment,
       balance: live.finalPayment,
       invoiceTotal: live.invoiceTotal,
+      downPaymentPct: live.downPaymentPct,
+      finalPaymentPct: Math.max(0, 100 - live.downPaymentPct),
       isCommitted: false,
     };
   }
@@ -71,11 +107,17 @@ export function resolvePaymentSchedule(
       : live.downPayment;
   const invoiceTotal = live.invoiceTotal;
   const balance = round2(invoiceTotal - downPayment);
+  const { downPaymentPct, finalPaymentPct } = percentsFromAmounts(
+    downPayment,
+    invoiceTotal,
+  );
 
   return {
     downPayment,
     balance,
     invoiceTotal,
+    downPaymentPct,
+    finalPaymentPct,
     isCommitted: true,
   };
 }
