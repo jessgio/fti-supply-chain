@@ -17,6 +17,7 @@ export { FranchiseBody } from "./franchise-body";
 import {
   calendarActiveMonth,
   isCurrentCalendarMonth,
+  activeMonthEdge,
   type ForecastSortKey,
 } from "./table-utils";
 import {
@@ -198,7 +199,7 @@ export function SkuMonthHeaders({
               sortKey: "l3m_net_delta" as const,
             },
           ] as const;
-          return subHeads.map((sub) => {
+          return subHeads.map((sub, subIndex) => {
             const sortable = sub.sortKey != null;
             const isActive = sortable && sortKey === sub.sortKey;
             const isPlan = sub.key === "plan";
@@ -207,6 +208,7 @@ export function SkuMonthHeaders({
                 key={`${month}-${sub.key}`}
                 className={cn(
                   "sticky top-0 z-10 bg-sky-50 py-2 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
+                  activeMonthEdge(subIndex, subHeads.length),
                   isPlan
                     ? compact
                       ? "min-w-[8.5rem]"
@@ -327,10 +329,13 @@ export function InactiveMonthHeaders({ year }: { year: number }) {
           const label = MONTH_LABELS[month - 1];
           return (
             ["MTD", "EOM", "Plan", "%", "contrib", "Δ qty", "Δ net"] as const
-          ).map((sub) => (
+          ).map((sub, subIndex, subs) => (
             <th
               key={`${month}-${sub}`}
-              className="sticky top-0 z-10 min-w-[6.5rem] bg-sky-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]"
+              className={cn(
+                "sticky top-0 z-10 min-w-[6.5rem] bg-sky-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
+                activeMonthEdge(subIndex, subs.length),
+              )}
             >
               {label} {sub}
             </th>

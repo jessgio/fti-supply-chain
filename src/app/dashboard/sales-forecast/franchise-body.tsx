@@ -32,6 +32,8 @@ import {
   isCurrentCalendarMonth,
   isPlanMonth,
   QTY_SOLD_CLASS,
+  ACTIVE_MONTH_EDGE_LEFT,
+  ACTIVE_MONTH_EDGE_RIGHT,
   rowStripeBg,
   rspForMonth,
   type ForecastSortKey,
@@ -142,7 +144,9 @@ function L3mDeltaPair({
     return (
       <>
         <td className="px-3 py-2.5 align-top text-stone-400">—</td>
-        <td className="px-3 py-2.5 align-top text-stone-400">—</td>
+        <td className={cn("px-3 py-2.5 align-top text-stone-400", ACTIVE_MONTH_EDGE_RIGHT)}>
+          —
+        </td>
       </>
     );
   }
@@ -161,6 +165,7 @@ function L3mDeltaPair({
       <td
         className={cn(
           "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
+          ACTIVE_MONTH_EDGE_RIGHT,
           signedDeltaClass(netDelta),
         )}
       >
@@ -215,7 +220,7 @@ function FranchiseMonthCells({
             : 0;
           return (
             <Fragment key={month}>
-              <td className="bg-sky-50/60 px-3 py-2.5 align-top text-stone-600">
+              <td className={cn("bg-sky-50/60 px-3 py-2.5 align-top text-stone-600", ACTIVE_MONTH_EDGE_LEFT)}>
                 <div className={QTY_SOLD_CLASS}>{formatNumber(mtdQty, 1)} u</div>
                 <div className="text-xs tabular-nums leading-tight text-stone-700">
                   {formatCurrency(mtdPostTax)}

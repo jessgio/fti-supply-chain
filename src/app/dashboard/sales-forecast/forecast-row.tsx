@@ -23,6 +23,8 @@ import {
   isCurrentCalendarMonth,
   isPlanMonth,
   QTY_SOLD_CLASS,
+  ACTIVE_MONTH_EDGE_LEFT,
+  ACTIVE_MONTH_EDGE_RIGHT,
   rowStripeBg,
   rspForMonth,
 } from "./table-utils";
@@ -703,7 +705,7 @@ function CurrentMonthFragment({
         qty={mtdQty}
         postTax={mtdPostTax}
         disc={mtdDisc}
-        className="bg-sky-50/60"
+        className={cn("bg-sky-50/60", ACTIVE_MONTH_EDGE_LEFT)}
       />
       <ReadonlyMetricCell
         qty={eomQty}
@@ -769,6 +771,7 @@ function CurrentMonthFragment({
       <td
         className={cn(
           "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
+          ACTIVE_MONTH_EDGE_RIGHT,
           signedDeltaClass(planPostTax - l3mPostTax),
         )}
         title="Plan post-tax minus L3M monthly average"

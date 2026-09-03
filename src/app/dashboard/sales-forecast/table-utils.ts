@@ -16,6 +16,16 @@ export const FREEZE_EDGE = "shadow-[4px_0_8px_-4px_rgba(28,25,23,0.18)]";
 export const QTY_SOLD_CLASS =
   "text-sm font-semibold tabular-nums leading-tight text-stone-900";
 
+/** Vertical rules that frame the active calendar-month column group. */
+export const ACTIVE_MONTH_EDGE_LEFT = "border-l border-sky-500";
+export const ACTIVE_MONTH_EDGE_RIGHT = "border-r border-sky-500";
+
+export function activeMonthEdge(index: number, count: number): string {
+  if (index === 0) return ACTIVE_MONTH_EDGE_LEFT;
+  if (index === count - 1) return ACTIVE_MONTH_EDGE_RIGHT;
+  return "";
+}
+
 export type ForecastSortKey =
   | "sku_code"
   | "franchise_name"
