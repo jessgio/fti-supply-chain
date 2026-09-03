@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { format } from "date-fns";
 import { getCompletedMonthBounds } from "@/lib/forecast/demand";
-import { loadRestockRecommendations } from "@/lib/forecast/service";
 import {
   MONTHS,
   OFFLINE_SALES_LAG_MONTHS,
@@ -15,15 +14,18 @@ import {
   remainingYearShortfall,
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
-import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
-import { nestBundleBoms } from "@/lib/sales-forecast/franchise-rollup";
+import {
+  extraCompleteSetsFromInbound,
+  nestBundleBoms,
+} from "@/lib/sales-forecast/franchise-rollup";
 import {
   loadSkuRetailPriceHistory,
   rspByMonthForYear,
   type SkuPriceHistoryRow,
 } from "@/lib/db/sku-retail-prices";
-import { fetchAllRows, fetchAllRpc } from "@/lib/supabase/fetch-all";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { listForecastPendingSkus } from "@/lib/db/sales-forecast-pending";
+import { isForecastDefectSku } from "@/lib/sales-forecast/resolve-csv-skus";
 import type {
   SopBomComponent,
   SopForecastPayload,
@@ -59,6 +61,7 @@ type ForecastSkuRow = {
 };
 
 function mapEligibleSku(row: ForecastSkuRow): EligibleSku | null {
+  if (isForecastDefectSku(row.sku_code)) return null;
   if (row.is_packaging || row.is_extract) return null;
   if (!row.is_bundle && !row.franchise_id) return null;
   const franchise = row.product_franchises;
@@ -150,42 +153,67 @@ export async function listSellableSkusByIds(
 async function loadStockBySkuId(
   supabase: SupabaseClient,
 ): Promise<Map<string, number>> {
-  const { data: latest, error: latestError } = await supabase
-    .from("stock_levels")
-    .select("as_of_date")
-    .in("location", [...STOCK_AGGREGATE_LOCATIONS])
-    .order("as_of_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (latestError) throw latestError;
-  if (!latest?.as_of_date) return new Map();
-
-  const rows = await fetchAllRows<{ sku_id: string; qty_on_hand: number }>(
-    () =>
-      supabase
-        .from("stock_levels")
-        .select("sku_id, qty_on_hand")
-        .eq("as_of_date", latest.as_of_date)
-        .in("location", [...STOCK_AGGREGATE_LOCATIONS]),
-  );
+  const { data, error } = await supabase.rpc("get_sop_stock_by_sku_json");
+  if (error) throw error;
+  const raw = data;
+  const parsed =
+    Array.isArray(raw)
+      ? raw
+      : typeof raw === "string"
+        ? (JSON.parse(raw) as unknown)
+        : [];
+  const rows = Array.isArray(parsed)
+    ? (parsed as Array<{ sku_id: string; qty: number }>)
+    : [];
   const map = new Map<string, number>();
   for (const row of rows) {
-    map.set(row.sku_id, (map.get(row.sku_id) ?? 0) + Number(row.qty_on_hand));
+    map.set(row.sku_id, Number(row.qty) || 0);
   }
   return map;
 }
 
+type OnOrderInfo = { qty: number; date: string | null };
+
+type OpenPoLineRow = {
+  sku_id: string;
+  qty_ordered: number;
+  qty_received: number;
+  is_closed: boolean;
+  purchase_orders:
+    | { expected_date: string | null; status: string }
+    | { expected_date: string | null; status: string }[]
+    | null;
+};
+
 async function loadOnOrderBySkuId(
   supabase: SupabaseClient,
-): Promise<Map<string, number>> {
-  const { data, error } = await supabase.rpc("get_on_order_qty_by_sku");
-  if (error) throw error;
-  const map = new Map<string, number>();
-  for (const row of (data ?? []) as Array<{
-    sku_id: string;
-    on_order_qty: number;
-  }>) {
-    map.set(row.sku_id, Number(row.on_order_qty));
+): Promise<Map<string, OnOrderInfo>> {
+  const rows = await fetchAllRows<OpenPoLineRow>(() =>
+    supabase
+      .from("purchase_order_lines")
+      .select(
+        "sku_id, qty_ordered, qty_received, is_closed, purchase_orders!inner(expected_date, status)",
+      )
+      .eq("is_closed", false)
+      .in("purchase_orders.status", [
+        "planned",
+        "ordered",
+        "in_production",
+        "in_transit",
+      ]),
+  );
+  const map = new Map<string, OnOrderInfo>();
+  for (const row of rows) {
+    const open = Number(row.qty_ordered) - Number(row.qty_received);
+    if (!(open > 0)) continue;
+    const po = Array.isArray(row.purchase_orders)
+      ? row.purchase_orders[0]
+      : row.purchase_orders;
+    const prev = map.get(row.sku_id) ?? { qty: 0, date: null };
+    prev.qty += open;
+    const date = po?.expected_date ?? null;
+    if (date && (!prev.date || date < prev.date)) prev.date = date;
+    map.set(row.sku_id, prev);
   }
   return map;
 }
@@ -259,7 +287,7 @@ function buildGroupRows(
     { projected_qty: number; avg_discount_pct: number; upload_id: string | null }
   >,
   stockBySku: Map<string, number>,
-  onOrderBySku: Map<string, number>,
+  onOrderBySku: Map<string, OnOrderInfo>,
   oosByCode: Map<string, string | null>,
   bomByBundle: Map<string, SopBomComponent[]>,
   priceHistory: Map<string, SkuPriceHistoryRow[]>,
@@ -333,7 +361,10 @@ function buildGroupRows(
     const current_stock = sku.is_bundle
       ? bundleStockFromBom(bom_components, stockBySku)
       : (stockBySku.get(sku.id) ?? 0);
-    const on_order_qty = onOrderBySku.get(sku.id) ?? 0;
+    const onOrder = sku.is_bundle
+      ? extraCompleteSetsFromInbound(bom_components, stockBySku, onOrderBySku)
+      : (onOrderBySku.get(sku.id) ?? { qty: 0, date: null });
+    const on_order_qty = onOrder.qty;
     return {
       sku_id: sku.id,
       sku_code: sku.sku_code,
@@ -345,6 +376,7 @@ function buildGroupRows(
       rsp_by_month,
       current_stock,
       on_order_qty,
+      on_order_date: onOrder.date,
       projected_stockout_date: oosByCode.get(sku.sku_code) ?? null,
       l3m_qty: l3m.qty,
       l3m_post_tax: l3m.post_tax,
@@ -399,7 +431,6 @@ export async function loadSopYearForecast(
     planRows,
     uploadsRes,
     monthlyActualsRes,
-    restockResult,
     inactiveRes,
     bomRows,
     priceHistory,
@@ -435,17 +466,32 @@ export async function loadSopYearForecast(
       .eq("year", year)
       .order("created_at", { ascending: false }),
     mappedChannelIds.size > 0
-      ? fetchAllRpc<{
-          sku_id: string;
-          channel_id: string;
-          sale_year: number;
-          sale_month: number;
-          qty: number;
-          net_sales: number;
-        }>(supabase, "get_sop_monthly_actuals", {
-          p_start: historyStart,
-          p_end: today,
-        }).then((data) => ({ data, error: null as null }))
+      ? supabase
+          .rpc("get_sop_monthly_actuals_json", {
+            p_start: historyStart,
+            p_end: today,
+          })
+          .then((res) => {
+            if (res.error) throw res.error;
+            const raw = res.data;
+            const parsed =
+              Array.isArray(raw)
+                ? raw
+                : typeof raw === "string"
+                  ? (JSON.parse(raw) as unknown)
+                  : [];
+            const data = Array.isArray(parsed)
+              ? (parsed as Array<{
+                  sku_id: string;
+                  channel_id: string;
+                  sale_year: number;
+                  sale_month: number;
+                  qty: number;
+                  net_sales: number;
+                }>)
+              : [];
+            return { data, error: null as null };
+          })
       : Promise.resolve({
           data: [] as Array<{
             sku_id: string;
@@ -457,28 +503,23 @@ export async function loadSopYearForecast(
           }>,
           error: null as null,
         }),
-    loadRestockRecommendations(supabase).catch(() => ({
-      recommendations: [] as Awaited<
-        ReturnType<typeof loadRestockRecommendations>
-      >["recommendations"],
-      skuCount: 0,
-    })),
-    supabase
-      .from("sop_sku_channel_inactive")
-      .select("sku_id, sop_group"),
+    supabase.from("sop_sku_channel_inactive").select("sku_id, sop_group"),
     fetchAllRows<{
       bundle_sku_id: string;
       component_sku_id: string;
       qty_per_bundle: number;
-      component: {
-        sku_code: string;
-        retail_price: number | null;
-        product_franchises: { name: string } | { name: string }[] | null;
-      } | {
-        sku_code: string;
-        retail_price: number | null;
-        product_franchises: { name: string } | { name: string }[] | null;
-      }[] | null;
+      component:
+        | {
+            sku_code: string;
+            retail_price: number | null;
+            product_franchises: { name: string } | { name: string }[] | null;
+          }
+        | {
+            sku_code: string;
+            retail_price: number | null;
+            product_franchises: { name: string } | { name: string }[] | null;
+          }[]
+        | null;
     }>(() =>
       supabase
         .from("bundle_components")
@@ -554,12 +595,7 @@ export async function loadSopYearForecast(
     bucket.set(key, prev);
   }
 
-  const oosByCode = new Map(
-    restockResult.recommendations.map((r) => [
-      r.sku_code,
-      r.projected_stockout_date,
-    ]),
-  );
+  const oosByCode = new Map<string, string | null>();
 
   const plansByGroup = {
     online: new Map<

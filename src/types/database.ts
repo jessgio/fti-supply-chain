@@ -59,6 +59,8 @@ export interface SopSkuRow {
   rsp_by_month: Record<number, number | null>;
   current_stock: number;
   on_order_qty: number;
+  /** Earliest open-PO expected date; for bundles, when extra complete sets unlock. */
+  on_order_date: string | null;
   projected_stockout_date: string | null;
   l3m_qty: number;
   l3m_post_tax: number;

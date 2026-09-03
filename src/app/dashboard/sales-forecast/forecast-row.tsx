@@ -22,9 +22,11 @@ import {
   hasMissingRsp,
   isCurrentCalendarMonth,
   isPlanMonth,
+  QTY_SOLD_CLASS,
   rowStripeBg,
   rspForMonth,
 } from "./table-utils";
+import { OnOrderCell } from "./on-order-cell";
 
 const CELL_INPUT_CLASS =
   "h-7 w-full rounded-lg border border-stone-300 bg-white px-1.5 text-xs text-stone-900 placeholder:text-stone-500 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
@@ -100,13 +102,17 @@ function ReadonlyMetricCell({
   return (
     <td
       className={cn(
-        "px-3 py-2.5 align-top text-xs text-stone-600",
+        "px-3 py-2.5 align-top text-stone-600",
         className,
       )}
     >
-      <div>{formatNumber(qty, 1)} u</div>
-      <div>{formatCurrency(postTax)}</div>
-      <div className="text-[11px] text-stone-500">{formatDiscLabel(disc)}</div>
+      <div className={QTY_SOLD_CLASS}>{formatNumber(qty, 1)} u</div>
+      <div className="text-xs tabular-nums leading-tight text-stone-700">
+        {formatCurrency(postTax)}
+      </div>
+      <div className="text-[11px] leading-tight text-stone-500">
+        {formatDiscLabel(disc)}
+      </div>
       {footer}
     </td>
   );
@@ -357,7 +363,6 @@ export const ForecastRow = memo(function ForecastRow({
   onTogglePendingInactive,
   onSaveRsp,
   onChangeExistingRsp,
-  liveVersion: _liveVersion,
   monthPlanTotal = 0,
 }: {
   row: SopSkuRow;
@@ -385,8 +390,6 @@ export const ForecastRow = memo(function ForecastRow({
     skuCode: string,
     next: number,
   ) => void;
-  /** Bumps memoized rows when plan drafts change so L3M deltas stay live. */
-  liveVersion?: number;
   /** Active-month planned post-tax total for contribution %. */
   monthPlanTotal?: number;
 }) {
@@ -500,6 +503,11 @@ export const ForecastRow = memo(function ForecastRow({
       <td className={freezeBody(FREEZE.stock, stripe.freeze)}>
         {formatNumber(row.current_stock)}
       </td>
+      <OnOrderCell
+        qty={row.on_order_qty}
+        date={row.on_order_date ?? null}
+        freeze={freezeBody(FREEZE.onOrder, stripe.freeze)}
+      />
       <td className={freezeBody(FREEZE.l3m, stripe.freeze)}>
         {formatNumber(row.l3m_qty, 1)}
       </td>
@@ -522,7 +530,6 @@ export const ForecastRow = memo(function ForecastRow({
         onSave={onSaveRsp}
         onChangeExisting={onChangeExistingRsp}
       />
-      <td className="px-3 py-2.5">{formatNumber(row.on_order_qty)}</td>
       <td className="px-3 py-2.5">{formatDateShort(row.projected_stockout_date)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l6m_post_tax)}</td>
@@ -752,7 +759,7 @@ function CurrentMonthFragment({
       </td>
       <td
         className={cn(
-          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
           signedDeltaClass(planQty - l3mQty),
         )}
         title="Plan qty minus L3M monthly average"
@@ -761,7 +768,7 @@ function CurrentMonthFragment({
       </td>
       <td
         className={cn(
-          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
           signedDeltaClass(planPostTax - l3mPostTax),
         )}
         title="Plan post-tax minus L3M monthly average"

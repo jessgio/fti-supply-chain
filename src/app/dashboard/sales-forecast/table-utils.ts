@@ -1,20 +1,26 @@
 import { cn } from "@/lib/utils";
 import type { SopSkuRow } from "@/types/database";
 
-/** Sticky left offsets: identity + stock + L3M qty + L6M qty. */
+/** Sticky left offsets: identity + stock + on order + L3M qty + L6M qty. */
 export const FREEZE = {
   id: "left-0 min-w-[24rem] w-[24rem] px-3",
   stock: "left-[24rem] min-w-[5.75rem] w-[5.75rem] px-3 tabular-nums",
-  l3m: "left-[29.75rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
-  l6m: "left-[36rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
+  onOrder: "left-[29.75rem] min-w-[7.5rem] w-[7.5rem] px-3 tabular-nums",
+  l3m: "left-[37.25rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
+  l6m: "left-[43.5rem] min-w-[6.25rem] w-[6.25rem] px-3 tabular-nums",
 } as const;
 
 export const FREEZE_EDGE = "shadow-[4px_0_8px_-4px_rgba(28,25,23,0.18)]";
+
+/** Qty sold in month cells — larger and bolder than net / discount. */
+export const QTY_SOLD_CLASS =
+  "text-sm font-semibold tabular-nums leading-tight text-stone-900";
 
 export type ForecastSortKey =
   | "sku_code"
   | "franchise_name"
   | "current_stock"
+  | "on_order_qty"
   | "l3m_qty"
   | "shortfall_qty"
   | "plan_qty"
@@ -31,7 +37,17 @@ export function freezeHead(col: string): string {
 }
 
 export function freezeBody(col: string, bg: string): string {
-  return cn("sticky z-20 py-2.5", col, bg);
+  return cn("sticky z-20 py-2.5 align-top", col, bg);
+}
+
+/** Lower is a better SKU-code match so an exact paste wins over DEF- twins. */
+export function skuSearchRank(skuCode: string, query: string): number {
+  if (!query) return 0;
+  const code = skuCode.toLowerCase();
+  if (code === query) return 0;
+  if (code.startsWith(query)) return 1;
+  if (code.includes(query)) return 2;
+  return 3;
 }
 
 export function hasMissingRsp(row: Pick<SopSkuRow, "retail_price">): boolean {

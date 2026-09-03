@@ -28,7 +28,6 @@ import {
   gapToneClass,
   momLineClass,
   monthOnMonthGrowth,
-  sumDraftPlanPostTax,
   sumStoredPlanPostTax,
   type GroupDrafts,
   liveSkuMonthFromDrafts,
@@ -361,7 +360,6 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   onDraftSettle,
   registerRow,
   draftSeed,
-  liveVersion,
   workspace,
   pendingInactiveIds,
   onTogglePendingInactive,
@@ -383,7 +381,6 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
   draftSeed: number;
-  liveVersion: number;
   workspace: Workspace;
   pendingInactiveIds?: Set<string>;
   onTogglePendingInactive?: (skuId: string) => void;
@@ -397,11 +394,8 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   const monthPlanTotal = useMemo(() => {
     const month = calendarActiveMonth(year);
     if (month == null) return 0;
-    if (readOnly) return sumStoredPlanPostTax(rows, month);
-    return sumDraftPlanPostTax(rows, month, getDrafts);
-    // liveVersion covers draft edits; getDrafts is a stable callback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, year, readOnly, liveVersion]);
+    return sumStoredPlanPostTax(rows, month);
+  }, [rows, year]);
 
   return (
     <tbody>
@@ -419,7 +413,6 @@ export const EditableSkuBody = memo(function EditableSkuBody({
           onDraft={onDraft}
           onDraftSettle={onDraftSettle}
           registerRow={registerRow}
-          liveVersion={liveVersion}
           monthPlanTotal={monthPlanTotal}
           pendingInactive={pendingInactiveIds?.has(row.sku_id) ?? false}
           onTogglePendingInactive={onTogglePendingInactive}

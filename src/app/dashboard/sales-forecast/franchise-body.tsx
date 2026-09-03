@@ -21,6 +21,7 @@ import {
 } from "@/lib/sales-forecast/math";
 import { cn, formatCurrency, formatDateShort, formatNumber } from "@/lib/utils";
 import type { SopChannelGroup, SopSkuRow, SopYearForecast } from "@/types/database";
+import { OnOrderCell } from "./on-order-cell";
 import type { DraftsStore } from "./drafts-store";
 import { storeServerSnapshot } from "./drafts-store";
 import {
@@ -30,6 +31,7 @@ import {
   calendarActiveMonth,
   isCurrentCalendarMonth,
   isPlanMonth,
+  QTY_SOLD_CLASS,
   rowStripeBg,
   rspForMonth,
   type ForecastSortKey,
@@ -58,6 +60,7 @@ type SkuChild = {
   name: string | null;
   current_stock: number;
   on_order_qty: number;
+  on_order_date: string | null;
   projected_stockout_date: string | null;
   l3m_qty: number;
   l3m_post_tax: number;
@@ -73,6 +76,7 @@ type FranchiseRollup = {
   skuCount: number;
   current_stock: number;
   on_order_qty: number;
+  on_order_date: string | null;
   projected_stockout_date: string | null;
   l3m_qty: number;
   l3m_post_tax: number;
@@ -137,8 +141,8 @@ function L3mDeltaPair({
   if (month == null) {
     return (
       <>
-        <td className="px-3 py-2.5 text-stone-400">—</td>
-        <td className="px-3 py-2.5 text-stone-400">—</td>
+        <td className="px-3 py-2.5 align-top text-stone-400">—</td>
+        <td className="px-3 py-2.5 align-top text-stone-400">—</td>
       </>
     );
   }
@@ -148,7 +152,7 @@ function L3mDeltaPair({
     <>
       <td
         className={cn(
-          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
           signedDeltaClass(qtyDelta),
         )}
       >
@@ -156,7 +160,7 @@ function L3mDeltaPair({
       </td>
       <td
         className={cn(
-          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          "bg-sky-50/30 px-3 py-2.5 align-top tabular-nums",
           signedDeltaClass(netDelta),
         )}
       >
@@ -211,9 +215,11 @@ function FranchiseMonthCells({
             : 0;
           return (
             <Fragment key={month}>
-              <td className="bg-sky-50/60 px-3 py-2.5 align-top text-xs text-stone-600">
-                <div>{formatNumber(mtdQty, 1)} u</div>
-                <div>{formatCurrency(mtdPostTax)}</div>
+              <td className="bg-sky-50/60 px-3 py-2.5 align-top text-stone-600">
+                <div className={QTY_SOLD_CLASS}>{formatNumber(mtdQty, 1)} u</div>
+                <div className="text-xs tabular-nums leading-tight text-stone-700">
+                  {formatCurrency(mtdPostTax)}
+                </div>
                 {showShare && parent ? (
                   <div className="mt-0.5 text-[10px] text-stone-500">
                     {formatShare(mtdQty, parent.actual_qty)} qty ·{" "}
@@ -227,9 +233,11 @@ function FranchiseMonthCells({
                   </div>
                 )}
               </td>
-              <td className="bg-sky-50/40 px-3 py-2.5 align-top text-xs text-stone-600">
-                <div>{formatNumber(eomQty, 1)} u</div>
-                <div>{formatCurrency(eomPostTax)}</div>
+              <td className="bg-sky-50/40 px-3 py-2.5 align-top text-stone-600">
+                <div className={QTY_SOLD_CLASS}>{formatNumber(eomQty, 1)} u</div>
+                <div className="text-xs tabular-nums leading-tight text-stone-700">
+                  {formatCurrency(eomPostTax)}
+                </div>
                 {showShare && parent ? (
                   <div className="mt-0.5 text-[10px] text-stone-500">
                     {formatShare(eomQty, parentEomQty)} qty ·{" "}
@@ -241,9 +249,11 @@ function FranchiseMonthCells({
                   </div>
                 )}
               </td>
-              <td className="px-3 py-2.5 align-top text-xs text-stone-600">
-                <div>{formatNumber(planQty, 1)} u</div>
-                <div>{formatCurrency(planPostTax)}</div>
+              <td className="px-3 py-2.5 align-top text-stone-600">
+                <div className={QTY_SOLD_CLASS}>{formatNumber(planQty, 1)} u</div>
+                <div className="text-xs tabular-nums leading-tight text-stone-700">
+                  {formatCurrency(planPostTax)}
+                </div>
                 {showShare && parent ? (
                   <div className="mt-0.5 text-[10px] text-stone-500">
                     {formatShare(planQty, parent.qty)} qty ·{" "}
@@ -300,10 +310,12 @@ function FranchiseMonthCells({
         return (
           <td
             key={month}
-            className="px-3 py-2.5 align-top text-xs text-stone-600"
+            className="px-3 py-2.5 align-top text-stone-600"
           >
-            <div>{formatNumber(m.qty, 1)} u</div>
-            <div>{formatCurrency(m.post_tax)}</div>
+            <div className={QTY_SOLD_CLASS}>{formatNumber(m.qty, 1)} u</div>
+            <div className="text-xs tabular-nums leading-tight text-stone-700">
+              {formatCurrency(m.post_tax)}
+            </div>
             {showShare && parent ? (
               <div className="mt-0.5 text-[10px] text-stone-500">
                 {formatShare(m.qty, parent.qty)} qty ·{" "}
@@ -368,6 +380,7 @@ export function FranchiseBody({
       name: string;
       current_stock: number;
       on_order_qty: number;
+      on_order_date: string | null;
       l3m_qty: number;
       l3m_post_tax: number;
       l6m_qty: number;
@@ -391,6 +404,7 @@ export function FranchiseBody({
           name,
           current_stock: 0,
           on_order_qty: 0,
+          on_order_date: null,
           l3m_qty: 0,
           l3m_post_tax: 0,
           l6m_qty: 0,
@@ -437,6 +451,7 @@ export function FranchiseBody({
           name,
           current_stock: 0,
           on_order_qty: 0,
+          on_order_date: null,
           projected_stockout_date: null,
           l3m_qty: 0,
           l3m_post_tax: 0,
@@ -466,6 +481,12 @@ export function FranchiseBody({
         if (acc) {
           acc.current_stock += row.current_stock;
           acc.on_order_qty += row.on_order_qty;
+          if (
+            row.on_order_date &&
+            (!acc.on_order_date || row.on_order_date < acc.on_order_date)
+          ) {
+            acc.on_order_date = row.on_order_date;
+          }
           const child = ensureChild(acc, {
             sku_id: row.sku_id,
             sku_code: row.sku_code,
@@ -473,6 +494,12 @@ export function FranchiseBody({
           });
           child.current_stock += row.current_stock;
           child.on_order_qty += row.on_order_qty;
+          if (
+            row.on_order_date &&
+            (!child.on_order_date || row.on_order_date < child.on_order_date)
+          ) {
+            child.on_order_date = row.on_order_date;
+          }
           if (
             row.projected_stockout_date &&
             (!acc.projected_stockout_date ||
@@ -605,6 +632,7 @@ export function FranchiseBody({
         skuCount: children.length,
         current_stock: acc.current_stock,
         on_order_qty: acc.on_order_qty,
+        on_order_date: acc.on_order_date,
         projected_stockout_date: acc.projected_stockout_date,
         l3m_qty: acc.l3m_qty,
         l3m_post_tax: acc.l3m_post_tax,
@@ -630,6 +658,9 @@ export function FranchiseBody({
           break;
         case "current_stock":
           cmp = a.current_stock - b.current_stock;
+          break;
+        case "on_order_qty":
+          cmp = a.on_order_qty - b.on_order_qty;
           break;
         case "l3m_qty":
           cmp = a.l3m_qty - b.l3m_qty;
@@ -748,6 +779,11 @@ export function FranchiseBody({
               <td className={freezeBody(FREEZE.stock, stripe.freeze)}>
                 {formatNumber(row.current_stock)}
               </td>
+              <OnOrderCell
+                qty={row.on_order_qty}
+                date={row.on_order_date}
+                freeze={freezeBody(FREEZE.onOrder, stripe.freeze)}
+              />
               <td className={freezeBody(FREEZE.l3m, stripe.freeze)}>
                 {formatNumber(row.l3m_qty, 1)}
               </td>
@@ -760,7 +796,6 @@ export function FranchiseBody({
                 {formatNumber(row.l6m_qty, 1)}
               </td>
               <td className="px-3 py-2.5">{row.skuCount}</td>
-              <td className="px-3 py-2.5">{formatNumber(row.on_order_qty)}</td>
               <td className="px-3 py-2.5">
                 {formatDateShort(row.projected_stockout_date)}
               </td>
@@ -809,6 +844,11 @@ export function FranchiseBody({
                     >
                       {formatNumber(child.current_stock)}
                     </td>
+                    <OnOrderCell
+                      qty={child.on_order_qty}
+                      date={child.on_order_date}
+                      freeze={freezeBody(FREEZE.onOrder, childStripeFreeze)}
+                    />
                     <td
                       className={freezeBody(FREEZE.l3m, childStripeFreeze)}
                     >
@@ -823,9 +863,6 @@ export function FranchiseBody({
                       {formatNumber(child.l6m_qty, 1)}
                     </td>
                     <td className="px-3 py-2.5 text-stone-400">—</td>
-                    <td className="px-3 py-2.5">
-                      {formatNumber(child.on_order_qty)}
-                    </td>
                     <td className="px-3 py-2.5">
                       {formatDateShort(child.projected_stockout_date)}
                     </td>

@@ -50,6 +50,7 @@ import {
   FREEZE,
   FREEZE_EDGE,
   freezeHead,
+  skuSearchRank,
   type ForecastSortKey,
 } from "./table-utils";
 import { PendingSkusCard } from "./pending-skus-card";
@@ -201,7 +202,8 @@ function SalesForecastClient() {
   );
   const [pendingRsp, setPendingRsp] = useState<PendingRspChange | null>(null);
   const [savingRsp, setSavingRsp] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const onlineFileRef = useRef<HTMLInputElement>(null);
+  const offlineFileRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const draftsRef = useRef<Record<SopChannelGroup, GroupDrafts>>({
     online: { qty: {}, disc: {} },
@@ -210,8 +212,21 @@ function SalesForecastClient() {
   const storeRef = useRef<ReturnType<typeof createDraftsStore> | null>(null);
   if (!storeRef.current) storeRef.current = createDraftsStore();
   const draftsStore = storeRef.current;
+  const sortNeedsLiveDrafts =
+    sortKey === "plan_qty" ||
+    sortKey === "plan_pct" ||
+    sortKey === "plan_contrib" ||
+    sortKey === "l3m_qty_delta" ||
+    sortKey === "l3m_net_delta";
+  const subscribeLiveSort = useCallback(
+    (onStoreChange: () => void) => {
+      if (!sortNeedsLiveDrafts) return () => {};
+      return draftsStore.subscribe(onStoreChange);
+    },
+    [draftsStore, sortNeedsLiveDrafts],
+  );
   const draftVersion = useSyncExternalStore(
-    draftsStore.subscribe,
+    subscribeLiveSort,
     draftsStore.getSnapshot,
     storeServerSnapshot,
   );
@@ -219,6 +234,16 @@ function SalesForecastClient() {
   const activeGroup: SopChannelGroup | null =
     workspace === "combined" ? null : workspace;
   const combined = workspace === "combined";
+
+  const hasUnsavedPlanDrafts = useCallback(() => {
+    if (!yearData || !activeGroup) return false;
+    return (
+      collectDirtyLines(
+        yearData.groups[activeGroup],
+        draftsRef.current[activeGroup],
+      ).length > 0
+    );
+  }, [yearData, activeGroup]);
 
   const applyYearData = useCallback((next: SopYearForecast) => {
     setYearData(next);
@@ -351,6 +376,16 @@ function SalesForecastClient() {
     setPendingInactiveIds(new Set());
   }, [workspace, year]);
 
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!hasUnsavedPlanDrafts()) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedPlanDrafts]);
+
   const payload = yearData
     ? combined
       ? yearData.groups.online
@@ -361,6 +396,8 @@ function SalesForecastClient() {
     workspace === "offline"
       ? `Excl. ${lagMonthLabel} — offline sell-out usually lands 20–25 days after month end`
       : undefined;
+  const onOrderHint =
+    "Open PO qty and expected arrival. Bundles show extra complete sets inbound unlocks (buildable after on-hand + POs, minus what’s already on the shelf) and the last batch date that makes that extra possible.";
 
   useEffect(() => {
     if (!payload || !focusSku) return;
@@ -479,6 +516,9 @@ function SalesForecastClient() {
       );
     };
     return [...rows].sort((a, b) => {
+      const q = debouncedSearch.trim().toLowerCase();
+      const rankCmp = skuSearchRank(a.sku_code, q) - skuSearchRank(b.sku_code, q);
+      if (rankCmp !== 0) return rankCmp;
       let cmp = 0;
       switch (sortKey) {
         case "sku_code":
@@ -489,6 +529,9 @@ function SalesForecastClient() {
           break;
         case "current_stock":
           cmp = a.current_stock - b.current_stock;
+          break;
+        case "on_order_qty":
+          cmp = a.on_order_qty - b.on_order_qty;
           break;
         case "l3m_qty":
           cmp = a.l3m_qty - b.l3m_qty;
@@ -526,6 +569,7 @@ function SalesForecastClient() {
     combined,
     activeGroup,
     draftVersion,
+    debouncedSearch,
   ]);
 
   const filteredInactiveRows = useMemo(() => {
@@ -627,7 +671,7 @@ function SalesForecastClient() {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir("asc");
+      setSortDir(key === "on_order_qty" ? "desc" : "asc");
     }
   }
 
@@ -839,15 +883,14 @@ function SalesForecastClient() {
     }
   }
 
-  async function uploadCsv(file: File) {
-    if (!activeGroup) return;
+  async function uploadCsv(file: File, group: SopChannelGroup) {
     setSaving(true);
     setError(null);
     setNotice(null);
     try {
       const form = new FormData();
       form.set("year", String(year));
-      form.set("group", activeGroup);
+      form.set("group", group);
       form.set("file", file);
       const res = await fetch("/api/sales-forecast/uploads", {
         method: "POST",
@@ -855,15 +898,17 @@ function SalesForecastClient() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
+      setWorkspace(group);
       if (isForecastGroupPayload(data)) {
-        applyGroupPayload(activeGroup, data);
+        applyGroupPayload(group, data);
         const uploaded = data.uploads[0]?.row_count ?? 0;
         const pending = data.pending_skus?.length ?? 0;
-        if (pending > 0) {
-          setNotice(
-            `Uploaded ${uploaded} known SKU${uploaded === 1 ? "" : "s"}. ${pending} need review below.`,
-          );
-        }
+        const label = group === "online" ? "Online" : "Offline";
+        setNotice(
+          pending > 0
+            ? `Uploaded ${uploaded} known SKU${uploaded === 1 ? "" : "s"} to ${label}. ${pending} need review below.`
+            : `Uploaded ${uploaded} known SKU${uploaded === 1 ? "" : "s"} to ${label}.`,
+        );
       } else {
         await load();
       }
@@ -871,7 +916,9 @@ function SalesForecastClient() {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setSaving(false);
-      if (fileRef.current) fileRef.current.value = "";
+      const input =
+        group === "online" ? onlineFileRef.current : offlineFileRef.current;
+      if (input) input.value = "";
     }
   }
 
@@ -935,7 +982,17 @@ function SalesForecastClient() {
           <select
             className="h-10 rounded-lg border border-stone-300 bg-white px-3 text-sm"
             value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
+            onChange={(e) => {
+              if (
+                hasUnsavedPlanDrafts() &&
+                !window.confirm(
+                  "You have unsaved forecast edits. Change year anyway?",
+                )
+              ) {
+                return;
+              }
+              setYear(Number(e.target.value));
+            }}
           >
             {years.map((y) => (
               <option key={y} value={y}>
@@ -1026,7 +1083,7 @@ function SalesForecastClient() {
           variant="outline"
           size="sm"
           onClick={downloadTemplate}
-          disabled={!yearData || combined}
+          disabled={!yearData}
         >
           <Download className="h-4 w-4" />
           CSV template
@@ -1034,20 +1091,39 @@ function SalesForecastClient() {
         <Button
           variant="outline"
           size="sm"
-          disabled={!yearData || readOnly || saving || combined}
-          onClick={() => fileRef.current?.click()}
+          disabled={!yearData || readOnly || saving}
+          onClick={() => onlineFileRef.current?.click()}
         >
           <Upload className="h-4 w-4" />
-          Upload CSV
+          Upload Online CSV
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!yearData || readOnly || saving}
+          onClick={() => offlineFileRef.current?.click()}
+        >
+          <Upload className="h-4 w-4" />
+          Upload Offline CSV
         </Button>
         <input
-          ref={fileRef}
+          ref={onlineFileRef}
           type="file"
           accept=".csv,text/csv"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) void uploadCsv(file);
+            if (file) void uploadCsv(file, "online");
+          }}
+        />
+        <input
+          ref={offlineFileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void uploadCsv(file, "offline");
           }}
         />
       </div>
@@ -1055,9 +1131,12 @@ function SalesForecastClient() {
       {!combined && uploads.length > 0 ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Forecast uploads</CardTitle>
+            <CardTitle className="text-base">
+              {activeGroup === "offline" ? "Offline" : "Online"} forecast uploads
+            </CardTitle>
             <CardDescription>
-              Deleting a file clears the qty/discount rows it created.
+              Deleting a file clears the qty/discount rows it created for this
+              channel only.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -1235,7 +1314,7 @@ function SalesForecastClient() {
             </p>
           ) : viewMode === "franchise" ? (
             <div className="max-h-[min(70vh,calc(100vh-12rem))] overflow-auto">
-              <table className="w-full min-w-[80rem] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[80rem] border-separate border-spacing-0 text-left text-sm [&_td]:align-top">
                 <thead>
                   <tr className="text-stone-500">
                     <SortTh
@@ -1253,6 +1332,15 @@ function SalesForecastClient() {
                       dir={sortDir}
                       onSort={handleSort}
                       className={freezeHead(FREEZE.stock)}
+                    />
+                    <SortTh
+                      label="On order"
+                      columnKey="on_order_qty"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      className={freezeHead(FREEZE.onOrder)}
+                      title={onOrderHint}
                     />
                     <SortTh
                       label="L3M qty"
@@ -1279,9 +1367,6 @@ function SalesForecastClient() {
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       SKUs
-                    </th>
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
-                      On order
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       OOS
@@ -1321,7 +1406,7 @@ function SalesForecastClient() {
             </div>
           ) : (
             <div className="max-h-[min(70vh,calc(100vh-12rem))] overflow-auto">
-              <table className="w-full min-w-[90rem] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[90rem] border-separate border-spacing-0 text-left text-sm [&_td]:align-top">
                 <thead>
                   <tr className="text-stone-500">
                     <SortTh
@@ -1339,6 +1424,15 @@ function SalesForecastClient() {
                       dir={sortDir}
                       onSort={handleSort}
                       className={freezeHead(FREEZE.stock)}
+                    />
+                    <SortTh
+                      label="On order"
+                      columnKey="on_order_qty"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      className={freezeHead(FREEZE.onOrder)}
+                      title={onOrderHint}
                     />
                     <SortTh
                       label="L3M qty"
@@ -1378,9 +1472,6 @@ function SalesForecastClient() {
                       title="Retail selling price (incl. VAT). Type a planned RSP for NPDs with no sales yet."
                     >
                       RSP
-                    </th>
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
-                      On order
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       OOS
@@ -1429,7 +1520,6 @@ function SalesForecastClient() {
                     onDraftSettle={onDraftSettle}
                     registerRow={registerRow}
                     draftSeed={draftSeed}
-                    liveVersion={draftVersion}
                     workspace={workspace}
                     pendingInactiveIds={pendingInactiveIds}
                     onTogglePendingInactive={
@@ -1477,11 +1567,14 @@ function SalesForecastClient() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="max-h-[min(50vh,calc(100vh-16rem))] overflow-auto">
-              <table className="w-full min-w-[90rem] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[90rem] border-separate border-spacing-0 text-left text-sm [&_td]:align-top">
                 <thead>
                   <tr className="text-stone-500">
                     <th className={freezeHead(FREEZE.id)}>SKU</th>
                     <th className={freezeHead(FREEZE.stock)}>Stock</th>
+                    <th className={freezeHead(FREEZE.onOrder)} title={onOrderHint}>
+                      On order
+                    </th>
                     <th className={freezeHead(FREEZE.l3m)}>L3M qty</th>
                     <th className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}>
                       L6M qty
@@ -1494,9 +1587,6 @@ function SalesForecastClient() {
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       RSP
-                    </th>
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
-                      On order
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       OOS

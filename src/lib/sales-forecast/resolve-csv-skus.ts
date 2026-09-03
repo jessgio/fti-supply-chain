@@ -44,7 +44,13 @@ export interface PendingForecastSku {
   months: PendingForecastMonth[];
 }
 
+/** Defect warehouse SKUs are not sellable S&OP lines. */
+export function isForecastDefectSku(skuCode: string): boolean {
+  return skuCode.toUpperCase().startsWith("DEF-");
+}
+
 export function isForecastCatalogEligible(sku: ForecastCatalogSku): boolean {
+  if (isForecastDefectSku(sku.sku_code)) return false;
   if (sku.is_packaging || sku.is_extract) return false;
   if (!sku.is_active) return false;
   if (!sku.is_bundle && !sku.franchise_id) return false;
@@ -55,6 +61,7 @@ export function pendingReasonForSku(
   sku: ForecastCatalogSku | undefined,
 ): ForecastPendingReason {
   if (!sku) return "missing";
+  if (isForecastDefectSku(sku.sku_code)) return "inactive";
   if (sku.is_packaging) return "packaging";
   if (sku.is_extract) return "extract";
   if (!sku.is_bundle && !sku.franchise_id) return "unclassified";

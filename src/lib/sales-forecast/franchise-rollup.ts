@@ -59,6 +59,62 @@ export function bomLeafComponents(
   return leaves;
 }
 
+function bundleBuildableQty(
+  leaves: SopBomComponent[],
+  qtyBySku: Map<string, number>,
+): number {
+  let min = Infinity;
+  for (const leaf of leaves) {
+    const qtyPer = leaf.qty_per_bundle;
+    if (!Number.isFinite(qtyPer) || qtyPer <= 0) continue;
+    min = Math.min(min, Math.floor((qtyBySku.get(leaf.sku_id) ?? 0) / qtyPer));
+  }
+  return Number.isFinite(min) ? Math.max(0, min) : 0;
+}
+
+/**
+ * Extra complete sets inbound unlocks: buildable after (on hand + on order)
+ * minus buildable from on hand now. ETA is the latest batch among leaves
+ * that still need their PO to reach that after-qty (oil already on the
+ * shelf does not delay cream that is still in transit).
+ */
+export function extraCompleteSetsFromInbound(
+  components: SopBomComponent[],
+  onHandBySku: Map<string, number>,
+  inboundBySku: Map<string, { qty: number; date: string | null }>,
+): { qty: number; date: string | null } {
+  const leaves = bomLeafComponents(components);
+  if (leaves.length === 0) return { qty: 0, date: null };
+
+  const afterBySku = new Map<string, number>();
+  for (const leaf of leaves) {
+    afterBySku.set(
+      leaf.sku_id,
+      (onHandBySku.get(leaf.sku_id) ?? 0) +
+        (inboundBySku.get(leaf.sku_id)?.qty ?? 0),
+    );
+  }
+  const now = bundleBuildableQty(leaves, onHandBySku);
+  const after = bundleBuildableQty(leaves, afterBySku);
+  const extra = after - now;
+  if (extra <= 0) return { qty: 0, date: null };
+  const neededDates: Array<string | null> = [];
+  for (const leaf of leaves) {
+    const qtyPer = leaf.qty_per_bundle;
+    if (!Number.isFinite(qtyPer) || qtyPer <= 0) continue;
+    if ((onHandBySku.get(leaf.sku_id) ?? 0) >= after * qtyPer) continue;
+    neededDates.push(inboundBySku.get(leaf.sku_id)?.date ?? null);
+  }
+  const dated = neededDates.filter((date): date is string => Boolean(date));
+  return {
+    qty: extra,
+    date:
+      dated.length === 0 || dated.length !== neededDates.length
+        ? null
+        : dated.reduce((a, b) => (a > b ? a : b)),
+  };
+}
+
 /** Franchises a SKU row contributes to (BOM leaf franchises for bundles). */
 export function franchisesForRow(row: SopSkuRow): string[] {
   if (row.is_bundle) {
