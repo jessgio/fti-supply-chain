@@ -1246,22 +1246,6 @@ function SalesForecastClient() {
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
                     </th>
-                    <SortTh
-                      label="Δ qty vs L3M"
-                      columnKey="l3m_qty_delta"
-                      active={sortKey}
-                      dir={sortDir}
-                      onSort={handleSort}
-                      title="Active-month plan qty minus L3M monthly average"
-                    />
-                    <SortTh
-                      label="Δ net vs L3M"
-                      columnKey="l3m_net_delta"
-                      active={sortKey}
-                      dir={sortDir}
-                      onSort={handleSort}
-                      title="Active-month plan post-tax minus L3M monthly average"
-                    />
                     <SkuMonthHeaders
                       store={draftsStore}
                       yearData={yearData}
@@ -1361,22 +1345,6 @@ function SalesForecastClient() {
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
                     </th>
-                    <SortTh
-                      label="Δ qty vs L3M"
-                      columnKey="l3m_qty_delta"
-                      active={sortKey}
-                      dir={sortDir}
-                      onSort={handleSort}
-                      title="Active-month plan qty minus L3M monthly average"
-                    />
-                    <SortTh
-                      label="Δ net vs L3M"
-                      columnKey="l3m_net_delta"
-                      active={sortKey}
-                      dir={sortDir}
-                      onSort={handleSort}
-                      title="Active-month plan post-tax minus L3M monthly average"
-                    />
                     <SkuMonthHeaders
                       store={draftsStore}
                       yearData={yearData}
@@ -1478,12 +1446,6 @@ function SalesForecastClient() {
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
-                    </th>
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
-                      Δ qty vs L3M
-                    </th>
-                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
-                      Δ net vs L3M
                     </th>
                     <InactiveMonthHeaders year={yearData.year} />
                   </tr>

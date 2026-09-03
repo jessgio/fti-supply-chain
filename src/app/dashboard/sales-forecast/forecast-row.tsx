@@ -17,7 +17,6 @@ import {
   FREEZE,
   FREEZE_EDGE,
   freezeBody,
-  calendarActiveMonth,
   hasLowL3mCover,
   hasMissingRsp,
   isCurrentCalendarMonth,
@@ -341,58 +340,6 @@ function RspCell({
   );
 }
 
-function L3mDeltaCells({
-  row,
-  year,
-  currentMonth,
-  readOnly,
-  combined,
-  getDrafts,
-}: {
-  row: SopSkuRow;
-  year: number;
-  currentMonth: number;
-  readOnly: boolean;
-  combined: boolean;
-  getDrafts: (skuId: string, month: number, field: "qty" | "disc") => string;
-}) {
-  const month = calendarActiveMonth(year);
-  if (month == null) {
-    return (
-      <>
-        <td className="px-3 py-2.5 text-stone-400">—</td>
-        <td className="px-3 py-2.5 text-stone-400">—</td>
-      </>
-    );
-  }
-  const editable = !combined && isPlanMonth(month, currentMonth, readOnly);
-  const monthRsp = rspForMonth(row, month);
-  const planQty = editable
-    ? Number(getDrafts(row.sku_id, month, "qty") || 0) || 0
-    : (row.months[month]?.plan.projected_qty ?? 0);
-  const planPostTax = editable
-    ? livePostTax(
-        getDrafts(row.sku_id, month, "qty"),
-        getDrafts(row.sku_id, month, "disc"),
-        monthRsp,
-      )
-    : (row.months[month]?.plan.post_tax_net ?? 0);
-  const qtyDelta = planQty - (row.l3m_qty ?? 0);
-  const netDelta = planPostTax - (row.l3m_post_tax ?? 0);
-  return (
-    <>
-      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(qtyDelta))}>
-        {formatSignedNumber(qtyDelta, 1)}
-      </td>
-      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(netDelta))}>
-        {netDelta > 0
-          ? `+${formatCurrency(netDelta)}`
-          : formatCurrency(netDelta)}
-      </td>
-    </>
-  );
-}
-
 export const ForecastRow = memo(function ForecastRow({
   row,
   rowIndex,
@@ -575,14 +522,6 @@ export const ForecastRow = memo(function ForecastRow({
       <td className="px-3 py-2.5">{formatDateShort(row.projected_stockout_date)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l6m_post_tax)}</td>
-      <L3mDeltaCells
-        row={row}
-        year={year}
-        currentMonth={currentMonth}
-        readOnly={readOnly}
-        combined={combined}
-        getDrafts={getDrafts}
-      />
       {MONTHS.map((month) => {
         const actual = row.months[month]?.actual;
         const plan = row.months[month]?.plan;
@@ -796,6 +735,26 @@ function CurrentMonthFragment({
           {formatEomProgress(progress)}
         </p>
         <div className="mt-0.5 text-[10px] text-stone-400">EOM vs plan</div>
+      </td>
+      <td
+        className={cn(
+          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          signedDeltaClass(planQty - l3mQty),
+        )}
+        title="Plan qty minus L3M monthly average"
+      >
+        {formatSignedNumber(planQty - l3mQty, 1)}
+      </td>
+      <td
+        className={cn(
+          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          signedDeltaClass(planPostTax - l3mPostTax),
+        )}
+        title="Plan post-tax minus L3M monthly average"
+      >
+        {planPostTax - l3mPostTax > 0
+          ? `+${formatCurrency(planPostTax - l3mPostTax)}`
+          : formatCurrency(planPostTax - l3mPostTax)}
       </td>
     </>
   );

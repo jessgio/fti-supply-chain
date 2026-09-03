@@ -145,10 +145,20 @@ function L3mDeltaPair({
   const netDelta = (months[month]?.post_tax ?? 0) - l3mPostTax;
   return (
     <>
-      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(qtyDelta))}>
+      <td
+        className={cn(
+          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          signedDeltaClass(qtyDelta),
+        )}
+      >
         {formatSignedNumber(qtyDelta, 1)}
       </td>
-      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(netDelta))}>
+      <td
+        className={cn(
+          "bg-sky-50/30 px-3 py-2.5 tabular-nums",
+          signedDeltaClass(netDelta),
+        )}
+      >
         {netDelta > 0
           ? `+${formatCurrency(netDelta)}`
           : formatCurrency(netDelta)}
@@ -160,11 +170,15 @@ function L3mDeltaPair({
 function FranchiseMonthCells({
   months,
   year,
+  l3mQty,
+  l3mPostTax,
   totals,
   showShare,
 }: {
   months: Record<number, MonthAcc>;
   year: number;
+  l3mQty: number;
+  l3mPostTax: number;
   totals?: Record<number, MonthAcc>;
   showShare?: boolean;
 }) {
@@ -259,6 +273,12 @@ function FranchiseMonthCells({
                   EOM vs plan
                 </div>
               </td>
+              <L3mDeltaPair
+                year={year}
+                months={months}
+                l3mQty={l3mQty}
+                l3mPostTax={l3mPostTax}
+              />
             </Fragment>
           );
         }
@@ -720,15 +740,11 @@ export function FranchiseBody({
               <td className="px-3 py-2.5">
                 {formatCurrency(row.l6m_post_tax)}
               </td>
-              <L3mDeltaPair
-                year={yearData.year}
-                months={row.months}
-                l3mQty={row.l3m_qty}
-                l3mPostTax={row.l3m_post_tax}
-              />
               <FranchiseMonthCells
                 months={row.months}
                 year={yearData.year}
+                l3mQty={row.l3m_qty}
+                l3mPostTax={row.l3m_post_tax}
               />
             </tr>
             {isOpen
@@ -788,15 +804,11 @@ export function FranchiseBody({
                     <td className="px-3 py-2.5">
                       {formatCurrency(child.l6m_post_tax)}
                     </td>
-                    <L3mDeltaPair
-                      year={yearData.year}
-                      months={child.months}
-                      l3mQty={child.l3m_qty}
-                      l3mPostTax={child.l3m_post_tax}
-                    />
                     <FranchiseMonthCells
                       months={child.months}
                       year={yearData.year}
+                      l3mQty={child.l3m_qty}
+                      l3mPostTax={child.l3m_post_tax}
                       totals={row.months}
                       showShare
                     />

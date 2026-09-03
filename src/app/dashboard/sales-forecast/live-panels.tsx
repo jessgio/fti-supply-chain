@@ -24,6 +24,7 @@ import {
   collectDirtyLines,
   formatSharePct,
   type GroupDrafts,
+  liveSkuMonthFromDrafts,
   mergeLiveSkuRows,
 } from "./view-helpers";
 
@@ -87,6 +88,38 @@ export function SkuMonthHeaders({
     }
     return { postTax, eom: eomProjectionFromMtd(postTax) };
   }, [yearData, workspace, combined]);
+  const l3mDeltas = useMemo(() => {
+    const now = new Date();
+    if (yearData.year !== now.getFullYear()) {
+      return { qty: 0, net: 0 };
+    }
+    const month = now.getMonth() + 1;
+    const groups: SopChannelGroup[] = combined
+      ? ["online", "offline"]
+      : workspace === "online" || workspace === "offline"
+        ? [workspace]
+        : [];
+    let planQty = 0;
+    let l3mQty = 0;
+    let l3mPostTax = 0;
+    for (const group of groups) {
+      const drafts = draftsRef.current[group];
+      for (const row of yearData.groups[group]?.rows ?? []) {
+        planQty += liveSkuMonthFromDrafts(
+          row,
+          month,
+          yearData.current_month,
+          yearData.read_only,
+          drafts,
+        ).qty;
+        l3mQty += row.l3m_qty ?? 0;
+        l3mPostTax += row.l3m_post_tax ?? 0;
+      }
+    }
+    const planNet = live[month - 1]?.planned ?? 0;
+    return { qty: planQty - l3mQty, net: planNet - l3mPostTax };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearData, workspace, combined, version, live]);
 
   return (
     <>
@@ -126,6 +159,26 @@ export function SkuMonthHeaders({
               value:
                 progress == null ? "—" : `${formatNumber(progress, 0)}%`,
               sortKey: "plan_pct" as const,
+            },
+            {
+              key: "qty_delta",
+              title: `${label} Δ qty`,
+              hint: "Plan vs L3M",
+              value:
+                l3mDeltas.qty > 0
+                  ? `+${formatNumber(l3mDeltas.qty, 1)}`
+                  : formatNumber(l3mDeltas.qty, 1),
+              sortKey: "l3m_qty_delta" as const,
+            },
+            {
+              key: "net_delta",
+              title: `${label} Δ net`,
+              hint: "Plan vs L3M",
+              value:
+                l3mDeltas.net > 0
+                  ? `+${formatCurrency(l3mDeltas.net)}`
+                  : formatCurrency(l3mDeltas.net),
+              sortKey: "l3m_net_delta" as const,
             },
           ] as const;
           return subHeads.map((sub) => {
@@ -208,7 +261,7 @@ export function InactiveMonthHeaders({ year }: { year: number }) {
         if (isCurrentCalendarMonth(year, month)) {
           const label = MONTH_LABELS[month - 1];
           return (
-            ["MTD", "EOM", "Plan", "%"] as const
+            ["MTD", "EOM", "Plan", "%", "Δ qty", "Δ net"] as const
           ).map((sub) => (
             <th
               key={`${month}-${sub}`}
