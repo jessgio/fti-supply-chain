@@ -144,6 +144,20 @@ export function isApExtraStoragePath(
   return rest.length > 0 && !rest.includes("/");
 }
 
+export function apShipmentExtraStoragePrefix(shipmentId: string): string {
+  return `shipments/${shipmentId}/lark-temp/`;
+}
+
+export function isApShipmentExtraStoragePath(
+  shipmentId: string,
+  path: string,
+): boolean {
+  const prefix = apShipmentExtraStoragePrefix(shipmentId);
+  if (!path.startsWith(prefix) || path.includes("..")) return false;
+  const rest = path.slice(prefix.length);
+  return rest.length > 0 && !rest.includes("/");
+}
+
 /** Amount widget on AP Form only allows these currencies. */
 export const AP_FORM_CURRENCIES = ["IDR", "USD", "CNY"] as const;
 export type ApFormCurrency = (typeof AP_FORM_CURRENCIES)[number];
@@ -201,7 +215,7 @@ function dueDateYmd(value: string | null | undefined): string | null {
 }
 
 export type BuildApFormInput = {
-  po: PurchaseOrder;
+  po?: PurchaseOrder | null;
   expenseCategory: ApExpenseCategoryValue;
   brand: ApBrandValue;
   /** AP date (应付日期) as YYYY-MM-DD. Defaults to today. */
@@ -604,16 +618,19 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
     attachmentCodes,
   } = input;
 
-  const planRows = (planRowsInput ?? buildPaymentPlanRows(po)).map(
-    (row, index) => {
-      if (planRowsInput) return row;
-      const override = planRemarks?.[index];
-      if (typeof override === "string") {
-        return { ...row, remarks: override.trim() };
-      }
-      return row;
-    },
-  );
+  const planRows = (
+    planRowsInput ?? (po ? buildPaymentPlanRows(po) : [])
+  ).map((row, index) => {
+    if (planRowsInput) return row;
+    const override = planRemarks?.[index];
+    if (typeof override === "string") {
+      return { ...row, remarks: override.trim() };
+    }
+    return row;
+  });
+  if (planRows.length === 0) {
+    throw new Error("Add at least one payment plan row");
+  }
 
   const apDate = dueDateYmd(apDateYmd) ?? localTodayYmd();
 
@@ -669,7 +686,9 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
   const projectValue =
     project !== undefined && project !== null
       ? project.trim()
-      : defaultApProject(po);
+      : po
+        ? defaultApProject(po)
+        : "";
   if (projectValue) {
     controls.push({
       id: AP_FORM_WIDGETS.project,
@@ -681,7 +700,9 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
   const supplierValue =
     supplier !== undefined && supplier !== null
       ? supplier.trim()
-      : defaultApSupplier(po);
+      : po
+        ? defaultApSupplier(po)
+        : "";
   if (supplierValue) {
     controls.push({
       id: AP_FORM_WIDGETS.supplier,
@@ -701,7 +722,9 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
   const remarksValue =
     remarks !== undefined && remarks !== null
       ? remarks.trim()
-      : defaultApRemarks(po);
+      : po
+        ? defaultApRemarks(po)
+        : "";
   if (remarksValue) {
     controls.push({
       id: AP_FORM_WIDGETS.remarks,

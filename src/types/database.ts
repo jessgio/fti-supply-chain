@@ -556,6 +556,30 @@ export interface PurchaseOrderLarkSubmission {
   submitted_at: string;
 }
 
+export type ShipmentApInvoiceKind = "tax" | "shipping";
+
+export interface ShipmentLarkSubmission {
+  id: string;
+  shipment_id: string;
+  invoice_kind: ShipmentApInvoiceKind;
+  supplier_id: string | null;
+  supplier_name?: string | null;
+  lark_instance_code: string;
+  lark_serial_number: string | null;
+  lark_approval_status: LarkApprovalStatus | null;
+  lark_status_synced_at: string | null;
+  lark_expense_category: string | null;
+  submitted_amount: number | null;
+  submitted_currency: string | null;
+  plan_rows: Array<{
+    dateYmd: string;
+    amount: number;
+    currency: string;
+    remarks: string;
+  }> | null;
+  submitted_at: string;
+}
+
 export type PoDocumentType = "proforma_invoice";
 
 export interface PoDocument {

@@ -22,6 +22,7 @@ import {
   LogOut,
   Banknote,
   FileText,
+  Receipt,
   MessageSquareText,
   Package,
   PackageCheck,
@@ -106,6 +107,12 @@ const links: NavItem[] = [
         href: "/dashboard/payments",
         label: "PO Payments",
         icon: Banknote,
+        roles: ["admin", "supply_chain"],
+      },
+      {
+        href: "/dashboard/shipment-payments",
+        label: "Shipment Payments",
+        icon: Receipt,
         roles: ["admin", "supply_chain"],
       },
       {

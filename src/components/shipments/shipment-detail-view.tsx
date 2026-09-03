@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Pencil,
   Plane,
+  Receipt,
   Ship,
   Trash2,
   Truck,
@@ -152,6 +153,13 @@ export function ShipmentDetailView({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/dashboard/shipment-payments/${shipment.id}`}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
+          >
+            <Receipt className="h-4 w-4" />
+            Request payment
+          </Link>
           {!isClosed && (
             <>
               <Button variant="outline" onClick={() => setEditOpen(true)}>
