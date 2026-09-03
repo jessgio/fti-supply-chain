@@ -77,12 +77,20 @@ function emptyTargetMap(): Record<number, string> {
   return Object.fromEntries(MONTHS.map((month) => [month, "0"]));
 }
 
-function targetsFromPayload(payload: SopForecastPayload): Record<number, string> {
+function targetsFromPayload(
+  payload: SopForecastPayload | null | undefined,
+): Record<number, string> {
   const next = emptyTargetMap();
-  for (const t of payload.targets) {
+  for (const t of payload?.targets ?? []) {
     next[t.month] = String(t.target_net_sales_post_tax ?? 0);
   }
   return next;
+}
+
+function isForecastGroupPayload(value: unknown): value is SopForecastPayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Partial<SopForecastPayload>;
+  return Array.isArray(payload.rows) && Array.isArray(payload.targets);
 }
 
 function patchYearDataRetailPrice(
@@ -205,8 +213,8 @@ function SalesForecastClient() {
   const applyYearData = useCallback((next: SopYearForecast) => {
     setYearData(next);
     draftsRef.current = {
-      online: draftsFromRows(next.groups.online.rows),
-      offline: draftsFromRows(next.groups.offline.rows),
+      online: draftsFromRows(next.groups?.online?.rows),
+      offline: draftsFromRows(next.groups?.offline?.rows),
     };
     const nextTargets = {
       online: targetsFromPayload(next.groups.online),
@@ -216,7 +224,9 @@ function SalesForecastClient() {
     setTargetDrafts(nextTargets);
     setTargetsPending(false);
     setChannelDraft(
-      Object.fromEntries(next.channels.map((c) => [c.id, c.sop_group ?? ""])),
+      Object.fromEntries(
+        (next.channels ?? []).map((c) => [c.id, c.sop_group ?? ""]),
+      ),
     );
     setDraftSeed((n) => n + 1);
     draftsStore.notifyNow();
@@ -224,6 +234,9 @@ function SalesForecastClient() {
 
   const applyGroupPayload = useCallback(
     (group: SopChannelGroup, next: SopForecastPayload) => {
+      if (!isForecastGroupPayload(next)) {
+        return;
+      }
       setYearData((prev) => {
         if (!prev) {
           return {
@@ -736,7 +749,11 @@ function SalesForecastClient() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
-      applyGroupPayload(activeGroup, data);
+      if (isForecastGroupPayload(data)) {
+        applyGroupPayload(activeGroup, data);
+      } else {
+        await load();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {

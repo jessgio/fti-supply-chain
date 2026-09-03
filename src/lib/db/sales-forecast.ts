@@ -485,7 +485,7 @@ export async function loadSopYearForecast(
     offline: new Map<string, { qty: number; post_tax: number }>(),
   };
 
-  for (const row of monthlyActualsRes.data) {
+  for (const row of monthlyActualsRes.data ?? []) {
     if (!skuIds.has(row.sku_id)) continue;
     if (!mappedChannelIds.has(row.channel_id)) continue;
     const group = channelGroup.get(row.channel_id);
@@ -699,7 +699,7 @@ export async function upsertSkuMonthPlans(
         .eq("sop_group", input.group)
         .in("sku_id", skuIds.slice(i, i + chunk));
       if (error) throw error;
-      for (const row of data ?? []) {
+      for (const row of Array.isArray(data) ? data : []) {
         existingUploadByKey.set(
           `${row.sku_id}:${row.month}`,
           row.upload_id ?? null,

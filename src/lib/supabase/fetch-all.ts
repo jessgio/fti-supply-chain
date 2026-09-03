@@ -23,7 +23,7 @@ export async function fetchAllRows<T>(
       offset + PAGE_SIZE - 1,
     );
     if (error) throw error;
-    if (!data?.length) break;
+    if (!Array.isArray(data) || data.length === 0) break;
     all.push(...data);
     if (data.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
@@ -45,7 +45,7 @@ export async function fetchAllRpc<T>(
       .rpc(fn, params)
       .range(offset, offset + PAGE_SIZE - 1);
     if (error) throw error;
-    if (!data?.length) break;
+    if (!Array.isArray(data) || data.length === 0) break;
     all.push(...(data as T[]));
     if (data.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;

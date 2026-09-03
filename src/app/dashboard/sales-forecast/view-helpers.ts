@@ -14,6 +14,10 @@ export type GroupDrafts = {
   disc: Record<string, string>;
 };
 
+function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export function sharePct(part: number, whole: number): number | null {
   if (!Number.isFinite(part) || !Number.isFinite(whole) || whole <= 0) {
     return null;
@@ -51,10 +55,10 @@ export function annualFromMonths(
   };
 }
 
-export function draftsFromRows(rows: SopSkuRow[]): GroupDrafts {
+export function draftsFromRows(rows: SopSkuRow[] | null | undefined): GroupDrafts {
   const qty: Record<string, string> = {};
   const disc: Record<string, string> = {};
-  for (const row of rows) {
+  for (const row of asArray(rows)) {
     for (const month of MONTHS) {
       const plan = row.months[month]?.plan;
       qty[draftKey(row.sku_id, month)] = planDraftValue(plan?.projected_qty);
@@ -90,7 +94,7 @@ export function mergeSavedPlanLines(
   }>,
 ): SopForecastPayload {
   const byKey = new Map(
-    lines.map((line) => [`${line.sku_id}:${line.month}`, line] as const),
+    asArray(lines).map((line) => [`${line.sku_id}:${line.month}`, line] as const),
   );
   if (byKey.size === 0) return payload;
 
@@ -140,13 +144,13 @@ export function mergeSavedPlanLines(
     };
   };
 
-  const rows = payload.rows.map(mapRow);
+  const rows = asArray(payload.rows).map(mapRow);
   const planned = plannedPostTaxByMonth(rows);
   return {
     ...payload,
     rows,
-    inactive_rows: payload.inactive_rows.map(mapRow),
-    targets: payload.targets.map((target) => {
+    inactive_rows: asArray(payload.inactive_rows).map(mapRow),
+    targets: asArray(payload.targets).map((target) => {
       const plannedPostTax = planned.get(target.month) ?? 0;
       return {
         ...target,
@@ -162,11 +166,11 @@ export function mergeSavedTargets(
   targets: Array<{ month: number; target_net_sales_post_tax: number }>,
 ): SopForecastPayload {
   const byMonth = new Map(
-    targets.map((row) => [row.month, row.target_net_sales_post_tax] as const),
+    asArray(targets).map((row) => [row.month, row.target_net_sales_post_tax] as const),
   );
   return {
     ...payload,
-    targets: payload.targets.map((target) => {
+    targets: asArray(payload.targets).map((target) => {
       const next = byMonth.get(target.month);
       if (next == null || !Number.isFinite(next)) return target;
       return {
@@ -215,7 +219,7 @@ export function monthPostTaxTotal(
   drafts: GroupDrafts,
 ): number {
   let planned = 0;
-  for (const row of rows) {
+  for (const row of asArray(rows)) {
     planned += liveSkuMonthFromDrafts(
       row,
       month,
@@ -293,7 +297,7 @@ export function collectDirtyLines(
     projected_qty: number;
     avg_discount_pct: number;
   }> = [];
-  for (const row of payload.rows) {
+  for (const row of asArray(payload.rows)) {
     for (const month of MONTHS) {
       if (!isPlanMonth(month, payload.current_month, payload.read_only)) {
         continue;
@@ -326,11 +330,13 @@ export function mergeLiveSkuRows(
   currentMonth: number,
   readOnly: boolean,
 ): SopSkuRow[] {
-  const onlineById = new Map(onlineRows.map((row) => [row.sku_id, row]));
-  const offlineById = new Map(offlineRows.map((row) => [row.sku_id, row]));
+  const onlineList = asArray(onlineRows);
+  const offlineList = asArray(offlineRows);
+  const onlineById = new Map(onlineList.map((row) => [row.sku_id, row]));
+  const offlineById = new Map(offlineList.map((row) => [row.sku_id, row]));
   const skuIds = [
-    ...onlineRows.map((row) => row.sku_id),
-    ...offlineRows
+    ...onlineList.map((row) => row.sku_id),
+    ...offlineList
       .filter((row) => !onlineById.has(row.sku_id))
       .map((row) => row.sku_id),
   ];
@@ -417,9 +423,11 @@ export function unionChannelSkuRows(
   onlineRows: SopSkuRow[],
   offlineRows: SopSkuRow[],
 ): SopSkuRow[] {
-  const onlineIds = new Set(onlineRows.map((row) => row.sku_id));
+  const online = asArray(onlineRows);
+  const offline = asArray(offlineRows);
+  const onlineIds = new Set(online.map((row) => row.sku_id));
   return [
-    ...onlineRows,
-    ...offlineRows.filter((row) => !onlineIds.has(row.sku_id)),
+    ...online,
+    ...offline.filter((row) => !onlineIds.has(row.sku_id)),
   ];
 }

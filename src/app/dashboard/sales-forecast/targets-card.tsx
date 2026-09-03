@@ -122,7 +122,7 @@ export function TargetsCard({
     workspace === "online" || workspace === "offline" ? workspace : null;
   const dirtyTargets =
     yearData && activeGroup
-      ? yearData.groups[activeGroup].targets.filter((t) => {
+      ? (yearData.groups[activeGroup].targets ?? []).filter((t) => {
           const next = parseNumericInput(
             targetDrafts[activeGroup][t.month] ?? 0,
           );
