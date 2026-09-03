@@ -28,7 +28,7 @@ import {
 import { FORECAST_CSV_HEADERS, MONTHS } from "@/lib/sales-forecast/constants";
 import { startOfMonthIso } from "@/lib/db/sku-retail-prices";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
-import { cn, formatDateShort } from "@/lib/utils";
+import { cn, formatDateShort, parseNumericInput } from "@/lib/utils";
 import type {
   SopChannelGroup,
   SopForecastPayload,
@@ -55,6 +55,8 @@ import {
   collectDirtyLines,
   draftsFromRows,
   type GroupDrafts,
+  mergeSavedPlanLines,
+  mergeSavedTargets,
   unionChannelSkuRows,
 } from "./view-helpers";
 
@@ -171,6 +173,8 @@ function SalesForecastClient() {
     online: emptyTargetMap(),
     offline: emptyTargetMap(),
   });
+  const targetDraftsRef = useRef(targetDrafts);
+  const [targetsPending, setTargetsPending] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [channelDraft, setChannelDraft] = useState<
     Record<string, SopChannelGroup | "">
@@ -204,10 +208,13 @@ function SalesForecastClient() {
       online: draftsFromRows(next.groups.online.rows),
       offline: draftsFromRows(next.groups.offline.rows),
     };
-    setTargetDrafts({
+    const nextTargets = {
       online: targetsFromPayload(next.groups.online),
       offline: targetsFromPayload(next.groups.offline),
-    });
+    };
+    targetDraftsRef.current = nextTargets;
+    setTargetDrafts(nextTargets);
+    setTargetsPending(false);
     setChannelDraft(
       Object.fromEntries(next.channels.map((c) => [c.id, c.sop_group ?? ""])),
     );
@@ -248,7 +255,10 @@ function SalesForecastClient() {
         };
       });
       draftsRef.current[group] = draftsFromRows(next.rows);
-      setTargetDrafts((d) => ({ ...d, [group]: targetsFromPayload(next) }));
+      const nextTargets = targetsFromPayload(next);
+      targetDraftsRef.current = { ...targetDraftsRef.current, [group]: nextTargets };
+      setTargetDrafts((d) => ({ ...d, [group]: nextTargets }));
+      setTargetsPending(false);
       setDraftSeed((n) => n + 1);
       draftsStore.notifyNow();
     },
@@ -505,6 +515,12 @@ function SalesForecastClient() {
 
   async function saveTargets() {
     if (!yearData || !activeGroup) return;
+    const flushed = targetDraftsRef.current[activeGroup];
+    const targets = MONTHS.map((month) => ({
+      month,
+      target_net_sales_post_tax: parseNumericInput(flushed[month]),
+    }));
+    setTargetDrafts(targetDraftsRef.current);
     setSaving(true);
     setError(null);
     try {
@@ -514,17 +530,30 @@ function SalesForecastClient() {
         body: JSON.stringify({
           year,
           group: activeGroup,
-          targets: MONTHS.map((month) => ({
-            month,
-            target_net_sales_post_tax: Number(
-              targetDrafts[activeGroup][month] ?? 0,
-            ),
-          })),
+          targets,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Failed to save targets");
-      applyGroupPayload(activeGroup, data);
+      const nextGroup = mergeSavedTargets(
+        yearData.groups[activeGroup],
+        targets,
+      );
+      const nextTargets = targetsFromPayload(nextGroup);
+      targetDraftsRef.current = {
+        ...targetDraftsRef.current,
+        [activeGroup]: nextTargets,
+      };
+      setYearData((prev) =>
+        prev
+          ? {
+              ...prev,
+              groups: { ...prev.groups, [activeGroup]: nextGroup },
+            }
+          : prev,
+      );
+      setTargetDrafts(targetDraftsRef.current);
+      setTargetsPending(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save targets");
     } finally {
@@ -534,11 +563,15 @@ function SalesForecastClient() {
 
   async function saveLines() {
     if (!yearData || !activeGroup) return;
+    draftsStore.notifyNow();
     const lines = collectDirtyLines(
       yearData.groups[activeGroup],
       draftsRef.current[activeGroup],
     );
-    if (lines.length === 0) return;
+    if (lines.length === 0) {
+      setError("No plan changes to save.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -547,9 +580,22 @@ function SalesForecastClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ year, group: activeGroup, lines }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Failed to save plan");
-      applyGroupPayload(activeGroup, data);
+      const nextGroup = mergeSavedPlanLines(
+        yearData.groups[activeGroup],
+        lines,
+      );
+      draftsRef.current[activeGroup] = draftsFromRows(nextGroup.rows);
+      setYearData((prev) =>
+        prev
+          ? {
+              ...prev,
+              groups: { ...prev.groups, [activeGroup]: nextGroup },
+            }
+          : prev,
+      );
+      draftsStore.notifyNow();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save plan");
     } finally {
@@ -916,6 +962,17 @@ function SalesForecastClient() {
         combined={combined}
         targetDrafts={targetDrafts}
         setTargetDrafts={setTargetDrafts}
+        targetsPending={targetsPending}
+        onTargetLiveChange={(group, month, value) => {
+          targetDraftsRef.current = {
+            ...targetDraftsRef.current,
+            [group]: {
+              ...targetDraftsRef.current[group],
+              [month]: value,
+            },
+          };
+          setTargetsPending(true);
+        }}
         onSave={() => void saveTargets()}
       />
 

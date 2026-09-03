@@ -357,7 +357,7 @@ export async function loadSopYearForecast(
     stockBySku,
     onOrderBySku,
     targetsRes,
-    plansRes,
+    planRows,
     uploadsRes,
     monthlyActualsRes,
     restockResult,
@@ -372,12 +372,21 @@ export async function loadSopYearForecast(
       .from("sop_monthly_targets")
       .select("month, target_net_sales_post_tax, sop_group")
       .eq("year", year),
-    supabase
-      .from("sop_sku_month_plans")
-      .select(
-        "sku_id, month, projected_qty, avg_discount_pct, upload_id, sop_group",
-      )
-      .eq("year", year),
+    fetchAllRows<{
+      sku_id: string;
+      month: number;
+      projected_qty: number;
+      avg_discount_pct: number;
+      upload_id: string | null;
+      sop_group: string;
+    }>(() =>
+      supabase
+        .from("sop_sku_month_plans")
+        .select(
+          "sku_id, month, projected_qty, avg_discount_pct, upload_id, sop_group",
+        )
+        .eq("year", year),
+    ),
     supabase
       .from("sop_forecast_uploads")
       .select(
@@ -441,7 +450,6 @@ export async function loadSopYearForecast(
     loadSkuRetailPriceHistory(supabase),
   ]);
   if (targetsRes.error) throw targetsRes.error;
-  if (plansRes.error) throw plansRes.error;
   if (uploadsRes.error) throw uploadsRes.error;
   if (inactiveRes.error) throw inactiveRes.error;
 
@@ -507,7 +515,7 @@ export async function loadSopYearForecast(
       { projected_qty: number; avg_discount_pct: number; upload_id: string | null }
     >(),
   };
-  for (const row of plansRes.data ?? []) {
+  for (const row of planRows) {
     const group = row.sop_group as SopChannelGroup;
     if (group !== "online" && group !== "offline") continue;
     plansByGroup[group].set(`${row.sku_id}:${row.month}`, {
@@ -680,22 +688,23 @@ export async function upsertSkuMonthPlans(
 ): Promise<string[]> {
   if (input.lines.length === 0) return [];
   const existingUploadByKey = new Map<string, string | null>();
+  const skuIds = [...new Set(input.lines.map((l) => l.sku_id))];
   if (input.keepExistingUploadId) {
-    const { data, error } = await supabase
-      .from("sop_sku_month_plans")
-      .select("sku_id, month, upload_id")
-      .eq("year", input.year)
-      .eq("sop_group", input.group)
-      .in(
-        "sku_id",
-        [...new Set(input.lines.map((l) => l.sku_id))],
-      );
-    if (error) throw error;
-    for (const row of data ?? []) {
-      existingUploadByKey.set(
-        `${row.sku_id}:${row.month}`,
-        row.upload_id ?? null,
-      );
+    const chunk = 80;
+    for (let i = 0; i < skuIds.length; i += chunk) {
+      const { data, error } = await supabase
+        .from("sop_sku_month_plans")
+        .select("sku_id, month, upload_id")
+        .eq("year", input.year)
+        .eq("sop_group", input.group)
+        .in("sku_id", skuIds.slice(i, i + chunk));
+      if (error) throw error;
+      for (const row of data ?? []) {
+        existingUploadByKey.set(
+          `${row.sku_id}:${row.month}`,
+          row.upload_id ?? null,
+        );
+      }
     }
   }
 
@@ -715,10 +724,15 @@ export async function upsertSkuMonthPlans(
       updated_at: new Date().toISOString(),
     }));
 
-  const { error } = await supabase
-    .from("sop_sku_month_plans")
-    .upsert(rows, { onConflict: "year,month,sop_group,sku_id" });
-  if (error) throw error;
+  const upsertChunk = 500;
+  for (let i = 0; i < rows.length; i += upsertChunk) {
+    const { error } = await supabase
+      .from("sop_sku_month_plans")
+      .upsert(rows.slice(i, i + upsertChunk), {
+        onConflict: "year,month,sop_group,sku_id",
+      });
+    if (error) throw error;
+  }
   return [...new Set(rows.map((r) => r.sku_id))];
 }
 

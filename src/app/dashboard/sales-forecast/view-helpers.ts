@@ -5,6 +5,7 @@ import {
   remainingYearShortfall,
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
+import { parseNumericInput } from "@/lib/utils";
 import type { SopForecastPayload, SopSkuRow } from "@/types/database";
 import { draftKey, isPlanMonth, planDraftValue, rspForMonth } from "./table-utils";
 
@@ -61,6 +62,120 @@ export function draftsFromRows(rows: SopSkuRow[]): GroupDrafts {
     }
   }
   return { qty, disc };
+}
+
+function plannedPostTaxByMonth(
+  rows: SopSkuRow[],
+): Map<number, number> {
+  const planned = new Map<number, number>();
+  for (const row of rows) {
+    for (const month of MONTHS) {
+      planned.set(
+        month,
+        (planned.get(month) ?? 0) + (row.months[month]?.plan.post_tax_net ?? 0),
+      );
+    }
+  }
+  return planned;
+}
+
+/** Apply saved qty/discount lines onto an already-loaded forecast payload. */
+export function mergeSavedPlanLines(
+  payload: SopForecastPayload,
+  lines: Array<{
+    sku_id: string;
+    month: number;
+    projected_qty: number;
+    avg_discount_pct: number;
+  }>,
+): SopForecastPayload {
+  const byKey = new Map(
+    lines.map((line) => [`${line.sku_id}:${line.month}`, line] as const),
+  );
+  if (byKey.size === 0) return payload;
+
+  const mapRow = (row: SopSkuRow): SopSkuRow => {
+    let touched = false;
+    const months = { ...row.months };
+    for (const month of MONTHS) {
+      const line = byKey.get(`${row.sku_id}:${month}`);
+      if (!line) continue;
+      touched = true;
+      const monthRsp = rspForMonth(row, month);
+      const vatIn = vatInclusiveNet(
+        line.projected_qty,
+        monthRsp,
+        line.avg_discount_pct,
+      );
+      const prev = months[month];
+      months[month] = {
+        actual: prev?.actual ?? { qty: 0, post_tax_net: 0 },
+        plan: {
+          projected_qty: line.projected_qty,
+          avg_discount_pct: line.avg_discount_pct,
+          vat_in_net: vatIn,
+          post_tax_net: postTaxNet(vatIn),
+          upload_id: prev?.plan.upload_id ?? null,
+        },
+      };
+    }
+    if (!touched) return row;
+
+    let remainingYearQty = 0;
+    for (const month of MONTHS) {
+      if (!isPlanMonth(month, payload.current_month, payload.read_only)) {
+        continue;
+      }
+      remainingYearQty += months[month]?.plan.projected_qty ?? 0;
+    }
+    return {
+      ...row,
+      months,
+      remaining_year_qty: remainingYearQty,
+      shortfall_qty: remainingYearShortfall(
+        remainingYearQty,
+        row.current_stock,
+        row.on_order_qty,
+      ),
+    };
+  };
+
+  const rows = payload.rows.map(mapRow);
+  const planned = plannedPostTaxByMonth(rows);
+  return {
+    ...payload,
+    rows,
+    inactive_rows: payload.inactive_rows.map(mapRow),
+    targets: payload.targets.map((target) => {
+      const plannedPostTax = planned.get(target.month) ?? 0;
+      return {
+        ...target,
+        planned_post_tax: plannedPostTax,
+        gap: plannedPostTax - target.target_net_sales_post_tax,
+      };
+    }),
+  };
+}
+
+export function mergeSavedTargets(
+  payload: SopForecastPayload,
+  targets: Array<{ month: number; target_net_sales_post_tax: number }>,
+): SopForecastPayload {
+  const byMonth = new Map(
+    targets.map((row) => [row.month, row.target_net_sales_post_tax] as const),
+  );
+  return {
+    ...payload,
+    targets: payload.targets.map((target) => {
+      const next = byMonth.get(target.month);
+      if (next == null || !Number.isFinite(next)) return target;
+      return {
+        ...target,
+        target_net_sales_post_tax: next,
+        gap: target.planned_post_tax - next,
+      };
+    }),
+  };
 }
 
 export function liveSkuMonthFromDrafts(
@@ -131,7 +246,7 @@ export function buildLiveGroupMonths(
 ): Record<SopChannelGroup | "combined", LiveMonth[]> {
   const build = (group: SopChannelGroup): LiveMonth[] =>
     MONTHS.map((month) => {
-      const target = Number(targetDrafts[group][month] ?? 0);
+      const target = parseNumericInput(targetDrafts[group][month]);
       const safeTarget = Number.isFinite(target) ? target : 0;
       const planned = monthPostTaxTotal(
         yearData.groups[group].rows,

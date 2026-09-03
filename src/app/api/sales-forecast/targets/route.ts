@@ -3,13 +3,10 @@ import {
   getCurrentProfile,
   requireCommercialWrite,
 } from "@/lib/auth";
-import {
-  isSopGroup,
-  loadSopForecast,
-  upsertMonthlyTargets,
-} from "@/lib/db/sales-forecast";
+import { isSopGroup, upsertMonthlyTargets } from "@/lib/db/sales-forecast";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
+import { parseNumericInput } from "@/lib/utils";
 
 export async function PUT(request: Request) {
   try {
@@ -37,24 +34,26 @@ export async function PUT(request: Request) {
     }
 
     const rawTargets: unknown[] = Array.isArray(body.targets) ? body.targets : [];
+    const targets = rawTargets.map((row) => {
+      const item = row as {
+        month?: number;
+        target_net_sales_post_tax?: number | string;
+      };
+      return {
+        month: Number(item.month),
+        target_net_sales_post_tax: parseNumericInput(
+          item.target_net_sales_post_tax,
+        ),
+      };
+    });
     const supabase = createAdminClient();
     await upsertMonthlyTargets(supabase, {
       year,
       group,
-      targets: rawTargets.map((row) => {
-        const item = row as {
-          month?: number;
-          target_net_sales_post_tax?: number;
-        };
-        return {
-          month: Number(item.month),
-          target_net_sales_post_tax: Number(item.target_net_sales_post_tax ?? 0),
-        };
-      }),
+      targets,
       userId: profile?.id ?? null,
     });
-    const payload = await loadSopForecast(supabase, year, group);
-    return NextResponse.json(payload);
+    return NextResponse.json({ ok: true, year, group, targets });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

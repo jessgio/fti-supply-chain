@@ -3,16 +3,11 @@ import {
   getCurrentProfile,
   requireCommercialWrite,
 } from "@/lib/auth";
-import { notifySalesForecastOversell } from "@/lib/db/notifications";
-import {
-  isSopGroup,
-  loadSopForecast,
-  upsertSkuMonthPlans,
-} from "@/lib/db/sales-forecast";
+import { isSopGroup, upsertSkuMonthPlans } from "@/lib/db/sales-forecast";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 export async function PATCH(request: Request) {
   try {
@@ -58,21 +53,14 @@ export async function PATCH(request: Request) {
       .filter((row) => row.sku_id && row.month >= 1 && row.month <= 12);
 
     const supabase = createAdminClient();
-    const skuIds = await upsertSkuMonthPlans(supabase, {
+    await upsertSkuMonthPlans(supabase, {
       year,
       group,
       lines,
       userId: profile?.id ?? null,
       keepExistingUploadId: true,
     });
-    const payload = await loadSopForecast(supabase, year, group);
-    await notifySalesForecastOversell(supabase, {
-      actorId: profile?.id ?? null,
-      group,
-      year,
-      rows: payload.rows.filter((row) => skuIds.includes(row.sku_id)),
-    });
-    return NextResponse.json(payload);
+    return NextResponse.json({ ok: true, year, group, lines });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

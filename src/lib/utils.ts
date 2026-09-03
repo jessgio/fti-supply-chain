@@ -107,6 +107,44 @@ export function formatNumber(value: number, decimals = 0): string {
   return numberFormatter(decimals).format(value);
 }
 
+/**
+ * Parse a typed amount. Accepts plain digits, 1,500,000 / 1.500.000 thousands,
+ * and optional Rp prefix. Empty or invalid input is 0.
+ */
+export function parseNumericInput(raw: string | number | null | undefined): number {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+  const trimmed = String(raw ?? "")
+    .trim()
+    .replace(/rp/gi, "")
+    .replace(/\s/g, "");
+  if (!trimmed || trimmed === "-") return 0;
+
+  const commaCount = (trimmed.match(/,/g) ?? []).length;
+  const dotCount = (trimmed.match(/\./g) ?? []).length;
+  let normalized = trimmed;
+
+  if (dotCount > 1 && commaCount === 0) {
+    normalized = trimmed.replace(/\./g, "");
+  } else if (commaCount > 1 && dotCount === 0) {
+    normalized = trimmed.replace(/,/g, "");
+  } else if (commaCount === 1 && dotCount === 0) {
+    const frac = trimmed.split(",")[1] ?? "";
+    normalized =
+      frac.length === 3 ? trimmed.replace(/,/g, "") : trimmed.replace(",", ".");
+  } else if (dotCount >= 1 && commaCount === 1) {
+    if (trimmed.lastIndexOf(",") > trimmed.lastIndexOf(".")) {
+      normalized = trimmed.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = trimmed.replace(/,/g, "");
+    }
+  } else {
+    normalized = trimmed.replace(/,/g, "");
+  }
+
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function formatPct(value: number | null): string {
   if (value === null) return "—";
   const sign = value > 0 ? "+" : "";

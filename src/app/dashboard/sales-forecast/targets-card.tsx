@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, parseNumericInput } from "@/lib/utils";
 import type { SopChannelGroup, SopYearForecast } from "@/types/database";
 import type { DraftsStore } from "./drafts-store";
 import { storeServerSnapshot } from "./drafts-store";
@@ -36,9 +36,11 @@ type Workspace = SopChannelGroup | "combined";
 /** Local-state input so typing does not rebuild the whole targets card. */
 function TargetMonthInput({
   value,
+  onLiveChange,
   onCommit,
 }: {
   value: string;
+  onLiveChange: (value: string) => void;
   onCommit: (value: string) => void;
 }) {
   const [local, setLocal] = useState(value);
@@ -50,7 +52,11 @@ function TargetMonthInput({
     <Input
       className="h-8 px-2 text-xs"
       value={local}
-      onChange={(e) => setLocal(e.target.value)}
+      onChange={(e) => {
+        const next = e.target.value;
+        setLocal(next);
+        onLiveChange(next);
+      }}
       onBlur={() => {
         if (local !== value) onCommit(local);
       }}
@@ -68,6 +74,8 @@ export function TargetsCard({
   combined,
   targetDrafts,
   setTargetDrafts,
+  targetsPending,
+  onTargetLiveChange,
   onSave,
 }: {
   store: DraftsStore;
@@ -81,6 +89,12 @@ export function TargetsCard({
   setTargetDrafts: Dispatch<
     SetStateAction<Record<SopChannelGroup, Record<number, string>>>
   >;
+  targetsPending: boolean;
+  onTargetLiveChange: (
+    group: SopChannelGroup,
+    month: number,
+    value: string,
+  ) => void;
   onSave: () => void;
 }) {
   const version = useSyncExternalStore(
@@ -109,7 +123,9 @@ export function TargetsCard({
   const dirtyTargets =
     yearData && activeGroup
       ? yearData.groups[activeGroup].targets.filter((t) => {
-          const next = Number(targetDrafts[activeGroup][t.month] ?? 0);
+          const next = parseNumericInput(
+            targetDrafts[activeGroup][t.month] ?? 0,
+          );
           return next !== t.target_net_sales_post_tax;
         })
       : [];
@@ -150,7 +166,7 @@ export function TargetsCard({
         </div>
         <Button
           size="sm"
-          disabled={!yearData || readOnly || saving || combined || dirtyTargets.length === 0}
+          disabled={!yearData || readOnly || saving || combined || (dirtyTargets.length === 0 && !targetsPending)}
           onClick={onSave}
         >
           <Save className="h-4 w-4" />
@@ -240,8 +256,13 @@ export function TargetsCard({
                             {row.editable && row.group ? (
                               <TargetMonthInput
                                 value={targetDrafts[row.group][month] ?? "0"}
+                                onLiveChange={(value) => {
+                                  const group = row.group!;
+                                  onTargetLiveChange(group, month, value);
+                                }}
                                 onCommit={(value) => {
                                   const group = row.group!;
+                                  onTargetLiveChange(group, month, value);
                                   setTargetDrafts((d) => ({
                                     ...d,
                                     [group]: {
