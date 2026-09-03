@@ -4,6 +4,7 @@ import { getCompletedMonthBounds } from "@/lib/forecast/demand";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
 import {
   MONTHS,
+  OFFLINE_SALES_LAG_MONTHS,
   SOP_GROUPS,
   type SopChannelGroup,
 } from "@/lib/sales-forecast/constants";
@@ -334,7 +335,8 @@ export async function loadSopYearForecast(
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
-  const { l3mStart, l6mStart } = getCompletedMonthBounds(now);
+  const onlineBounds = getCompletedMonthBounds(now);
+  const offlineBounds = getCompletedMonthBounds(now, OFFLINE_SALES_LAG_MONTHS);
   const current_month =
     year > currentYear ? 1 : year === currentYear ? currentMonth : 13;
   const read_only = year < currentYear;
@@ -350,7 +352,8 @@ export async function loadSopYearForecast(
 
   const yearStart = `${year}-01-01`;
   const today = format(now, "yyyy-MM-dd");
-  const historyStart = l6mStart < yearStart ? l6mStart : yearStart;
+  const historyStart = [onlineBounds.l6mStart, offlineBounds.l6mStart, yearStart]
+    .sort()[0]!;
 
   const [
     skus,
@@ -565,6 +568,7 @@ export async function loadSopYearForecast(
 
   const groups = {} as Record<SopChannelGroup, SopForecastPayload>;
   for (const group of SOP_GROUPS) {
+    const bounds = group === "offline" ? offlineBounds : onlineBounds;
     const activeSkus = skus.filter((sku) => !inactiveByGroup[group].has(sku.id));
     const inactiveSkus = skus.filter((sku) => inactiveByGroup[group].has(sku.id));
     const { rows, plannedByMonth } = buildGroupRows(
@@ -572,8 +576,8 @@ export async function loadSopYearForecast(
       year,
       currentYear,
       currentMonth,
-      l3mStart,
-      l6mStart,
+      bounds.l3mStart,
+      bounds.l6mStart,
       actualByGroup[group],
       plansByGroup[group],
       stockBySku,
@@ -587,8 +591,8 @@ export async function loadSopYearForecast(
       year,
       currentYear,
       currentMonth,
-      l3mStart,
-      l6mStart,
+      bounds.l3mStart,
+      bounds.l6mStart,
       actualByGroup[group],
       plansByGroup[group],
       stockBySku,

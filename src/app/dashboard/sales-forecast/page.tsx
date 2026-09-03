@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowDown,
@@ -25,7 +25,7 @@ import {
   franchisesForRow,
   rowMatchesFranchiseFilter,
 } from "@/lib/sales-forecast/franchise-rollup";
-import { FORECAST_CSV_HEADERS, MONTHS } from "@/lib/sales-forecast/constants";
+import { FORECAST_CSV_HEADERS, MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
 import { startOfMonthIso } from "@/lib/db/sku-retail-prices";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn, formatDateShort, parseNumericInput } from "@/lib/utils";
@@ -35,7 +35,7 @@ import type {
   SopSkuRow,
   SopYearForecast,
 } from "@/types/database";
-import { createDraftsStore } from "./drafts-store";
+import { createDraftsStore, storeServerSnapshot } from "./drafts-store";
 import {
   CombinedSkuBody,
   EditableSkuBody,
@@ -45,14 +45,22 @@ import {
   SavePlanButton,
   SkuMonthHeaders,
 } from "./live-panels";
-import { FREEZE, FREEZE_EDGE, freezeHead } from "./table-utils";
+import {
+  calendarActiveMonth,
+  FREEZE,
+  FREEZE_EDGE,
+  freezeHead,
+  type ForecastSortKey,
+} from "./table-utils";
 import { TargetsCard } from "./targets-card";
 import {
   RspEffectiveDialog,
   type PendingRspChange,
 } from "./rsp-effective-dialog";
 import {
+  activeMonthSortMetrics,
   collectDirtyLines,
+  combinedActiveMonthSortMetrics,
   draftsFromRows,
   type GroupDrafts,
   mergeSavedPlanLines,
@@ -60,12 +68,7 @@ import {
   unionChannelSkuRows,
 } from "./view-helpers";
 
-type SortKey =
-  | "sku_code"
-  | "franchise_name"
-  | "current_stock"
-  | "l3m_qty"
-  | "shortfall_qty";
+type SortKey = ForecastSortKey;
 type SortDir = "asc" | "desc";
 type TypeFilter = "single" | "bundle";
 type NpdFilter = "npd" | "established";
@@ -205,6 +208,11 @@ function SalesForecastClient() {
   const storeRef = useRef<ReturnType<typeof createDraftsStore> | null>(null);
   if (!storeRef.current) storeRef.current = createDraftsStore();
   const draftsStore = storeRef.current;
+  const draftVersion = useSyncExternalStore(
+    draftsStore.subscribe,
+    draftsStore.getSnapshot,
+    storeServerSnapshot,
+  );
 
   const activeGroup: SopChannelGroup | null =
     workspace === "combined" ? null : workspace;
@@ -330,6 +338,11 @@ function SalesForecastClient() {
       ? yearData.groups.online
       : yearData.groups[workspace]
     : null;
+  const lagMonthLabel = MONTH_LABELS[(new Date().getMonth() + 11) % 12];
+  const runRateHint =
+    workspace === "offline"
+      ? `Excl. ${lagMonthLabel} — offline sell-out usually lands 20–25 days after month end`
+      : undefined;
 
   useEffect(() => {
     if (!payload || !focusSku) return;
@@ -400,6 +413,41 @@ function SalesForecastClient() {
 
   const filteredRows = useMemo(() => {
     const rows = filterSkuRows(tableRows);
+    const activeMonth = yearData ? calendarActiveMonth(yearData.year) : null;
+    const onlineById = new Map(
+      (yearData?.groups.online.rows ?? []).map((row) => [row.sku_id, row]),
+    );
+    const offlineById = new Map(
+      (yearData?.groups.offline.rows ?? []).map((row) => [row.sku_id, row]),
+    );
+    const metricFor = (row: SopSkuRow) => {
+      if (!yearData) {
+        return {
+          planQty: 0,
+          planPct: null as number | null,
+          qtyDelta: 0,
+          netDelta: 0,
+        };
+      }
+      if (combined) {
+        return combinedActiveMonthSortMetrics(
+          onlineById.get(row.sku_id),
+          offlineById.get(row.sku_id),
+          activeMonth,
+          yearData.current_month,
+          yearData.read_only,
+          draftsRef.current.online,
+          draftsRef.current.offline,
+        );
+      }
+      return activeMonthSortMetrics(
+        row,
+        activeMonth,
+        yearData.current_month,
+        yearData.read_only,
+        activeGroup ? draftsRef.current[activeGroup] : null,
+      );
+    };
     return [...rows].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -418,10 +466,34 @@ function SalesForecastClient() {
         case "shortfall_qty":
           cmp = a.shortfall_qty - b.shortfall_qty;
           break;
+        case "plan_qty":
+          cmp = metricFor(a).planQty - metricFor(b).planQty;
+          break;
+        case "plan_pct": {
+          const aPct = metricFor(a).planPct;
+          const bPct = metricFor(b).planPct;
+          cmp = (aPct ?? Number.NEGATIVE_INFINITY) - (bPct ?? Number.NEGATIVE_INFINITY);
+          break;
+        }
+        case "l3m_qty_delta":
+          cmp = metricFor(a).qtyDelta - metricFor(b).qtyDelta;
+          break;
+        case "l3m_net_delta":
+          cmp = metricFor(a).netDelta - metricFor(b).netDelta;
+          break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tableRows, filterSkuRows, sortKey, sortDir]);
+  }, [
+    tableRows,
+    filterSkuRows,
+    sortKey,
+    sortDir,
+    yearData,
+    combined,
+    activeGroup,
+    draftVersion,
+  ]);
 
   const filteredInactiveRows = useMemo(() => {
     const rows = filterSkuRows(inactiveTableRows);
@@ -1004,7 +1076,9 @@ function SalesForecastClient() {
                 {viewMode === "sku"
                   ? combined
                     ? "Read-only sum of online and offline qty and post-tax. Stock is not doubled."
-                    : "Month headers show the running total of entered values. Past months are actuals. Edit RSP on a row to plan net for new launches."
+                    : workspace === "offline"
+                      ? `Offline L3M/L6M exclude ${lagMonthLabel}; sell-out usually lands 20–25 days after month end. Sort Plan, %, and L3M delta columns to find zeros and the largest gaps.`
+                      : "Month headers show entered totals. Sort the active-month Plan / % headers and L3M delta columns to find zeros and the largest gaps vs L3M."
                   : "Read-only sum of SKU plans and history. Edit quantities on the SKU view."}
               </CardDescription>
               <ForecastRowLegend className="mt-3" />
@@ -1141,9 +1215,21 @@ function SalesForecastClient() {
                       dir={sortDir}
                       onSort={handleSort}
                       className={freezeHead(FREEZE.l3m)}
+                      title={runRateHint}
+                      hint={
+                        workspace === "offline" ? `excl. ${lagMonthLabel}` : undefined
+                      }
                     />
-                    <th className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}>
+                    <th
+                      className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}
+                      title={runRateHint}
+                    >
                       L6M qty
+                      {workspace === "offline" ? (
+                        <div className="text-[10px] font-normal text-stone-500">
+                          excl. {lagMonthLabel}
+                        </div>
+                      ) : null}
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       SKUs
@@ -1160,6 +1246,22 @@ function SalesForecastClient() {
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
                     </th>
+                    <SortTh
+                      label="Δ qty vs L3M"
+                      columnKey="l3m_qty_delta"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      title="Active-month plan qty minus L3M monthly average"
+                    />
+                    <SortTh
+                      label="Δ net vs L3M"
+                      columnKey="l3m_net_delta"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      title="Active-month plan post-tax minus L3M monthly average"
+                    />
                     <SkuMonthHeaders
                       store={draftsStore}
                       yearData={yearData}
@@ -1168,6 +1270,9 @@ function SalesForecastClient() {
                       workspace={workspace}
                       combined={combined}
                       compact
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
                     />
                   </tr>
                 </thead>
@@ -1212,9 +1317,21 @@ function SalesForecastClient() {
                       dir={sortDir}
                       onSort={handleSort}
                       className={freezeHead(FREEZE.l3m)}
+                      title={runRateHint}
+                      hint={
+                        workspace === "offline" ? `excl. ${lagMonthLabel}` : undefined
+                      }
                     />
-                    <th className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}>
+                    <th
+                      className={cn(freezeHead(FREEZE.l6m), FREEZE_EDGE)}
+                      title={runRateHint}
+                    >
                       L6M qty
+                      {workspace === "offline" ? (
+                        <div className="text-[10px] font-normal text-stone-500">
+                          excl. {lagMonthLabel}
+                        </div>
+                      ) : null}
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       Type
@@ -1244,6 +1361,22 @@ function SalesForecastClient() {
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
                     </th>
+                    <SortTh
+                      label="Δ qty vs L3M"
+                      columnKey="l3m_qty_delta"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      title="Active-month plan qty minus L3M monthly average"
+                    />
+                    <SortTh
+                      label="Δ net vs L3M"
+                      columnKey="l3m_net_delta"
+                      active={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                      title="Active-month plan post-tax minus L3M monthly average"
+                    />
                     <SkuMonthHeaders
                       store={draftsStore}
                       yearData={yearData}
@@ -1251,6 +1384,9 @@ function SalesForecastClient() {
                       targetDrafts={targetDrafts}
                       workspace={workspace}
                       combined={combined}
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
                     />
                   </tr>
                 </thead>
@@ -1279,6 +1415,7 @@ function SalesForecastClient() {
                     onDraftSettle={onDraftSettle}
                     registerRow={registerRow}
                     draftSeed={draftSeed}
+                    liveVersion={draftVersion}
                     workspace={workspace}
                     pendingInactiveIds={pendingInactiveIds}
                     onTogglePendingInactive={
@@ -1341,6 +1478,12 @@ function SalesForecastClient() {
                     </th>
                     <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
                       L6M post-tax
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Δ qty vs L3M
+                    </th>
+                    <th className="sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]">
+                      Δ net vs L3M
                     </th>
                     <InactiveMonthHeaders year={yearData.year} />
                   </tr>
@@ -1580,6 +1723,8 @@ function SortTh({
   dir,
   onSort,
   className,
+  title,
+  hint,
 }: {
   label: string;
   columnKey: SortKey;
@@ -1587,6 +1732,8 @@ function SortTh({
   dir: SortDir;
   onSort: (key: SortKey) => void;
   className?: string;
+  title?: string;
+  hint?: string;
 }) {
   const isActive = active === columnKey;
   return (
@@ -1595,6 +1742,7 @@ function SortTh({
         "sticky top-0 z-10 bg-stone-50 py-2.5 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
         className,
       )}
+      title={title}
     >
       <button
         type="button"
@@ -1612,6 +1760,9 @@ function SortTh({
           <ArrowUpDown className="h-3 w-3 opacity-40" />
         )}
       </button>
+      {hint ? (
+        <div className="text-[10px] font-normal text-stone-500">{hint}</div>
+      ) : null}
     </th>
   );
 }

@@ -17,6 +17,7 @@ import {
   FREEZE,
   FREEZE_EDGE,
   freezeBody,
+  calendarActiveMonth,
   hasLowL3mCover,
   hasMissingRsp,
   isCurrentCalendarMonth,
@@ -70,6 +71,17 @@ function eomProgressClass(pct: number | null): string {
   if (pct >= 100) return "text-emerald-700";
   if (pct >= 80) return "text-amber-700";
   return "text-rose-700";
+}
+
+function signedDeltaClass(value: number): string {
+  if (value > 0.0001) return "text-emerald-700";
+  if (value < -0.0001) return "text-amber-700";
+  return "text-stone-600";
+}
+
+function formatSignedNumber(value: number, decimals: number): string {
+  const formatted = formatNumber(value, decimals);
+  return value > 0 ? `+${formatted}` : formatted;
 }
 
 function ReadonlyMetricCell({
@@ -329,6 +341,58 @@ function RspCell({
   );
 }
 
+function L3mDeltaCells({
+  row,
+  year,
+  currentMonth,
+  readOnly,
+  combined,
+  getDrafts,
+}: {
+  row: SopSkuRow;
+  year: number;
+  currentMonth: number;
+  readOnly: boolean;
+  combined: boolean;
+  getDrafts: (skuId: string, month: number, field: "qty" | "disc") => string;
+}) {
+  const month = calendarActiveMonth(year);
+  if (month == null) {
+    return (
+      <>
+        <td className="px-3 py-2.5 text-stone-400">—</td>
+        <td className="px-3 py-2.5 text-stone-400">—</td>
+      </>
+    );
+  }
+  const editable = !combined && isPlanMonth(month, currentMonth, readOnly);
+  const monthRsp = rspForMonth(row, month);
+  const planQty = editable
+    ? Number(getDrafts(row.sku_id, month, "qty") || 0) || 0
+    : (row.months[month]?.plan.projected_qty ?? 0);
+  const planPostTax = editable
+    ? livePostTax(
+        getDrafts(row.sku_id, month, "qty"),
+        getDrafts(row.sku_id, month, "disc"),
+        monthRsp,
+      )
+    : (row.months[month]?.plan.post_tax_net ?? 0);
+  const qtyDelta = planQty - (row.l3m_qty ?? 0);
+  const netDelta = planPostTax - (row.l3m_post_tax ?? 0);
+  return (
+    <>
+      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(qtyDelta))}>
+        {formatSignedNumber(qtyDelta, 1)}
+      </td>
+      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(netDelta))}>
+        {netDelta > 0
+          ? `+${formatCurrency(netDelta)}`
+          : formatCurrency(netDelta)}
+      </td>
+    </>
+  );
+}
+
 export const ForecastRow = memo(function ForecastRow({
   row,
   rowIndex,
@@ -345,6 +409,7 @@ export const ForecastRow = memo(function ForecastRow({
   onTogglePendingInactive,
   onSaveRsp,
   onChangeExistingRsp,
+  liveVersion: _liveVersion,
 }: {
   row: SopSkuRow;
   rowIndex: number;
@@ -371,6 +436,8 @@ export const ForecastRow = memo(function ForecastRow({
     skuCode: string,
     next: number,
   ) => void;
+  /** Bumps memoized rows when plan drafts change so L3M deltas stay live. */
+  liveVersion?: number;
 }) {
   const shortfall = row.shortfall_qty;
   const bomComponents = row.bom_components ?? [];
@@ -471,7 +538,7 @@ export const ForecastRow = memo(function ForecastRow({
             {row.is_npd ? (
               <Badge
                 className="mt-1 bg-violet-100 text-violet-800"
-                title="Fewer than 3 months with sales in L3M"
+                title="Fewer than 3 months with sales in the L3M window"
               >
                 NPD ({row.l3m_months_with_sales}/3)
               </Badge>
@@ -508,6 +575,14 @@ export const ForecastRow = memo(function ForecastRow({
       <td className="px-3 py-2.5">{formatDateShort(row.projected_stockout_date)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l3m_post_tax)}</td>
       <td className="px-3 py-2.5">{formatCurrency(row.l6m_post_tax)}</td>
+      <L3mDeltaCells
+        row={row}
+        year={year}
+        currentMonth={currentMonth}
+        readOnly={readOnly}
+        combined={combined}
+        getDrafts={getDrafts}
+      />
       {MONTHS.map((month) => {
         const actual = row.months[month]?.actual;
         const plan = row.months[month]?.plan;

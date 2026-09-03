@@ -1,5 +1,7 @@
 import { MONTHS, type SopChannelGroup } from "@/lib/sales-forecast/constants";
 import {
+  eomProjectionFromMtd,
+  eomVsForecastPct,
   impliedDiscountPct,
   postTaxNet,
   remainingYearShortfall,
@@ -208,6 +210,126 @@ export function liveSkuMonthFromDrafts(
       vatInclusiveNet(safeQty, rspForMonth(row, month), safeDisc),
     ),
     editable: true,
+  };
+}
+
+export type ActiveMonthSortMetrics = {
+  planQty: number;
+  planPostTax: number;
+  planPct: number | null;
+  qtyDelta: number;
+  netDelta: number;
+};
+
+function storedPlanForMonth(
+  row: SopSkuRow,
+  month: number,
+): { qty: number; postTax: number } {
+  const plan = row.months[month]?.plan;
+  return {
+    qty: plan?.projected_qty ?? 0,
+    postTax: plan?.post_tax_net ?? 0,
+  };
+}
+
+export function livePlanForMonth(
+  row: SopSkuRow,
+  month: number,
+  currentMonth: number,
+  readOnly: boolean,
+  drafts: GroupDrafts | null,
+): { qty: number; postTax: number } {
+  if (drafts && isPlanMonth(month, currentMonth, readOnly)) {
+    const live = liveSkuMonthFromDrafts(
+      row,
+      month,
+      currentMonth,
+      readOnly,
+      drafts,
+    );
+    return { qty: live.qty, postTax: live.postTax };
+  }
+  return storedPlanForMonth(row, month);
+}
+
+export function activeMonthProgressPct(
+  row: SopSkuRow,
+  month: number,
+  planPostTax: number,
+): number | null {
+  const mtd = row.months[month]?.actual.post_tax_net ?? 0;
+  return eomVsForecastPct(eomProjectionFromMtd(mtd), planPostTax);
+}
+
+export function activeMonthSortMetrics(
+  row: SopSkuRow,
+  month: number | null,
+  currentMonth: number,
+  readOnly: boolean,
+  drafts: GroupDrafts | null,
+): ActiveMonthSortMetrics {
+  if (month == null) {
+    return {
+      planQty: 0,
+      planPostTax: 0,
+      planPct: null,
+      qtyDelta: 0,
+      netDelta: 0,
+    };
+  }
+  const plan = livePlanForMonth(
+    row,
+    month,
+    currentMonth,
+    readOnly,
+    drafts,
+  );
+  return {
+    planQty: plan.qty,
+    planPostTax: plan.postTax,
+    planPct: activeMonthProgressPct(row, month, plan.postTax),
+    qtyDelta: plan.qty - (row.l3m_qty ?? 0),
+    netDelta: plan.postTax - (row.l3m_post_tax ?? 0),
+  };
+}
+
+export function combinedActiveMonthSortMetrics(
+  online: SopSkuRow | undefined,
+  offline: SopSkuRow | undefined,
+  month: number | null,
+  currentMonth: number,
+  readOnly: boolean,
+  onlineDrafts: GroupDrafts,
+  offlineDrafts: GroupDrafts,
+): ActiveMonthSortMetrics {
+  if (month == null || (!online && !offline)) {
+    return {
+      planQty: 0,
+      planPostTax: 0,
+      planPct: null,
+      qtyDelta: 0,
+      netDelta: 0,
+    };
+  }
+  const on = online
+    ? livePlanForMonth(online, month, currentMonth, readOnly, onlineDrafts)
+    : { qty: 0, postTax: 0 };
+  const off = offline
+    ? livePlanForMonth(offline, month, currentMonth, readOnly, offlineDrafts)
+    : { qty: 0, postTax: 0 };
+  const planQty = on.qty + off.qty;
+  const planPostTax = on.postTax + off.postTax;
+  const l3mQty = (online?.l3m_qty ?? 0) + (offline?.l3m_qty ?? 0);
+  const l3mPost = (online?.l3m_post_tax ?? 0) + (offline?.l3m_post_tax ?? 0);
+  const mtd =
+    (online?.months[month]?.actual.post_tax_net ?? 0) +
+    (offline?.months[month]?.actual.post_tax_net ?? 0);
+  return {
+    planQty,
+    planPostTax,
+    planPct: eomVsForecastPct(eomProjectionFromMtd(mtd), planPostTax),
+    qtyDelta: planQty - l3mQty,
+    netDelta: planPostTax - l3mPost,
   };
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo, useSyncExternalStore, type MutableRefObject } from "react";
-import { Save } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
 import {
@@ -14,7 +14,10 @@ import type { DraftsStore } from "./drafts-store";
 import { storeServerSnapshot } from "./drafts-store";
 import { ForecastRow } from "./forecast-row";
 export { FranchiseBody } from "./franchise-body";
-import { isCurrentCalendarMonth } from "./table-utils";
+import {
+  isCurrentCalendarMonth,
+  type ForecastSortKey,
+} from "./table-utils";
 import {
   annualFromMonths,
   buildLiveGroupMonths,
@@ -34,6 +37,9 @@ export function SkuMonthHeaders({
   workspace,
   combined,
   compact,
+  sortKey,
+  sortDir,
+  onSort,
 }: {
   store: DraftsStore;
   yearData: SopYearForecast;
@@ -42,6 +48,9 @@ export function SkuMonthHeaders({
   workspace: Workspace;
   combined: boolean;
   compact?: boolean;
+  sortKey: ForecastSortKey;
+  sortDir: "asc" | "desc";
+  onSort: (key: ForecastSortKey) => void;
 }) {
   const version = useSyncExternalStore(
     store.subscribe,
@@ -94,18 +103,21 @@ export function SkuMonthHeaders({
               title: `${label} MTD`,
               hint: "Sales to date",
               value: formatCurrency(currentMonthMtd.postTax),
+              sortKey: null,
             },
             {
               key: "eom",
               title: `${label} EOM`,
               hint: "Run-rate proj.",
               value: formatCurrency(currentMonthMtd.eom),
+              sortKey: null,
             },
             {
               key: "plan",
               title: `${label} Plan`,
               hint: total?.editable ? "Entered" : "Forecast",
               value: formatCurrency(planTotal),
+              sortKey: "plan_qty" as const,
             },
             {
               key: "pct",
@@ -113,27 +125,51 @@ export function SkuMonthHeaders({
               hint: "EOM vs plan",
               value:
                 progress == null ? "—" : `${formatNumber(progress, 0)}%`,
+              sortKey: "plan_pct" as const,
             },
           ] as const;
-          return subHeads.map((sub) => (
-            <th
-              key={`${month}-${sub.key}`}
-              className={cn(
-                "sticky top-0 z-10 bg-sky-50 py-2 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
-                compact ? "min-w-[6.5rem]" : "min-w-[7.25rem] py-2.5",
-              )}
-            >
-              <div>{sub.title}</div>
-              <div className="mt-0.5 text-xs font-semibold tabular-nums text-stone-800">
-                {sub.value}
-              </div>
-              {compact ? null : (
-                <div className="text-[10px] font-normal text-stone-500">
-                  {sub.hint}
+          return subHeads.map((sub) => {
+            const sortable = sub.sortKey != null;
+            const isActive = sortable && sortKey === sub.sortKey;
+            return (
+              <th
+                key={`${month}-${sub.key}`}
+                className={cn(
+                  "sticky top-0 z-10 bg-sky-50 py-2 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
+                  compact ? "min-w-[6.5rem]" : "min-w-[7.25rem] py-2.5",
+                )}
+              >
+                {sortable ? (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 whitespace-nowrap text-left hover:text-stone-800"
+                    onClick={() => onSort(sub.sortKey)}
+                  >
+                    {sub.title}
+                    {isActive ? (
+                      sortDir === "asc" ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="h-3 w-3 opacity-40" />
+                    )}
+                  </button>
+                ) : (
+                  <div>{sub.title}</div>
+                )}
+                <div className="mt-0.5 text-xs font-semibold tabular-nums text-stone-800">
+                  {sub.value}
                 </div>
-              )}
-            </th>
-          ));
+                {compact ? null : (
+                  <div className="text-[10px] font-normal text-stone-500">
+                    {sub.hint}
+                  </div>
+                )}
+              </th>
+            );
+          });
         }
         return (
           <th
@@ -206,6 +242,7 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   onDraftSettle,
   registerRow,
   draftSeed,
+  liveVersion,
   workspace,
   pendingInactiveIds,
   onTogglePendingInactive,
@@ -227,6 +264,7 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   onDraftSettle: () => void;
   registerRow: (skuId: string, el: HTMLTableRowElement | null) => void;
   draftSeed: number;
+  liveVersion: number;
   workspace: Workspace;
   pendingInactiveIds?: Set<string>;
   onTogglePendingInactive?: (skuId: string) => void;
@@ -253,6 +291,7 @@ export const EditableSkuBody = memo(function EditableSkuBody({
           onDraft={onDraft}
           onDraftSettle={onDraftSettle}
           registerRow={registerRow}
+          liveVersion={liveVersion}
           pendingInactive={pendingInactiveIds?.has(row.sku_id) ?? false}
           onTogglePendingInactive={onTogglePendingInactive}
           onSaveRsp={onSaveRsp}
@@ -332,7 +371,8 @@ export function CombinedSkuBody({
   );
   const rows = useMemo(() => {
     const allowed = new Set(filteredOnlineRows.map((row) => row.sku_id));
-    return mergeLiveSkuRows(
+    const order = filteredOnlineRows.map((row) => row.sku_id);
+    const merged = mergeLiveSkuRows(
       yearData.groups.online.rows.filter((row) => allowed.has(row.sku_id)),
       yearData.groups.offline.rows.filter((row) => allowed.has(row.sku_id)),
       draftsRef.current.online,
@@ -340,6 +380,10 @@ export function CombinedSkuBody({
       yearData.current_month,
       yearData.read_only,
     );
+    const byId = new Map(merged.map((row) => [row.sku_id, row]));
+    return order
+      .map((id) => byId.get(id))
+      .filter((row): row is SopSkuRow => row != null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearData, filteredOnlineRows, version]);
 

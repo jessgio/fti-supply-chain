@@ -57,12 +57,21 @@ function monthsToDays(months: number): number {
   return months * DAYS_PER_MONTH;
 }
 
-/** Completed calendar months only — current month is excluded. */
-export function getCompletedMonthBounds(referenceDate = new Date()) {
+/**
+ * Completed calendar months only — current month is excluded.
+ * `excludeLatestCompletedMonths` drops the most recent completed month(s)
+ * (used for offline S&OP, where last month’s sell-out is still incomplete).
+ */
+export function getCompletedMonthBounds(
+  referenceDate = new Date(),
+  excludeLatestCompletedMonths = 0,
+) {
   const currentMonthStart = startOfMonth(referenceDate);
-  const l6mEnd = subDays(currentMonthStart, 1);
-  const l6mStart = startOfMonth(subMonths(currentMonthStart, 6));
-  const l3mStart = startOfMonth(subMonths(currentMonthStart, 3));
+  const lag = Math.max(0, excludeLatestCompletedMonths);
+  const windowEndMonthStart = subMonths(currentMonthStart, lag);
+  const l6mEnd = subDays(windowEndMonthStart, 1);
+  const l6mStart = startOfMonth(subMonths(windowEndMonthStart, 6));
+  const l3mStart = startOfMonth(subMonths(windowEndMonthStart, 3));
   return {
     l3mStart: format(l3mStart, "yyyy-MM-dd"),
     l6mStart: format(l6mStart, "yyyy-MM-dd"),

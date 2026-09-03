@@ -27,10 +27,12 @@ import {
   FREEZE,
   FREEZE_EDGE,
   freezeBody,
+  calendarActiveMonth,
   isCurrentCalendarMonth,
   isPlanMonth,
   rowStripeBg,
   rspForMonth,
+  type ForecastSortKey,
 } from "./table-utils";
 import {
   liveSkuMonthFromDrafts,
@@ -106,6 +108,53 @@ function sharePct(part: number, total: number): number | null {
 function formatShare(part: number, total: number): string {
   const pct = sharePct(part, total);
   return pct == null ? "—" : `${formatNumber(pct, 0)}%`;
+}
+
+function signedDeltaClass(value: number): string {
+  if (value > 0.0001) return "text-emerald-700";
+  if (value < -0.0001) return "text-amber-700";
+  return "text-stone-600";
+}
+
+function formatSignedNumber(value: number, decimals: number): string {
+  const formatted = formatNumber(value, decimals);
+  return value > 0 ? `+${formatted}` : formatted;
+}
+
+function L3mDeltaPair({
+  year,
+  months,
+  l3mQty,
+  l3mPostTax,
+}: {
+  year: number;
+  months: Record<number, { qty: number; post_tax: number }>;
+  l3mQty: number;
+  l3mPostTax: number;
+}) {
+  const month = calendarActiveMonth(year);
+  if (month == null) {
+    return (
+      <>
+        <td className="px-3 py-2.5 text-stone-400">—</td>
+        <td className="px-3 py-2.5 text-stone-400">—</td>
+      </>
+    );
+  }
+  const qtyDelta = (months[month]?.qty ?? 0) - l3mQty;
+  const netDelta = (months[month]?.post_tax ?? 0) - l3mPostTax;
+  return (
+    <>
+      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(qtyDelta))}>
+        {formatSignedNumber(qtyDelta, 1)}
+      </td>
+      <td className={cn("px-3 py-2.5 tabular-nums", signedDeltaClass(netDelta))}>
+        {netDelta > 0
+          ? `+${formatCurrency(netDelta)}`
+          : formatCurrency(netDelta)}
+      </td>
+    </>
+  );
 }
 
 function FranchiseMonthCells({
@@ -256,12 +305,7 @@ export function FranchiseBody({
   workspace: Workspace;
   combined: boolean;
   franchiseFilter: string[];
-  sortKey:
-    | "sku_code"
-    | "franchise_name"
-    | "current_stock"
-    | "l3m_qty"
-    | "shortfall_qty";
+  sortKey: ForecastSortKey;
   sortDir: "asc" | "desc";
 }) {
   const version = useSyncExternalStore(
@@ -559,6 +603,43 @@ export function FranchiseBody({
         case "shortfall_qty":
           cmp = a.shortfall_qty - b.shortfall_qty;
           break;
+        case "plan_qty": {
+          const month = calendarActiveMonth(yearData.year);
+          cmp =
+            (month == null ? 0 : (a.months[month]?.qty ?? 0)) -
+            (month == null ? 0 : (b.months[month]?.qty ?? 0));
+          break;
+        }
+        case "plan_pct": {
+          const month = calendarActiveMonth(yearData.year);
+          const pct = (row: (typeof rows)[number]) => {
+            if (month == null) return Number.NEGATIVE_INFINITY;
+            return (
+              eomVsForecastPct(
+                eomProjectionFromMtd(row.months[month]?.actual_post_tax ?? 0),
+                row.months[month]?.post_tax ?? 0,
+              ) ?? Number.NEGATIVE_INFINITY
+            );
+          };
+          cmp = pct(a) - pct(b);
+          break;
+        }
+        case "l3m_qty_delta": {
+          const month = calendarActiveMonth(yearData.year);
+          const delta = (row: (typeof rows)[number]) =>
+            month == null ? 0 : (row.months[month]?.qty ?? 0) - row.l3m_qty;
+          cmp = delta(a) - delta(b);
+          break;
+        }
+        case "l3m_net_delta": {
+          const month = calendarActiveMonth(yearData.year);
+          const delta = (row: (typeof rows)[number]) =>
+            month == null
+              ? 0
+              : (row.months[month]?.post_tax ?? 0) - row.l3m_post_tax;
+          cmp = delta(a) - delta(b);
+          break;
+        }
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
@@ -639,6 +720,12 @@ export function FranchiseBody({
               <td className="px-3 py-2.5">
                 {formatCurrency(row.l6m_post_tax)}
               </td>
+              <L3mDeltaPair
+                year={yearData.year}
+                months={row.months}
+                l3mQty={row.l3m_qty}
+                l3mPostTax={row.l3m_post_tax}
+              />
               <FranchiseMonthCells
                 months={row.months}
                 year={yearData.year}
@@ -701,6 +788,12 @@ export function FranchiseBody({
                     <td className="px-3 py-2.5">
                       {formatCurrency(child.l6m_post_tax)}
                     </td>
+                    <L3mDeltaPair
+                      year={yearData.year}
+                      months={child.months}
+                      l3mQty={child.l3m_qty}
+                      l3mPostTax={child.l3m_post_tax}
+                    />
                     <FranchiseMonthCells
                       months={child.months}
                       year={yearData.year}

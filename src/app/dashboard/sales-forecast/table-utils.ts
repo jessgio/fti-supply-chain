@@ -11,6 +11,17 @@ export const FREEZE = {
 
 export const FREEZE_EDGE = "shadow-[4px_0_8px_-4px_rgba(28,25,23,0.18)]";
 
+export type ForecastSortKey =
+  | "sku_code"
+  | "franchise_name"
+  | "current_stock"
+  | "l3m_qty"
+  | "shortfall_qty"
+  | "plan_qty"
+  | "plan_pct"
+  | "l3m_qty_delta"
+  | "l3m_net_delta";
+
 export function freezeHead(col: string): string {
   return cn(
     "sticky top-0 z-30 bg-stone-50 py-2.5 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
@@ -100,4 +111,14 @@ export function isCurrentCalendarMonth(
   now: Date = new Date(),
 ): boolean {
   return year === now.getFullYear() && month === now.getMonth() + 1;
+}
+
+/** Calendar month for the live Plan / % / L3M-delta columns, or null if `year` is not this year. */
+export function calendarActiveMonth(
+  year: number,
+  now: Date = new Date(),
+): number | null {
+  if (year !== now.getFullYear()) return null;
+  const month = now.getMonth() + 1;
+  return month >= 1 && month <= 12 ? month : null;
 }
