@@ -16,6 +16,7 @@ import {
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
 import { STOCK_AGGREGATE_LOCATIONS } from "@/lib/stock/locations";
+import { nestBundleBoms } from "@/lib/sales-forecast/franchise-rollup";
 import {
   loadSkuRetailPriceHistory,
   rspByMonthForYear,
@@ -292,7 +293,11 @@ function buildGroupRows(
       if (isRemaining) remainingYearQty += projected_qty;
     }
     const bom_components = sku.is_bundle
-      ? (bomByBundle.get(sku.id) ?? [])
+      ? nestBundleBoms(
+          bomByBundle.get(sku.id) ?? [],
+          bomByBundle,
+          new Set([sku.id]),
+        )
       : [];
     const current_stock = sku.is_bundle
       ? bundleStockFromBom(bom_components, stockBySku)

@@ -19,6 +19,7 @@ export type ForecastSortKey =
   | "shortfall_qty"
   | "plan_qty"
   | "plan_pct"
+  | "plan_contrib"
   | "l3m_qty_delta"
   | "l3m_net_delta";
 

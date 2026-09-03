@@ -15,6 +15,7 @@ import { storeServerSnapshot } from "./drafts-store";
 import { ForecastRow } from "./forecast-row";
 export { FranchiseBody } from "./franchise-body";
 import {
+  calendarActiveMonth,
   isCurrentCalendarMonth,
   type ForecastSortKey,
 } from "./table-utils";
@@ -22,7 +23,13 @@ import {
   annualFromMonths,
   buildLiveGroupMonths,
   collectDirtyLines,
+  formatMomLine,
   formatSharePct,
+  gapToneClass,
+  momLineClass,
+  monthOnMonthGrowth,
+  sumDraftPlanPostTax,
+  sumStoredPlanPostTax,
   type GroupDrafts,
   liveSkuMonthFromDrafts,
   mergeLiveSkuRows,
@@ -129,7 +136,11 @@ export function SkuMonthHeaders({
         if (isCurrent) {
           const label = MONTH_LABELS[month - 1];
           const planTotal = total?.planned ?? 0;
+          const target = total?.target ?? 0;
+          const gap = total?.gap ?? 0;
           const progress = eomVsForecastPct(currentMonthMtd.eom, planTotal);
+          const mom = monthOnMonthGrowth(live, yearData.year, month);
+          const momText = formatMomLine(mom.pct, mom.prevMonth, mom.required);
           const subHeads = [
             {
               key: "mtd",
@@ -161,6 +172,13 @@ export function SkuMonthHeaders({
               sortKey: "plan_pct" as const,
             },
             {
+              key: "contrib",
+              title: `${label} contrib`,
+              hint: "Share of plan",
+              value: "",
+              sortKey: "plan_contrib" as const,
+            },
+            {
               key: "qty_delta",
               title: `${label} Δ qty`,
               hint: "Plan vs L3M",
@@ -184,12 +202,19 @@ export function SkuMonthHeaders({
           return subHeads.map((sub) => {
             const sortable = sub.sortKey != null;
             const isActive = sortable && sortKey === sub.sortKey;
+            const isPlan = sub.key === "plan";
             return (
               <th
                 key={`${month}-${sub.key}`}
                 className={cn(
                   "sticky top-0 z-10 bg-sky-50 py-2 pr-3 font-medium shadow-[inset_0_-1px_0_#e7e5e4]",
-                  compact ? "min-w-[6.5rem]" : "min-w-[7.25rem] py-2.5",
+                  isPlan
+                    ? compact
+                      ? "min-w-[8.5rem]"
+                      : "min-w-[9.25rem] py-2.5"
+                    : compact
+                      ? "min-w-[6.5rem]"
+                      : "min-w-[7.25rem] py-2.5",
                 )}
               >
                 {sortable ? (
@@ -212,9 +237,38 @@ export function SkuMonthHeaders({
                 ) : (
                   <div>{sub.title}</div>
                 )}
-                <div className="mt-0.5 text-xs font-semibold tabular-nums text-stone-800">
-                  {sub.value}
-                </div>
+                {isPlan ? (
+                  <>
+                    <div className="mt-0.5 text-[10px] font-normal tabular-nums text-stone-600">
+                      Target: {formatCurrency(target)}
+                    </div>
+                    <div
+                      className={cn(
+                        "text-[10px] font-medium tabular-nums",
+                        gapToneClass(gap, target),
+                      )}
+                    >
+                      Gap: {formatCurrency(gap)}
+                    </div>
+                    <div className="mt-0.5 text-xs font-semibold tabular-nums text-stone-800">
+                      {sub.value}
+                    </div>
+                    {momText ? (
+                      <div
+                        className={cn(
+                          "text-[10px] font-medium leading-tight",
+                          momLineClass(mom.pct, mom.required),
+                        )}
+                      >
+                        {momText}
+                      </div>
+                    ) : null}
+                  </>
+                ) : sub.value ? (
+                  <div className="mt-0.5 text-xs font-semibold tabular-nums text-stone-800">
+                    {sub.value}
+                  </div>
+                ) : null}
                 {compact ? null : (
                   <div className="text-[10px] font-normal text-stone-500">
                     {sub.hint}
@@ -224,6 +278,8 @@ export function SkuMonthHeaders({
             );
           });
         }
+        const mom = monthOnMonthGrowth(live, yearData.year, month);
+        const momText = formatMomLine(mom.pct, mom.prevMonth, mom.required);
         return (
           <th
             key={month}
@@ -241,6 +297,16 @@ export function SkuMonthHeaders({
                 {total?.editable ? "Entered total" : "Actual"}
               </div>
             )}
+            {momText ? (
+              <div
+                className={cn(
+                  "text-[10px] font-medium leading-tight",
+                  momLineClass(mom.pct, mom.required),
+                )}
+              >
+                {momText}
+              </div>
+            ) : null}
             <div className="text-[10px] font-normal text-stone-500">
               Target {formatSharePct(total?.target ?? 0, headerAnnual.target)} of annual
             </div>
@@ -261,7 +327,7 @@ export function InactiveMonthHeaders({ year }: { year: number }) {
         if (isCurrentCalendarMonth(year, month)) {
           const label = MONTH_LABELS[month - 1];
           return (
-            ["MTD", "EOM", "Plan", "%", "Δ qty", "Δ net"] as const
+            ["MTD", "EOM", "Plan", "%", "contrib", "Δ qty", "Δ net"] as const
           ).map((sub) => (
             <th
               key={`${month}-${sub}`}
@@ -328,6 +394,15 @@ export const EditableSkuBody = memo(function EditableSkuBody({
     next: number,
   ) => void;
 }) {
+  const monthPlanTotal = useMemo(() => {
+    const month = calendarActiveMonth(year);
+    if (month == null) return 0;
+    if (readOnly) return sumStoredPlanPostTax(rows, month);
+    return sumDraftPlanPostTax(rows, month, getDrafts);
+    // liveVersion covers draft edits; getDrafts is a stable callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, year, readOnly, liveVersion]);
+
   return (
     <tbody>
       {rows.map((row, index) => (
@@ -345,6 +420,7 @@ export const EditableSkuBody = memo(function EditableSkuBody({
           onDraftSettle={onDraftSettle}
           registerRow={registerRow}
           liveVersion={liveVersion}
+          monthPlanTotal={monthPlanTotal}
           pendingInactive={pendingInactiveIds?.has(row.sku_id) ?? false}
           onTogglePendingInactive={onTogglePendingInactive}
           onSaveRsp={onSaveRsp}
@@ -367,6 +443,12 @@ export const InactiveSkuBody = memo(function InactiveSkuBody({
   currentMonth: number;
   draftSeed: number;
 }) {
+  const monthPlanTotal = useMemo(() => {
+    const month = calendarActiveMonth(year);
+    if (month == null) return 0;
+    return sumStoredPlanPostTax(rows, month);
+  }, [rows, year]);
+
   return (
     <tbody>
       {rows.map((row, index) => (
@@ -383,6 +465,7 @@ export const InactiveSkuBody = memo(function InactiveSkuBody({
           onDraft={() => {}}
           onDraftSettle={() => {}}
           registerRow={() => {}}
+          monthPlanTotal={monthPlanTotal}
         />
       ))}
     </tbody>
@@ -440,6 +523,12 @@ export function CombinedSkuBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearData, filteredOnlineRows, version]);
 
+  const monthPlanTotal = useMemo(() => {
+    const month = calendarActiveMonth(yearData.year);
+    if (month == null) return 0;
+    return sumStoredPlanPostTax(rows, month);
+  }, [rows, yearData.year]);
+
   return (
     <tbody>
       {rows.map((row, index) => (
@@ -456,6 +545,7 @@ export function CombinedSkuBody({
           onDraft={onDraft}
           onDraftSettle={onDraftSettle}
           registerRow={registerRow}
+          monthPlanTotal={monthPlanTotal}
         />
       ))}
     </tbody>

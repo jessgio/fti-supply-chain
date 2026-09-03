@@ -2,11 +2,68 @@ import type { SopBomComponent, SopSkuRow } from "@/types/database";
 
 export const UNMAPPED_FRANCHISE = "Unmapped";
 
-/** Franchises a SKU row contributes to (BOM franchises for bundles). */
+/**
+ * Attach nested BOMs when a component is itself a bundle (e.g. a FREE GWP
+ * SKU that wraps a real sellable SKU). `seen` prevents cycles.
+ */
+export function nestBundleBoms(
+  components: SopBomComponent[],
+  bomByBundle: Map<string, SopBomComponent[]>,
+  seen: Set<string> = new Set(),
+): SopBomComponent[] {
+  return components.map((c) => {
+    if (seen.has(c.sku_id)) {
+      return { ...c, components: undefined };
+    }
+    const nested = bomByBundle.get(c.sku_id);
+    if (!nested || nested.length === 0) {
+      return { ...c, components: undefined };
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(c.sku_id);
+    return {
+      ...c,
+      components: nestBundleBoms(nested, bomByBundle, nextSeen),
+    };
+  });
+}
+
+/**
+ * Leaf sellable SKUs after exploding nested bundles. Qty is multiplied through
+ * each level (1 parent × 1 FREE wrapper × 1 component = 1 unit).
+ */
+export function bomLeafComponents(
+  components: SopBomComponent[],
+  qtyScale = 1,
+): SopBomComponent[] {
+  const leaves: SopBomComponent[] = [];
+  for (const c of components) {
+    const qty =
+      (Number.isFinite(c.qty_per_bundle) ? c.qty_per_bundle : 0) * qtyScale;
+    if (qty <= 0) continue;
+    const nested = (c.components ?? []).filter(
+      (n) => Number.isFinite(n.qty_per_bundle) && n.qty_per_bundle > 0,
+    );
+    if (nested.length > 0) {
+      leaves.push(...bomLeafComponents(nested, qty));
+      continue;
+    }
+    leaves.push({
+      sku_id: c.sku_id,
+      sku_code: c.sku_code,
+      qty_per_bundle: qty,
+      franchise_name: c.franchise_name,
+      retail_price: c.retail_price,
+    });
+  }
+  return leaves;
+}
+
+/** Franchises a SKU row contributes to (BOM leaf franchises for bundles). */
 export function franchisesForRow(row: SopSkuRow): string[] {
   if (row.is_bundle) {
     const names = new Set<string>();
-    for (const c of row.bom_components ?? []) {
+    for (const c of bomLeafComponents(row.bom_components ?? [])) {
       names.add(c.franchise_name?.trim() || UNMAPPED_FRANCHISE);
     }
     if (names.size === 0) names.add(UNMAPPED_FRANCHISE);
@@ -38,11 +95,12 @@ type FranchiseWeights = {
 export function bomFranchiseWeights(
   components: SopBomComponent[],
 ): FranchiseWeights[] {
+  const leaves = bomLeafComponents(components);
   const byFranchise = new Map<
     string,
     { qtyPerBundle: number; valueWeight: number }
   >();
-  for (const c of components) {
+  for (const c of leaves) {
     const franchise = c.franchise_name?.trim() || UNMAPPED_FRANCHISE;
     const qty = Number.isFinite(c.qty_per_bundle) ? c.qty_per_bundle : 0;
     if (qty <= 0) continue;
@@ -120,9 +178,7 @@ export function allocateToComponentSkus(
     ];
   }
 
-  const components = (row.bom_components ?? []).filter(
-    (c) => Number.isFinite(c.qty_per_bundle) && c.qty_per_bundle > 0,
-  );
+  const components = bomLeafComponents(row.bom_components ?? []);
   if (components.length === 0) {
     return [
       {

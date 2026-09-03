@@ -37,6 +37,7 @@ import {
 import {
   liveSkuMonthFromDrafts,
   mergeLiveSkuRows,
+  formatSharePct,
   type GroupDrafts,
 } from "./view-helpers";
 
@@ -172,6 +173,7 @@ function FranchiseMonthCells({
   year,
   l3mQty,
   l3mPostTax,
+  monthPlanTotal,
   totals,
   showShare,
 }: {
@@ -179,6 +181,7 @@ function FranchiseMonthCells({
   year: number;
   l3mQty: number;
   l3mPostTax: number;
+  monthPlanTotal: number;
   totals?: Record<number, MonthAcc>;
   showShare?: boolean;
 }) {
@@ -271,6 +274,17 @@ function FranchiseMonthCells({
                 </p>
                 <div className="mt-0.5 text-[10px] text-stone-400">
                   EOM vs plan
+                </div>
+              </td>
+              <td
+                className="bg-sky-50/20 px-3 py-2.5 align-top tabular-nums"
+                title="Share of the month plan total"
+              >
+                <p className="text-sm font-semibold">
+                  {formatSharePct(m.post_tax, monthPlanTotal)}
+                </p>
+                <div className="mt-0.5 text-[10px] text-stone-400">
+                  of month
                 </div>
               </td>
               <L3mDeltaPair
@@ -644,6 +658,13 @@ export function FranchiseBody({
           cmp = pct(a) - pct(b);
           break;
         }
+        case "plan_contrib": {
+          const month = calendarActiveMonth(yearData.year);
+          cmp =
+            (month == null ? 0 : (a.months[month]?.post_tax ?? 0)) -
+            (month == null ? 0 : (b.months[month]?.post_tax ?? 0));
+          break;
+        }
         case "l3m_qty_delta": {
           const month = calendarActiveMonth(yearData.year);
           const delta = (row: (typeof rows)[number]) =>
@@ -683,6 +704,15 @@ export function FranchiseBody({
       return next;
     });
   }
+
+  const activeMonth = calendarActiveMonth(yearData.year);
+  const monthPlanTotal =
+    activeMonth == null
+      ? 0
+      : franchiseRows.reduce(
+          (sum, item) => sum + (item.months[activeMonth]?.post_tax ?? 0),
+          0,
+        );
 
   return (
     <tbody>
@@ -745,6 +775,7 @@ export function FranchiseBody({
                 year={yearData.year}
                 l3mQty={row.l3m_qty}
                 l3mPostTax={row.l3m_post_tax}
+                monthPlanTotal={monthPlanTotal}
               />
             </tr>
             {isOpen
@@ -809,6 +840,7 @@ export function FranchiseBody({
                       year={yearData.year}
                       l3mQty={child.l3m_qty}
                       l3mPostTax={child.l3m_post_tax}
+                      monthPlanTotal={monthPlanTotal}
                       totals={row.months}
                       showShare
                     />

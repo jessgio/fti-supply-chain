@@ -13,6 +13,7 @@ import {
 } from "@/lib/sales-forecast/math";
 import { cn, formatCurrency, formatDateShort, formatNumber } from "@/lib/utils";
 import type { SopSkuRow } from "@/types/database";
+import { formatSharePct } from "./view-helpers";
 import {
   FREEZE,
   FREEZE_EDGE,
@@ -357,6 +358,7 @@ export const ForecastRow = memo(function ForecastRow({
   onSaveRsp,
   onChangeExistingRsp,
   liveVersion: _liveVersion,
+  monthPlanTotal = 0,
 }: {
   row: SopSkuRow;
   rowIndex: number;
@@ -385,6 +387,8 @@ export const ForecastRow = memo(function ForecastRow({
   ) => void;
   /** Bumps memoized rows when plan drafts change so L3M deltas stay live. */
   liveVersion?: number;
+  /** Active-month planned post-tax total for contribution %. */
+  monthPlanTotal?: number;
 }) {
   const shortfall = row.shortfall_qty;
   const bomComponents = row.bom_components ?? [];
@@ -582,6 +586,7 @@ export const ForecastRow = memo(function ForecastRow({
               warn={shortfall > 0}
               progress={progress}
               progressRef={progressRef}
+              monthPlanTotal={monthPlanTotal}
               onDraft={onDraft}
               onDraftSettle={onDraftSettle}
             />
@@ -628,7 +633,7 @@ export const ForecastRow = memo(function ForecastRow({
   );
 });
 
-/** Four cells for the live calendar month: MTD · EOM · Plan · %. */
+/** Active calendar month: MTD · EOM · Plan · % · contrib · Δ qty · Δ net. */
 function CurrentMonthFragment({
   skuCode,
   skuId,
@@ -651,6 +656,7 @@ function CurrentMonthFragment({
   warn,
   progress,
   progressRef,
+  monthPlanTotal,
   onDraft,
   onDraftSettle,
 }: {
@@ -675,6 +681,7 @@ function CurrentMonthFragment({
   warn: boolean;
   progress: number | null;
   progressRef: RefObject<HTMLParagraphElement | null>;
+  monthPlanTotal: number;
   onDraft: (
     skuId: string,
     month: number,
@@ -735,6 +742,13 @@ function CurrentMonthFragment({
           {formatEomProgress(progress)}
         </p>
         <div className="mt-0.5 text-[10px] text-stone-400">EOM vs plan</div>
+      </td>
+      <td
+        className="bg-sky-50/20 px-3 py-2.5 align-top tabular-nums"
+        title="SKU planned post-tax as a share of the month plan total"
+      >
+        <p className="text-sm font-semibold">{formatSharePct(planPostTax, monthPlanTotal)}</p>
+        <div className="mt-0.5 text-[10px] text-stone-400">of month</div>
       </td>
       <td
         className={cn(

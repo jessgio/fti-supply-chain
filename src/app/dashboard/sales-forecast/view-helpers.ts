@@ -1,13 +1,18 @@
-import { MONTHS, type SopChannelGroup } from "@/lib/sales-forecast/constants";
+import {
+  MONTH_LABELS,
+  MONTHS,
+  type SopChannelGroup,
+} from "@/lib/sales-forecast/constants";
 import {
   eomProjectionFromMtd,
   eomVsForecastPct,
   impliedDiscountPct,
+  pctVsBaseline,
   postTaxNet,
   remainingYearShortfall,
   vatInclusiveNet,
 } from "@/lib/sales-forecast/math";
-import { parseNumericInput } from "@/lib/utils";
+import { formatNumber, parseNumericInput } from "@/lib/utils";
 import type { SopForecastPayload, SopSkuRow } from "@/types/database";
 import { draftKey, isPlanMonth, planDraftValue, rspForMonth } from "./table-utils";
 
@@ -353,6 +358,35 @@ export function monthPostTaxTotal(
   return planned;
 }
 
+/** Planned post-tax for an editable month, using the same draft getters as the row cells. */
+export function sumDraftPlanPostTax(
+  rows: SopSkuRow[],
+  month: number,
+  getDrafts: (skuId: string, month: number, field: "qty" | "disc") => string,
+): number {
+  let total = 0;
+  for (const row of asArray(rows)) {
+    const qty = Number(getDrafts(row.sku_id, month, "qty") || 0);
+    const disc = Number(getDrafts(row.sku_id, month, "disc") || 0);
+    total += postTaxNet(
+      vatInclusiveNet(
+        Number.isFinite(qty) ? qty : 0,
+        rspForMonth(row, month),
+        Number.isFinite(disc) ? disc : 0,
+      ),
+    );
+  }
+  return total;
+}
+
+export function sumStoredPlanPostTax(rows: SopSkuRow[], month: number): number {
+  let total = 0;
+  for (const row of asArray(rows)) {
+    total += row.months[month]?.plan.post_tax_net ?? 0;
+  }
+  return total;
+}
+
 export type LiveMonth = {
   month: number;
   target: number;
@@ -360,6 +394,85 @@ export type LiveMonth = {
   gap: number;
   editable: boolean;
 };
+
+/**
+ * Net used for month-on-month growth: closed months use actuals (`planned`
+ * on a non-editable LiveMonth), current and future months use the target.
+ */
+export function momComparableNet(
+  live: Pick<LiveMonth, "planned" | "target">,
+  year: number,
+  month: number,
+  now: Date = new Date(),
+): number {
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth() + 1;
+  if (year < nowYear) return live.planned;
+  if (year > nowYear) return live.target;
+  if (month < nowMonth) return live.planned;
+  return live.target;
+}
+
+export function monthOnMonthGrowth(
+  live: LiveMonth[],
+  year: number,
+  month: number,
+  now: Date = new Date(),
+): {
+  pct: number | null;
+  prevMonth: number | null;
+  required: boolean;
+} {
+  if (month <= 1) {
+    return { pct: null, prevMonth: null, required: false };
+  }
+  const current = live[month - 1];
+  const prev = live[month - 2];
+  if (!current || !prev) {
+    return { pct: null, prevMonth: month - 1, required: false };
+  }
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth() + 1;
+  const required = year > nowYear || (year === nowYear && month >= nowMonth);
+  return {
+    pct: pctVsBaseline(
+      momComparableNet(current, year, month, now),
+      momComparableNet(prev, year, month - 1, now),
+    ),
+    prevMonth: month - 1,
+    required,
+  };
+}
+
+export function formatMomLine(
+  pct: number | null,
+  prevMonth: number | null,
+  required: boolean,
+): string | null {
+  if (prevMonth == null) return null;
+  const prev = MONTH_LABELS[prevMonth - 1];
+  if (pct == null) return `MoM — vs ${prev}`;
+  if (required && pct > 0) {
+    return `Must earn +${formatNumber(pct, 0)}% vs ${prev}`;
+  }
+  const sign = pct > 0 ? "+" : "";
+  return `MoM ${sign}${formatNumber(pct, 0)}% vs ${prev}`;
+}
+
+export function momLineClass(pct: number | null, required: boolean): string {
+  if (pct == null) return "text-stone-400";
+  if (required && pct > 0) return "text-amber-800";
+  if (pct > 0) return "text-emerald-700";
+  if (pct < 0) return "text-rose-700";
+  return "text-stone-500";
+}
+
+export function gapToneClass(gap: number, target: number): string {
+  if (!(target > 0)) return "text-stone-500";
+  if (gap < -0.5) return "text-rose-700";
+  if (gap > 0.5) return "text-emerald-700";
+  return "text-stone-600";
+}
 
 export function buildLiveGroupMonths(
   yearData: {

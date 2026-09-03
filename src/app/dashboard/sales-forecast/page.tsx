@@ -424,6 +424,7 @@ function SalesForecastClient() {
       if (!yearData) {
         return {
           planQty: 0,
+          planPostTax: 0,
           planPct: null as number | null,
           qtyDelta: 0,
           netDelta: 0,
@@ -475,6 +476,9 @@ function SalesForecastClient() {
           cmp = (aPct ?? Number.NEGATIVE_INFINITY) - (bPct ?? Number.NEGATIVE_INFINITY);
           break;
         }
+        case "plan_contrib":
+          cmp = metricFor(a).planPostTax - metricFor(b).planPostTax;
+          break;
         case "l3m_qty_delta":
           cmp = metricFor(a).qtyDelta - metricFor(b).qtyDelta;
           break;

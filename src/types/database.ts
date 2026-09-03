@@ -39,6 +39,11 @@ export interface SopBomComponent {
   franchise_name: string | null;
   /** Component RSP for allocating bundle net sales across franchises. */
   retail_price: number | null;
+  /**
+   * Nested BOM when this component is itself a bundle. Franchise view
+   * explodes these to leaf SKUs so nested free/GWP bundles are not Unmapped.
+   */
+  components?: SopBomComponent[];
 }
 
 export interface SopSkuRow {
