@@ -23,6 +23,7 @@ import {
   type SkuPriceHistoryRow,
 } from "@/lib/db/sku-retail-prices";
 import { fetchAllRows, fetchAllRpc } from "@/lib/supabase/fetch-all";
+import { listForecastPendingSkus } from "@/lib/db/sales-forecast-pending";
 import type {
   SopBomComponent,
   SopForecastPayload,
@@ -39,6 +40,39 @@ interface EligibleSku {
   is_bundle: boolean;
   retail_price: number | null;
   franchise_name: string | null;
+}
+
+const FORECAST_SKU_SELECT =
+  "id, sku_code, name, is_bundle, is_packaging, is_extract, is_active, franchise_id, retail_price, product_franchises(name)";
+
+type ForecastSkuRow = {
+  id: string;
+  sku_code: string;
+  name: string | null;
+  is_bundle: boolean;
+  is_packaging: boolean;
+  is_extract: boolean;
+  is_active: boolean;
+  franchise_id: string | null;
+  retail_price: number | null;
+  product_franchises: { name: string } | { name: string }[] | null;
+};
+
+function mapEligibleSku(row: ForecastSkuRow): EligibleSku | null {
+  if (row.is_packaging || row.is_extract) return null;
+  if (!row.is_bundle && !row.franchise_id) return null;
+  const franchise = row.product_franchises;
+  const franchiseName = Array.isArray(franchise)
+    ? (franchise[0]?.name ?? null)
+    : (franchise?.name ?? null);
+  return {
+    id: row.id,
+    sku_code: row.sku_code,
+    name: row.name,
+    is_bundle: row.is_bundle,
+    retail_price: row.retail_price == null ? null : Number(row.retail_price),
+    franchise_name: row.is_bundle ? null : franchiseName,
+  };
 }
 
 export function isSopGroup(value: string): value is SopChannelGroup {
@@ -74,23 +108,10 @@ export async function saveChannelGroups(
 export async function listEligibleSkus(
   supabase: SupabaseClient,
 ): Promise<EligibleSku[]> {
-  const rows = await fetchAllRows<{
-    id: string;
-    sku_code: string;
-    name: string | null;
-    is_bundle: boolean;
-    is_packaging: boolean;
-    is_extract: boolean;
-    is_active: boolean;
-    franchise_id: string | null;
-    retail_price: number | null;
-    product_franchises: { name: string } | { name: string }[] | null;
-  }>(() =>
+  const rows = await fetchAllRows<ForecastSkuRow>(() =>
     supabase
       .from("skus")
-      .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_extract, is_active, franchise_id, retail_price, product_franchises(name)",
-      )
+      .select(FORECAST_SKU_SELECT)
       .eq("is_active", true)
       .eq("is_packaging", false)
       .eq("is_extract", false)
@@ -99,21 +120,31 @@ export async function listEligibleSkus(
   );
 
   return rows
-    .filter((row) => row.is_bundle || row.franchise_id)
-    .map((row) => {
-      const franchise = row.product_franchises;
-      const franchiseName = Array.isArray(franchise)
-        ? (franchise[0]?.name ?? null)
-        : (franchise?.name ?? null);
-      return {
-        id: row.id,
-        sku_code: row.sku_code,
-        name: row.name,
-        is_bundle: row.is_bundle,
-        retail_price: row.retail_price == null ? null : Number(row.retail_price),
-        franchise_name: row.is_bundle ? null : franchiseName,
-      };
-    });
+    .map(mapEligibleSku)
+    .filter((row): row is EligibleSku => row != null);
+}
+
+const ID_CHUNK = 100;
+
+export async function listSellableSkusByIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<EligibleSku[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  const rows: ForecastSkuRow[] = [];
+  for (let i = 0; i < unique.length; i += ID_CHUNK) {
+    const chunk = unique.slice(i, i + ID_CHUNK);
+    const page = await fetchAllRows<ForecastSkuRow>(() =>
+      supabase.from("skus").select(FORECAST_SKU_SELECT).in("id", chunk),
+    );
+    rows.push(...page);
+  }
+
+  return rows
+    .map(mapEligibleSku)
+    .filter((row): row is EligibleSku => row != null);
 }
 
 async function loadStockBySkuId(
@@ -361,7 +392,7 @@ export async function loadSopYearForecast(
     .sort()[0]!;
 
   const [
-    skus,
+    eligibleSkus,
     stockBySku,
     onOrderBySku,
     targetsRes,
@@ -372,6 +403,7 @@ export async function loadSopYearForecast(
     inactiveRes,
     bomRows,
     priceHistory,
+    pendingSkus,
   ] = await Promise.all([
     listEligibleSkus(supabase),
     loadStockBySkuId(supabase),
@@ -456,10 +488,26 @@ export async function loadSopYearForecast(
         .order("created_at"),
     ),
     loadSkuRetailPriceHistory(supabase),
+    listForecastPendingSkus(supabase, year),
   ]);
   if (targetsRes.error) throw targetsRes.error;
   if (uploadsRes.error) throw uploadsRes.error;
   if (inactiveRes.error) throw inactiveRes.error;
+
+  const knownSkuIds = new Set(eligibleSkus.map((sku) => sku.id));
+  const extraPlanIds = [
+    ...new Set(planRows.map((row) => row.sku_id)),
+  ].filter((id) => !knownSkuIds.has(id));
+  const extraSkus =
+    extraPlanIds.length > 0
+      ? await listSellableSkusByIds(supabase, extraPlanIds)
+      : [];
+  const skus =
+    extraSkus.length === 0
+      ? eligibleSkus
+      : [...eligibleSkus, ...extraSkus].sort((a, b) =>
+          a.sku_code.localeCompare(b.sku_code),
+        );
 
   const bomByBundle = new Map<string, SopBomComponent[]>();
   for (const row of bomRows) {
@@ -625,6 +673,7 @@ export async function loadSopYearForecast(
       }),
       rows,
       inactive_rows,
+      pending_skus: pendingSkus.filter((sku) => sku.sop_group === group),
       uploads: uploads.filter((u) => u.sop_group === group),
       inactive_sku_ids: inactive_sku_ids[group],
     };

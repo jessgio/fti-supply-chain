@@ -7,11 +7,16 @@ import { notifySalesForecastOversell } from "@/lib/db/notifications";
 import {
   createForecastUpload,
   isSopGroup,
-  listEligibleSkus,
   loadSopForecast,
   upsertSkuMonthPlans,
 } from "@/lib/db/sales-forecast";
+import { replaceForecastPendingSkus } from "@/lib/db/sales-forecast-pending";
 import { parseForecastCsv } from "@/lib/sales-forecast/csv";
+import {
+  resolveForecastCsvSkus,
+  type ForecastCatalogSku,
+} from "@/lib/sales-forecast/resolve-csv-skus";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 
@@ -51,8 +56,8 @@ export async function POST(request: Request) {
     if (parsed.errors.length > 0) {
       return NextResponse.json(
         {
-          error: parsed.errors.slice(0, 20).join(" "),
-          errors: parsed.errors.slice(0, 50),
+          error: parsed.errors.join("\n"),
+          errors: parsed.errors,
         },
         { status: 400 },
       );
@@ -65,36 +70,23 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient();
-    const skus = await listEligibleSkus(supabase);
-    const byCode = new Map(skus.map((sku) => [sku.sku_code.toUpperCase(), sku]));
-    const unknown: string[] = [];
-    const lines: Array<{
-      sku_id: string;
-      month: number;
-      projected_qty: number;
-      avg_discount_pct: number;
-    }> = [];
-    const lastByKey = new Map<string, (typeof lines)[number]>();
-    for (const row of parsed.rows) {
-      const sku = byCode.get(row.skuCode.toUpperCase());
-      if (!sku) {
-        unknown.push(`Line ${row.line}: unknown SKU ${row.skuCode}.`);
-        continue;
-      }
-      lastByKey.set(`${sku.id}:${row.month}`, {
-        sku_id: sku.id,
-        month: row.month,
-        projected_qty: row.qty,
-        avg_discount_pct: row.discountPct,
-      });
-    }
-    if (unknown.length > 0) {
+    const catalog = await fetchAllRows<ForecastCatalogSku>(() =>
+      supabase
+        .from("skus")
+        .select(
+          "id, sku_code, name, is_bundle, is_packaging, is_extract, is_active, franchise_id, retail_price",
+        ),
+    );
+    const { lines, pending, eligibleCodes } = resolveForecastCsvSkus(
+      parsed.rows,
+      catalog,
+    );
+    if (lines.length === 0 && pending.length === 0) {
       return NextResponse.json(
-        { error: unknown.slice(0, 20).join(" "), errors: unknown.slice(0, 50) },
+        { error: "CSV has a header but no data rows." },
         { status: 400 },
       );
     }
-    lines.push(...lastByKey.values());
 
     const uploadId = await createForecastUpload(supabase, {
       group,
@@ -103,20 +95,33 @@ export async function POST(request: Request) {
       rowCount: lines.length,
       userId: profile?.id ?? null,
     });
-    const skuIds = await upsertSkuMonthPlans(supabase, {
+    const skuIds =
+      lines.length > 0
+        ? await upsertSkuMonthPlans(supabase, {
+            year,
+            group,
+            lines,
+            userId: profile?.id ?? null,
+            uploadId,
+          })
+        : [];
+    await replaceForecastPendingSkus(supabase, {
       year,
       group,
-      lines,
-      userId: profile?.id ?? null,
       uploadId,
+      userId: profile?.id ?? null,
+      pending,
+      eligibleCodes,
     });
     const payload = await loadSopForecast(supabase, year, group);
-    await notifySalesForecastOversell(supabase, {
-      actorId: profile?.id ?? null,
-      group,
-      year,
-      rows: payload.rows.filter((row) => skuIds.includes(row.sku_id)),
-    });
+    if (skuIds.length > 0) {
+      await notifySalesForecastOversell(supabase, {
+        actorId: profile?.id ?? null,
+        group,
+        year,
+        rows: payload.rows.filter((row) => skuIds.includes(row.sku_id)),
+      });
+    }
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

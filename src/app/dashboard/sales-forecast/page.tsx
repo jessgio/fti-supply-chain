@@ -52,6 +52,7 @@ import {
   freezeHead,
   type ForecastSortKey,
 } from "./table-utils";
+import { PendingSkusCard } from "./pending-skus-card";
 import { TargetsCard } from "./targets-card";
 import {
   RspEffectiveDialog,
@@ -169,6 +170,7 @@ function SalesForecastClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState(focusSku);
   const debouncedSearch = useDebouncedValue(search, 250);
   const [typeFilter, setTypeFilter] = useState<TypeFilter[]>([]);
@@ -268,6 +270,21 @@ function SalesForecastClient() {
           ...prev,
           unmapped_channel_count: next.unmapped_channel_count,
           channels: next.channels,
+          eligible_skus: (() => {
+            const seen = new Set(prev.eligible_skus.map((sku) => sku.sku_id));
+            const extra = next.rows
+              .filter((row) => !seen.has(row.sku_id))
+              .map((row) => ({
+                sku_id: row.sku_id,
+                sku_code: row.sku_code,
+                name: row.name,
+                is_bundle: row.is_bundle,
+                franchise_name: row.franchise_name,
+              }));
+            return extra.length === 0
+              ? prev.eligible_skus
+              : [...prev.eligible_skus, ...extra];
+          })(),
           inactive_sku_ids: {
             ...prev.inactive_sku_ids,
             [group]: next.inactive_sku_ids,
@@ -312,6 +329,7 @@ function SalesForecastClient() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/sales-forecast?year=${year}`);
       const data = await res.json();
@@ -376,6 +394,17 @@ function SalesForecastClient() {
       );
     }
     return yearData.groups[workspace].inactive_rows ?? [];
+  }, [yearData, workspace, combined]);
+
+  const pendingTableRows = useMemo(() => {
+    if (!yearData) return [];
+    if (combined) {
+      return [
+        ...(yearData.groups.online.pending_skus ?? []),
+        ...(yearData.groups.offline.pending_skus ?? []),
+      ];
+    }
+    return yearData.groups[workspace].pending_skus ?? [];
   }, [yearData, workspace, combined]);
 
   const franchises = useMemo(() => {
@@ -814,6 +843,7 @@ function SalesForecastClient() {
     if (!activeGroup) return;
     setSaving(true);
     setError(null);
+    setNotice(null);
     try {
       const form = new FormData();
       form.set("year", String(year));
@@ -827,6 +857,13 @@ function SalesForecastClient() {
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       if (isForecastGroupPayload(data)) {
         applyGroupPayload(activeGroup, data);
+        const uploaded = data.uploads[0]?.row_count ?? 0;
+        const pending = data.pending_skus?.length ?? 0;
+        if (pending > 0) {
+          setNotice(
+            `Uploaded ${uploaded} known SKU${uploaded === 1 ? "" : "s"}. ${pending} need review below.`,
+          );
+        }
       } else {
         await load();
       }
@@ -929,8 +966,13 @@ function SalesForecastClient() {
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p className="whitespace-pre-wrap rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
         </p>
       ) : null}
 
@@ -1404,6 +1446,20 @@ function SalesForecastClient() {
           )}
         </CardContent>
       </Card>
+
+      {viewMode === "sku" && yearData && !loading ? (
+        <PendingSkusCard
+          rows={pendingTableRows}
+          combined={combined}
+          readOnly={readOnly}
+          saving={saving}
+          onPayload={(group, payload) => {
+            applyGroupPayload(group, payload);
+            setNotice(null);
+          }}
+          onError={(message) => setError(message || null)}
+        />
+      ) : null}
 
       {viewMode === "sku" &&
       yearData &&

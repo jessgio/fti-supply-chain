@@ -104,6 +104,36 @@ export interface SopForecastUpload {
   created_at: string;
 }
 
+export type SopPendingForecastReason =
+  | "missing"
+  | "inactive"
+  | "unclassified"
+  | "packaging"
+  | "extract";
+
+export interface SopPendingForecastMonth {
+  month: number;
+  qty: number;
+  disc: number;
+}
+
+/** CSV SKUs that are not yet eligible for the main forecast table. */
+export interface SopPendingForecastSku {
+  id: string;
+  year: number;
+  sop_group: SopChannelGroup;
+  sku_code: string;
+  sku_id: string | null;
+  reason: SopPendingForecastReason;
+  suggested_sku_code: string | null;
+  name: string | null;
+  retail_price: number | null;
+  is_bundle: boolean;
+  franchise_id: string | null;
+  franchise_name: string | null;
+  months: SopPendingForecastMonth[];
+}
+
 export interface SopForecastPayload {
   year: number;
   group: SopChannelGroup;
@@ -119,6 +149,8 @@ export interface SopForecastPayload {
   rows: SopSkuRow[];
   /** Channel-inactive SKUs kept for sales reference (not in the main plan table). */
   inactive_rows: SopSkuRow[];
+  /** Missing, inactive, or unclassified SKUs from CSV uploads. */
+  pending_skus: SopPendingForecastSku[];
   uploads: SopForecastUpload[];
   inactive_sku_ids: string[];
 }
