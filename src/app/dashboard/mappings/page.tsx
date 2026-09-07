@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +22,33 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+
+/** Keeps keystrokes local so the heavy SKU table does not re-render on every character. */
+function DeferredSearchInput({
+  placeholder,
+  onQueryChange,
+  className,
+}: {
+  placeholder: string;
+  onQueryChange: (query: string) => void;
+  className?: string;
+}) {
+  const [value, setValue] = useState("");
+  const deferredValue = useDeferredValue(value);
+
+  useEffect(() => {
+    onQueryChange(deferredValue);
+  }, [deferredValue, onQueryChange]);
+
+  return (
+    <Input
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      className={className}
+    />
+  );
+}
 
 const franchiseColumns = ["sku_code", "sku_name", "franchise_name"];
 
@@ -903,14 +937,13 @@ export default function MappingsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Input
+            <DeferredSearchInput
               placeholder={
                 listTab === "mapped"
                   ? "Search SKU or franchise…"
                   : "Search unclassified SKU…"
               }
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onQueryChange={setSearch}
               className="max-w-xs"
             />
             {listTab === "mapped" && (
