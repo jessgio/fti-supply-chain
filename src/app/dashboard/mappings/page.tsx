@@ -696,7 +696,7 @@ export default function MappingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-8">
+    <div className="w-full space-y-6 p-6 lg:p-8">
       <div>
         <h1 className="text-2xl font-semibold text-stone-900">
           SKUs & Franchises
@@ -1094,19 +1094,19 @@ function MappedSkuTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
-      <table className="w-full text-left text-sm">
+      <table className="w-full min-w-[72rem] text-left text-sm">
         <thead>
           <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-            <th className="px-3 py-2">SKU</th>
-            <th className="min-w-[16rem] px-3 py-2 sm:min-w-[22rem]">
+            <th className="px-3 py-2 align-top">SKU</th>
+            <th className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
               Product name
             </th>
-            <th className="px-3 py-2">RSP</th>
-            <th className="px-3 py-2">Franchise</th>
-            <th className="px-3 py-2">Type</th>
-            <th className="px-3 py-2">Forecast</th>
-            <th className="px-3 py-2">Clearance</th>
-            <th className="px-3 py-2">Action</th>
+            <th className="px-3 py-2 align-top">RSP</th>
+            <th className="px-3 py-2 align-top">Franchise</th>
+            <th className="px-3 py-2 align-top">Type</th>
+            <th className="px-3 py-2 align-top">Forecast</th>
+            <th className="px-3 py-2 align-top">Clearance</th>
+            <th className="px-3 py-2 align-top">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -1125,7 +1125,7 @@ function MappedSkuTable({
                     : "border-b border-stone-100 last:border-0"
                 }
               >
-                <td className="px-3 py-2 font-mono text-xs sm:text-sm">
+                <td className="px-3 py-2 align-top font-mono text-xs sm:text-sm">
                   {sku.sku_code}
                 </td>
                 <td className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
@@ -1135,7 +1135,7 @@ function MappedSkuTable({
                     onSave={(name) => onUpdateProductName(sku, name)}
                   />
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   <RetailPriceInput
                     retailPrice={sku.retail_price}
                     disabled={busy}
@@ -1144,7 +1144,7 @@ function MappedSkuTable({
                     }
                   />
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   {isTyped ? (
                     <div className="flex min-w-[180px] flex-col gap-1.5">
                       <span className="text-xs text-stone-400">
@@ -1238,10 +1238,10 @@ function MappedSkuTable({
                     </Select>
                   )}
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   <SkuTypeBadge sku={sku} />
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   {isTyped ? (
                     <span className="text-stone-500">N/A</span>
                   ) : sku.is_active ? (
@@ -1254,7 +1254,7 @@ function MappedSkuTable({
                     </Badge>
                   )}
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   {isTyped ? (
                     <span className="text-xs text-stone-400">—</span>
                   ) : sku.is_clearance ? (
@@ -1265,7 +1265,7 @@ function MappedSkuTable({
                     <span className="text-xs text-stone-400">—</span>
                   )}
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   <div className="flex flex-wrap gap-2">
                     {!sku.is_bundle ? (
                       <Button
@@ -1381,14 +1381,14 @@ function UnclassifiedSkuTable({
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
-      <table className="w-full text-left text-sm">
+      <table className="w-full min-w-[48rem] text-left text-sm">
         <thead>
           <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
-            <th className="px-3 py-2">SKU</th>
-            <th className="min-w-[16rem] px-3 py-2 sm:min-w-[22rem]">
+            <th className="px-3 py-2 align-top">SKU</th>
+            <th className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
               Product name
             </th>
-            <th className="px-3 py-2">Classify</th>
+            <th className="px-3 py-2 align-top">Classify</th>
           </tr>
         </thead>
         <tbody>
@@ -1404,7 +1404,7 @@ function UnclassifiedSkuTable({
                     : "border-b border-stone-100 last:border-0"
                 }
               >
-                <td className="px-3 py-2 font-mono text-xs sm:text-sm">
+                <td className="px-3 py-2 align-top font-mono text-xs sm:text-sm">
                   {sku.sku_code}
                 </td>
                 <td className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
@@ -1414,7 +1414,7 @@ function UnclassifiedSkuTable({
                     onSave={(name) => onUpdateProductName(sku, name)}
                   />
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   <div className="flex min-w-[280px] flex-wrap items-center gap-2">
                     <Select
                       value={franchiseId}
