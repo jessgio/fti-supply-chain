@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCommercialWrite, requireWriteRole } from "@/lib/auth";
-import { updateSku } from "@/lib/db/skus";
+import { deleteSku, updateSku } from "@/lib/db/skus";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
@@ -123,6 +123,30 @@ export async function PATCH(
       ? 404
       : message.includes("RSP must") || message.includes("effective_from")
         ? 400
+        : 500;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const denied = await requireWriteRole();
+    if (denied) return denied;
+
+    const { id } = await params;
+    const supabase = createAdminClient();
+    const deleted = await deleteSku(supabase, id);
+    invalidateForecastCache();
+    return NextResponse.json({ ok: true, sku_code: deleted.sku_code });
+  } catch (error) {
+    const message = errorMessage(error);
+    const status = message.includes("not found")
+      ? 404
+      : message.includes("Cannot delete")
+        ? 409
         : 500;
     return NextResponse.json({ error: message }, { status });
   }

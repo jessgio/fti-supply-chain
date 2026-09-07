@@ -293,6 +293,34 @@ export default function MappingsPage() {
     }
   }
 
+  async function deleteSkuRow(sku: SkuRow) {
+    const ok = window.confirm(
+      `Delete SKU ${sku.sku_code}? This cannot be undone. Only SKUs without sales, stock, or purchase-order history can be deleted.`,
+    );
+    if (!ok) return;
+
+    setUpdatingId(sku.id);
+    setError(null);
+    setAddSuccess(null);
+    try {
+      const res = await fetch(`/api/skus/${sku.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Delete failed");
+
+      setSkus((prev) => prev.filter((row) => row.id !== sku.id));
+      setUnclassified((prev) => prev.filter((row) => row.id !== sku.id));
+      if (editingFranchiseId === sku.id) {
+        setEditingFranchiseId(null);
+        setNewFranchiseName("");
+      }
+      setAddSuccess(`${data.sku_code ?? sku.sku_code} deleted.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   async function updateProductName(sku: SkuRow, name: string) {
     const trimmed = name.trim();
     if (trimmed === (sku.name ?? "").trim()) return;
@@ -946,6 +974,7 @@ export default function MappingsPage() {
                 onNewFranchiseNameChange={setNewFranchiseName}
                 onUpdateFranchise={updateFranchise}
                 onClearMapping={clearMapping}
+                onDeleteSku={deleteSkuRow}
                 onUpdateProductName={updateProductName}
                 onUpdateRetailPrice={updateRetailPrice}
                 onToggleActive={toggleActive}
@@ -977,6 +1006,7 @@ export default function MappingsPage() {
               }
               onUpdateProductName={updateProductName}
               onClassify={classifySku}
+              onDeleteSku={deleteSkuRow}
             />
           )}
         </CardContent>
@@ -1057,6 +1087,7 @@ function MappedSkuTable({
   onNewFranchiseNameChange,
   onUpdateFranchise,
   onClearMapping,
+  onDeleteSku,
   onUpdateProductName,
   onUpdateRetailPrice,
   onToggleActive,
@@ -1078,6 +1109,7 @@ function MappedSkuTable({
     franchiseName?: string,
   ) => void;
   onClearMapping: (sku: SkuRow) => void;
+  onDeleteSku: (sku: SkuRow) => void;
   onUpdateProductName: (sku: SkuRow, name: string) => void;
   onUpdateRetailPrice: (sku: SkuRow, retailPrice: number | null) => void;
   onToggleActive: (sku: SkuRow) => void;
@@ -1345,6 +1377,15 @@ function MappedSkuTable({
                     >
                       {busy ? "Saving…" : "Clear mapping"}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                      onClick={() => onDeleteSku(sku)}
+                    >
+                      {busy ? "Deleting…" : "Delete"}
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -1365,6 +1406,7 @@ function UnclassifiedSkuTable({
   onClassifyFranchiseChange,
   onUpdateProductName,
   onClassify,
+  onDeleteSku,
 }: {
   skus: SkuRow[];
   franchises: FranchiseOption[];
@@ -1378,6 +1420,7 @@ function UnclassifiedSkuTable({
     kind: ProductType,
     franchiseId?: string,
   ) => void;
+  onDeleteSku: (sku: SkuRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
@@ -1461,6 +1504,15 @@ function UnclassifiedSkuTable({
                       onClick={() => onClassify(sku, "extract")}
                     >
                       Extract
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                      onClick={() => onDeleteSku(sku)}
+                    >
+                      {busy ? "Deleting…" : "Delete"}
                     </Button>
                   </div>
                 </td>

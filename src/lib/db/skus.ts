@@ -456,3 +456,66 @@ export async function ensureExtractSku(
   if (error) throw error;
   return data.id as string;
 }
+
+/**
+ * Delete a SKU that was added by mistake.
+ * Refuses when sales, stock, or purchase-order lines still reference it.
+ */
+export async function deleteSku(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<{ sku_code: string }> {
+  const { data: existing, error: fetchError } = await supabase
+    .from("skus")
+    .select("id, sku_code")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!existing) {
+    throw new Error("SKU not found.");
+  }
+
+  const blockers: string[] = [];
+
+  const { count: salesCount, error: salesError } = await supabase
+    .from("sales_records")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", id);
+  if (salesError) throw salesError;
+  if ((salesCount ?? 0) > 0) blockers.push("sales history");
+
+  const { count: stockCount, error: stockError } = await supabase
+    .from("stock_levels")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", id);
+  if (stockError) throw stockError;
+  if ((stockCount ?? 0) > 0) blockers.push("stock records");
+
+  const { count: poCount, error: poError } = await supabase
+    .from("purchase_order_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("sku_id", id);
+  if (poError) throw poError;
+  if ((poCount ?? 0) > 0) blockers.push("purchase orders");
+
+  if (blockers.length > 0) {
+    throw new Error(
+      `Cannot delete ${existing.sku_code} because it is linked to ${blockers.join(
+        ", ",
+      )}. Clear the mapping instead if you only need to remove the franchise/type.`,
+    );
+  }
+
+  const { error } = await supabase.from("skus").delete().eq("id", id);
+  if (error) {
+    if (error.code === "23503") {
+      throw new Error(
+        `Cannot delete ${existing.sku_code} because other records still reference it.`,
+      );
+    }
+    throw error;
+  }
+
+  return { sku_code: existing.sku_code };
+}
+
