@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 const franchiseColumns = ["sku_code", "sku_name", "franchise_name"];
 
@@ -252,6 +253,46 @@ export default function MappingsPage() {
     }
   }
 
+  /** Remove franchise / type classification so the SKU returns to Needs classification. */
+  async function clearMapping(sku: SkuRow) {
+    setUpdatingId(sku.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/skus/${sku.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_bundle: false,
+          is_packaging: false,
+          is_extract: false,
+          franchise_id: null,
+          is_clearance: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Clear mapping failed");
+
+      const updated = data.sku as SkuRow;
+      setSkus((prev) => prev.filter((row) => row.id !== sku.id));
+      setUnclassified((prev) => {
+        const next = prev.some((row) => row.id === sku.id)
+          ? prev.map((row) =>
+              row.id === sku.id ? { ...row, ...updated } : row,
+            )
+          : [...prev, { ...sku, ...updated }];
+        return next.sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+      });
+      if (editingFranchiseId === sku.id) {
+        setEditingFranchiseId(null);
+        setNewFranchiseName("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Clear mapping failed");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   async function updateProductName(sku: SkuRow, name: string) {
     const trimmed = name.trim();
     if (trimmed === (sku.name ?? "").trim()) return;
@@ -383,21 +424,45 @@ export default function MappingsPage() {
     });
   }
 
-  /** Convert a mapped single SKU to bundle, packaging, or extract (clears franchise). */
+  /** Convert a mapped SKU between single / bundle / packaging / extract. */
   async function changeMappedKind(
     sku: SkuRow,
-    kind: "bundle" | "packaging" | "extract",
+    kind: ProductType,
+    franchiseId?: string,
   ) {
-    if (sku.is_bundle || sku.is_packaging || sku.is_extract) return;
+    if (kind === "single" && !franchiseId) {
+      setError("Select a franchise to map as a single SKU.");
+      return;
+    }
+    const already =
+      (kind === "bundle" && sku.is_bundle) ||
+      (kind === "packaging" && sku.is_packaging) ||
+      (kind === "extract" && sku.is_extract) ||
+      (kind === "single" &&
+        !sku.is_bundle &&
+        !sku.is_packaging &&
+        !sku.is_extract &&
+        sku.franchise_id === franchiseId);
+    if (already) return;
+
     setUpdatingId(sku.id);
     setError(null);
     try {
-      const body =
-        kind === "bundle"
-          ? { is_bundle: true, is_packaging: false, is_extract: false }
-          : kind === "packaging"
-            ? { is_bundle: false, is_packaging: true, is_extract: false }
-            : { is_bundle: false, is_packaging: false, is_extract: true };
+      let body: Record<string, string | boolean | null>;
+      if (kind === "bundle") {
+        body = { is_bundle: true, is_packaging: false, is_extract: false };
+      } else if (kind === "packaging") {
+        body = { is_bundle: false, is_packaging: true, is_extract: false };
+      } else if (kind === "extract") {
+        body = { is_bundle: false, is_packaging: false, is_extract: true };
+      } else {
+        body = {
+          is_bundle: false,
+          is_packaging: false,
+          is_extract: false,
+          franchise_id: franchiseId!,
+        };
+      }
       const res = await fetch(`/api/skus/${sku.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -408,10 +473,19 @@ export default function MappingsPage() {
       const updated = data.sku as SkuRow;
       upsertMappedSku({
         ...updated,
-        franchise_id: null,
-        franchise_name: null,
-        is_clearance: false,
+        is_clearance:
+          kind === "single" ? (updated.is_clearance ?? false) : false,
       });
+      setUnclassified((prev) => prev.filter((row) => row.id !== sku.id));
+      if (updated.franchise_id && updated.franchise_name) {
+        setFranchises((prev) => {
+          if (prev.some((f) => f.id === updated.franchise_id)) return prev;
+          return [
+            ...prev,
+            { id: updated.franchise_id!, name: updated.franchise_name! },
+          ].sort((a, b) => a.name.localeCompare(b.name));
+        });
+      }
       if (editingFranchiseId === sku.id) {
         setEditingFranchiseId(null);
         setNewFranchiseName("");
@@ -666,14 +740,16 @@ export default function MappingsPage() {
                 onChange={(e) => setAddSkuCode(e.target.value)}
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 sm:col-span-2">
               <label className="text-sm font-medium text-stone-700">
                 Product name
               </label>
-              <Input
+              <textarea
                 placeholder="Optional — defaults to SKU code"
                 value={addSkuName}
                 onChange={(e) => setAddSkuName(e.target.value)}
+                rows={2}
+                className="min-h-[2.75rem] w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
               />
             </div>
             <div className="space-y-1">
@@ -869,6 +945,7 @@ export default function MappingsPage() {
                 }}
                 onNewFranchiseNameChange={setNewFranchiseName}
                 onUpdateFranchise={updateFranchise}
+                onClearMapping={clearMapping}
                 onUpdateProductName={updateProductName}
                 onUpdateRetailPrice={updateRetailPrice}
                 onToggleActive={toggleActive}
@@ -979,6 +1056,7 @@ function MappedSkuTable({
   onCancelEditFranchise,
   onNewFranchiseNameChange,
   onUpdateFranchise,
+  onClearMapping,
   onUpdateProductName,
   onUpdateRetailPrice,
   onToggleActive,
@@ -999,19 +1077,30 @@ function MappedSkuTable({
     franchiseId: string,
     franchiseName?: string,
   ) => void;
+  onClearMapping: (sku: SkuRow) => void;
   onUpdateProductName: (sku: SkuRow, name: string) => void;
   onUpdateRetailPrice: (sku: SkuRow, retailPrice: number | null) => void;
   onToggleActive: (sku: SkuRow) => void;
   onToggleClearance: (sku: SkuRow) => void;
-  onChangeKind: (sku: SkuRow, kind: "bundle" | "packaging" | "extract") => void;
+  onChangeKind: (
+    sku: SkuRow,
+    kind: ProductType,
+    franchiseId?: string,
+  ) => void;
 }) {
+  const [toSingleFranchiseId, setToSingleFranchiseId] = useState<
+    Record<string, string>
+  >({});
+
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-200">
       <table className="w-full text-left text-sm">
         <thead>
           <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
             <th className="px-3 py-2">SKU</th>
-            <th className="px-3 py-2">Product name</th>
+            <th className="min-w-[16rem] px-3 py-2 sm:min-w-[22rem]">
+              Product name
+            </th>
             <th className="px-3 py-2">RSP</th>
             <th className="px-3 py-2">Franchise</th>
             <th className="px-3 py-2">Type</th>
@@ -1021,190 +1110,246 @@ function MappedSkuTable({
           </tr>
         </thead>
         <tbody>
-          {skus.map((sku) => (
-            <tr
-              key={sku.id}
-              className={
-                highlightSkuCode === sku.sku_code
-                  ? "border-b border-amber-200 bg-amber-50 last:border-0"
-                  : "border-b border-stone-100 last:border-0"
-              }
-            >
-              <td className="px-3 py-2 font-mono text-xs sm:text-sm">
-                {sku.sku_code}
-              </td>
-              <td className="px-3 py-2">
-                <ProductNameInput
-                  name={sku.name}
-                  disabled={updatingId === sku.id}
-                  onSave={(name) => onUpdateProductName(sku, name)}
-                />
-              </td>
-              <td className="px-3 py-2">
-                <RetailPriceInput
-                  retailPrice={sku.retail_price}
-                  disabled={updatingId === sku.id}
-                  onSave={(retailPrice) =>
-                    onUpdateRetailPrice(sku, retailPrice)
-                  }
-                />
-              </td>
-              <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
-                  "—"
-                ) : editingFranchiseId === sku.id ? (
-                  <div className="flex min-w-[200px] flex-wrap items-center gap-2">
-                    <Input
-                      placeholder="New franchise name"
-                      value={newFranchiseName}
-                      onChange={(e) => onNewFranchiseNameChange(e.target.value)}
-                      className="h-8 min-w-[140px] flex-1 text-xs"
-                      disabled={updatingId === sku.id}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && newFranchiseName.trim()) {
-                          void onUpdateFranchise(
-                            sku,
-                            "",
-                            newFranchiseName.trim(),
-                          );
+          {skus.map((sku) => {
+            const isTyped =
+              sku.is_bundle || sku.is_packaging || sku.is_extract;
+            const busy = updatingId === sku.id;
+            const remappedFranchise =
+              toSingleFranchiseId[sku.id] ?? sku.franchise_id ?? "";
+            return (
+              <tr
+                key={sku.id}
+                className={
+                  highlightSkuCode === sku.sku_code
+                    ? "border-b border-amber-200 bg-amber-50 last:border-0"
+                    : "border-b border-stone-100 last:border-0"
+                }
+              >
+                <td className="px-3 py-2 font-mono text-xs sm:text-sm">
+                  {sku.sku_code}
+                </td>
+                <td className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
+                  <ProductNameInput
+                    name={sku.name}
+                    disabled={busy}
+                    onSave={(name) => onUpdateProductName(sku, name)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <RetailPriceInput
+                    retailPrice={sku.retail_price}
+                    disabled={busy}
+                    onSave={(retailPrice) =>
+                      onUpdateRetailPrice(sku, retailPrice)
+                    }
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  {isTyped ? (
+                    <div className="flex min-w-[180px] flex-col gap-1.5">
+                      <span className="text-xs text-stone-400">
+                        N/A for this type
+                      </span>
+                      <Select
+                        value={remappedFranchise}
+                        disabled={busy}
+                        onChange={(e) =>
+                          setToSingleFranchiseId((prev) => ({
+                            ...prev,
+                            [sku.id]: e.target.value,
+                          }))
                         }
-                        if (e.key === "Escape") {
-                          onCancelEditFranchise();
+                        className="h-8 min-w-[160px] text-xs"
+                      >
+                        <option value="">Franchise to remap as single…</option>
+                        {franchiseOptions.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ) : editingFranchiseId === sku.id ? (
+                    <div className="flex min-w-[200px] flex-wrap items-center gap-2">
+                      <Input
+                        placeholder="New franchise name"
+                        value={newFranchiseName}
+                        onChange={(e) =>
+                          onNewFranchiseNameChange(e.target.value)
                         }
+                        className="h-8 min-w-[140px] flex-1 text-xs"
+                        disabled={busy}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newFranchiseName.trim()) {
+                            void onUpdateFranchise(
+                              sku,
+                              "",
+                              newFranchiseName.trim(),
+                            );
+                          }
+                          if (e.key === "Escape") {
+                            onCancelEditFranchise();
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={busy || !newFranchiseName.trim()}
+                        onClick={() =>
+                          onUpdateFranchise(sku, "", newFranchiseName.trim())
+                        }
+                      >
+                        {busy ? "Saving…" : "Save"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={onCancelEditFranchise}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={sku.franchise_id ?? ""}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === "__new__") {
+                          onEditFranchise(sku.id);
+                          return;
+                        }
+                        if (value === "__clear__") {
+                          void onClearMapping(sku);
+                          return;
+                        }
+                        void onUpdateFranchise(sku, value);
                       }}
-                    />
-                    <Button
-                      size="sm"
-                      disabled={
-                        updatingId === sku.id || !newFranchiseName.trim()
-                      }
-                      onClick={() =>
-                        onUpdateFranchise(sku, "", newFranchiseName.trim())
-                      }
+                      className="h-8 min-w-[160px] text-xs"
                     >
-                      {updatingId === sku.id ? "Saving…" : "Save"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={updatingId === sku.id}
-                      onClick={onCancelEditFranchise}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <Select
-                    value={sku.franchise_id ?? ""}
-                    disabled={updatingId === sku.id}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "__new__") {
-                        onEditFranchise(sku.id);
-                        return;
-                      }
-                      void onUpdateFranchise(sku, value);
-                    }}
-                    className="h-8 min-w-[160px] text-xs"
-                  >
-                    {franchiseOptions.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                    <option value="__new__">+ New franchise…</option>
-                  </Select>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                <SkuTypeBadge sku={sku} />
-              </td>
-              <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
-                  <span className="text-stone-500">N/A</span>
-                ) : sku.is_active ? (
-                  <Badge className="bg-emerald-100 text-emerald-800">
-                    Included
-                  </Badge>
-                ) : (
-                  <Badge className="bg-amber-100 text-amber-800">
-                    Excluded
-                  </Badge>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
-                  <span className="text-xs text-stone-400">—</span>
-                ) : sku.is_clearance ? (
-                  <Badge className="bg-violet-100 text-violet-800">
-                    Clearance
-                  </Badge>
-                ) : (
-                  <span className="text-xs text-stone-400">—</span>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {sku.is_bundle || sku.is_packaging || sku.is_extract ? (
-                  <span className="text-xs text-stone-400">—</span>
-                ) : (
+                      {franchiseOptions.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                      <option value="__new__">+ New franchise…</option>
+                      <option value="__clear__">Clear mapping…</option>
+                    </Select>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  <SkuTypeBadge sku={sku} />
+                </td>
+                <td className="px-3 py-2">
+                  {isTyped ? (
+                    <span className="text-stone-500">N/A</span>
+                  ) : sku.is_active ? (
+                    <Badge className="bg-emerald-100 text-emerald-800">
+                      Included
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-amber-100 text-amber-800">
+                      Excluded
+                    </Badge>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {isTyped ? (
+                    <span className="text-xs text-stone-400">—</span>
+                  ) : sku.is_clearance ? (
+                    <Badge className="bg-violet-100 text-violet-800">
+                      Clearance
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-stone-400">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">
+                    {!sku.is_bundle ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => onChangeKind(sku, "bundle")}
+                      >
+                        {busy ? "Saving…" : "To bundle"}
+                      </Button>
+                    ) : null}
+                    {!sku.is_packaging ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => onChangeKind(sku, "packaging")}
+                      >
+                        {busy ? "Saving…" : "To packaging"}
+                      </Button>
+                    ) : null}
+                    {!sku.is_extract ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => onChangeKind(sku, "extract")}
+                      >
+                        {busy ? "Saving…" : "To extract"}
+                      </Button>
+                    ) : null}
+                    {isTyped ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || !remappedFranchise}
+                        onClick={() =>
+                          onChangeKind(sku, "single", remappedFranchise)
+                        }
+                      >
+                        {busy ? "Saving…" : "To single"}
+                      </Button>
+                    ) : null}
+                    {!isTyped ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => onToggleClearance(sku)}
+                        >
+                          {busy
+                            ? "Saving…"
+                            : sku.is_clearance
+                              ? "Unmark clearance"
+                              : "Mark clearance"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => onToggleActive(sku)}
+                        >
+                          {busy
+                            ? "Saving…"
+                            : sku.is_active
+                              ? "Mark inactive"
+                              : "Mark active"}
+                        </Button>
+                      </>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={updatingId === sku.id}
-                      onClick={() => onChangeKind(sku, "bundle")}
+                      disabled={busy}
+                      onClick={() => onClearMapping(sku)}
                     >
-                      {updatingId === sku.id ? "Saving…" : "Change to bundle"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={updatingId === sku.id}
-                      onClick={() => onChangeKind(sku, "packaging")}
-                    >
-                      {updatingId === sku.id
-                        ? "Saving…"
-                        : "Change to packaging"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={updatingId === sku.id}
-                      onClick={() => onChangeKind(sku, "extract")}
-                    >
-                      {updatingId === sku.id
-                        ? "Saving…"
-                        : "Change to extract"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={updatingId === sku.id}
-                      onClick={() => onToggleClearance(sku)}
-                    >
-                      {updatingId === sku.id
-                        ? "Saving…"
-                        : sku.is_clearance
-                          ? "Unmark clearance"
-                          : "Mark clearance"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={updatingId === sku.id}
-                      onClick={() => onToggleActive(sku)}
-                    >
-                      {updatingId === sku.id
-                        ? "Saving…"
-                        : sku.is_active
-                          ? "Mark inactive"
-                          : "Mark active"}
+                      {busy ? "Saving…" : "Clear mapping"}
                     </Button>
                   </div>
-                )}
-              </td>
-            </tr>
-          ))}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1240,7 +1385,9 @@ function UnclassifiedSkuTable({
         <thead>
           <tr className="border-b border-stone-200 bg-stone-50 text-stone-500">
             <th className="px-3 py-2">SKU</th>
-            <th className="px-3 py-2">Product name</th>
+            <th className="min-w-[16rem] px-3 py-2 sm:min-w-[22rem]">
+              Product name
+            </th>
             <th className="px-3 py-2">Classify</th>
           </tr>
         </thead>
@@ -1260,7 +1407,7 @@ function UnclassifiedSkuTable({
                 <td className="px-3 py-2 font-mono text-xs sm:text-sm">
                   {sku.sku_code}
                 </td>
-                <td className="px-3 py-2">
+                <td className="min-w-[16rem] px-3 py-2 align-top sm:min-w-[22rem]">
                   <ProductNameInput
                     name={sku.name}
                     disabled={busy}
@@ -1336,24 +1483,32 @@ function ProductNameInput({
   onSave: (name: string) => void;
 }) {
   const [value, setValue] = useState(name ?? "");
+  const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setValue(name ?? "");
   }, [name]);
 
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.max(el.scrollHeight, 32)}px`;
+  }, [value]);
+
   return (
-    <Input
+    <textarea
+      ref={ref}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={() => onSave(value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.currentTarget.blur();
-        }
-      }}
       placeholder="Product name"
-      className="h-8 min-w-[160px] text-xs"
+      rows={1}
       disabled={disabled}
+      className={cn(
+        "block w-full min-w-[14rem] resize-none overflow-hidden rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-xs leading-snug text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-50",
+        "whitespace-pre-wrap break-words",
+      )}
     />
   );
 }

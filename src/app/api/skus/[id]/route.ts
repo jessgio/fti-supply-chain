@@ -109,7 +109,9 @@ export async function PATCH(
       typeof input.is_clearance === "boolean" ||
       typeof input.is_bundle === "boolean" ||
       typeof input.is_packaging === "boolean" ||
-      typeof input.is_extract === "boolean"
+      typeof input.is_extract === "boolean" ||
+      input.franchise_id !== undefined ||
+      input.franchise_name !== undefined
     ) {
       invalidateForecastCache();
     }

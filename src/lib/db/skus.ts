@@ -324,18 +324,32 @@ export async function updateSku(
     if (nextIsExtract) {
       throw new Error("Extract SKUs cannot be assigned to a franchise.");
     }
-    const franchiseId = await resolveFranchiseId(
-      supabase,
-      typeof input.franchise_id === "string" ? input.franchise_id : null,
-      typeof input.franchise_name === "string" ? input.franchise_name : null,
-    );
-    if (!franchiseId) {
-      throw new Error("Franchise is required.");
+
+    const clearing =
+      input.franchise_id === null &&
+      (input.franchise_name === undefined ||
+        input.franchise_name === null ||
+        !String(input.franchise_name).trim());
+
+    if (clearing) {
+      updates.franchise_id = null;
+      updates.is_bundle = false;
+      updates.is_packaging = false;
+      updates.is_extract = false;
+    } else {
+      const franchiseId = await resolveFranchiseId(
+        supabase,
+        typeof input.franchise_id === "string" ? input.franchise_id : null,
+        typeof input.franchise_name === "string" ? input.franchise_name : null,
+      );
+      if (!franchiseId) {
+        throw new Error("Franchise is required.");
+      }
+      updates.franchise_id = franchiseId;
+      updates.is_bundle = false;
+      updates.is_packaging = false;
+      updates.is_extract = false;
     }
-    updates.franchise_id = franchiseId;
-    updates.is_bundle = false;
-    updates.is_packaging = false;
-    updates.is_extract = false;
   }
 
   if (input.unit_cogs !== undefined) {
