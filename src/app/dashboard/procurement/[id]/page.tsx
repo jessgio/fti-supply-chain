@@ -524,6 +524,14 @@ export default function PurchaseOrderPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
+                <span className="text-stone-600">Total qty</span>
+                <span className="font-medium">
+                  {new Intl.NumberFormat("id-ID", {
+                    maximumFractionDigits: 2,
+                  }).format(totals.totalQty)}
+                </span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-stone-600">Subtotal</span>
                 <span className="font-medium">{fmt(totals.subtotal)}</span>
               </div>

@@ -303,6 +303,7 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
       totalsY += 18;
     }
 
+    totalRow("Total qty", formatNumber(totals.totalQty));
     totalRow("Subtotal", formatCurrency(totals.subtotal, currency));
     if (totals.discount > 0) {
       totalRow("Discount", `-${formatCurrency(totals.discount, currency)}`);

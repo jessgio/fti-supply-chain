@@ -51,6 +51,8 @@ function billingScale(
 }
 
 export interface PoInvoiceTotals {
+  /** Sum of billable line quantities (ordered, or received when short-closed). */
+  totalQty: number;
   subtotal: number;
   orderedSubtotal: number;
   discount: number;
@@ -76,6 +78,8 @@ export function computePoInvoiceTotals(
     down_payment_pct?: number;
   },
 ): PoInvoiceTotals {
+  const lines = po.lines ?? [];
+  const totalQty = lines.reduce((sum, l) => sum + billableLineQty(l, po), 0);
   const orderedSubtotal = poSubtotal(po);
   const subtotal = poBilledSubtotal(po);
   const scale = billingScale(po);
@@ -101,9 +105,10 @@ export function computePoInvoiceTotals(
   const finalPayment = invoiceTotal - downPayment;
   const isShortReceived =
     usesBilledQuantities(po) &&
-    (po.lines ?? []).some((l) => l.qty_received < l.qty_ordered);
+    lines.some((l) => l.qty_received < l.qty_ordered);
 
   return {
+    totalQty,
     subtotal,
     orderedSubtotal,
     discount,

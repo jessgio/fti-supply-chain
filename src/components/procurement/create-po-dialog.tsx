@@ -52,6 +52,14 @@ function PoInvoiceTotalsView({
   return (
     <div className={className}>
       <div className={rowClassName}>
+        <span>Total qty</span>
+        <span>
+          {new Intl.NumberFormat("id-ID", {
+            maximumFractionDigits: 2,
+          }).format(totals.totalQty)}
+        </span>
+      </div>
+      <div className={`${rowClassName} mt-1`}>
         <span>Subtotal</span>
         <span>{fmt(totals.subtotal)}</span>
       </div>
