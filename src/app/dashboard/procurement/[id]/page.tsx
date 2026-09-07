@@ -359,7 +359,7 @@ export default function PurchaseOrderPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-6">
-          {timeline && <SinglePoGantt entry={timeline} />}
+          {timeline && <SinglePoGantt entry={timeline} po={po} />}
 
           {extractShortfalls.length > 0 && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">

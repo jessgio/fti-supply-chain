@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -14,7 +15,6 @@ import {
 } from "@/lib/shipments/constants";
 import {
   buildPoGanttBars,
-  formatPoGanttDate,
   getPoGanttPosition,
 } from "@/lib/procurement/po-timeline-gantt";
 import { GanttAxis, GanttLegend, GanttRow } from "@/components/procurement/gantt-chart-parts";
@@ -22,10 +22,25 @@ import {
   poDetailHref,
   shipmentDetailHref,
 } from "@/lib/shipments/shipment-navigation";
-import type { PoTimelineEntry } from "@/types/database";
+import {
+  DEFAULT_PO_CURRENCY,
+  formatPoMoney,
+} from "@/lib/procurement/currencies";
+import {
+  billableLineQty,
+  computePoInvoiceTotals,
+} from "@/lib/procurement/po-totals";
+import {
+  resolveProductLineLabel,
+  showSkuCodeSubline,
+} from "@/lib/procurement/product-line-label";
+import { formatNumber } from "@/lib/utils";
+import type { PoTimelineEntry, PurchaseOrder } from "@/types/database";
 
 interface SinglePoGanttProps {
   entry: PoTimelineEntry;
+  /** When provided, shows a collapsible qty / unit cost / line total table. */
+  po?: Pick<PurchaseOrder, "lines" | "currency" | "status">;
 }
 
 function statusBadgeClass(status: string): string {
@@ -39,7 +54,97 @@ function formatStatusLabel(status: string): string {
   );
 }
 
-export function SinglePoGantt({ entry }: SinglePoGanttProps) {
+function PoLinePricingDetails({
+  po,
+}: {
+  po: Pick<PurchaseOrder, "lines" | "currency" | "status">;
+}) {
+  const lines = po.lines ?? [];
+  if (lines.length === 0) return null;
+
+  const currency = po.currency ?? DEFAULT_PO_CURRENCY;
+  const totals = computePoInvoiceTotals(po);
+
+  return (
+    <details className="group rounded-lg border border-stone-200 bg-stone-50/80 open:bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-stone-800 [&::-webkit-details-marker]:hidden">
+        <span>
+          Line pricing
+          <span className="ml-2 font-normal text-stone-500">
+            {formatNumber(totals.totalQty, 2)} qty ·{" "}
+            {formatPoMoney(totals.subtotal, currency)}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-stone-400 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-stone-200 px-3 pb-3 pt-2">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[28rem] text-left text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 text-stone-500">
+                <th className="py-2 pr-3 font-medium">Product</th>
+                <th className="py-2 pr-3 text-right font-medium">Qty</th>
+                <th className="py-2 pr-3 text-right font-medium">Unit cost</th>
+                <th className="py-2 text-right font-medium">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line) => {
+                const qty = billableLineQty(line, po);
+                const unitCost = line.unit_cost;
+                const lineTotal = (unitCost ?? 0) * qty;
+                const label = resolveProductLineLabel(line);
+                const showSku = showSkuCodeSubline(line);
+                return (
+                  <tr
+                    key={line.id}
+                    className="border-b border-stone-100 last:border-0"
+                  >
+                    <td className="py-2 pr-3 align-top">
+                      <span className="font-medium text-stone-900">
+                        {label}
+                      </span>
+                      {showSku ? (
+                        <span className="mt-0.5 block font-mono text-xs text-stone-500">
+                          {line.sku_code}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-right align-top tabular-nums text-stone-800">
+                      {formatNumber(qty, 2)}
+                    </td>
+                    <td className="py-2 pr-3 text-right align-top tabular-nums text-stone-800">
+                      {unitCost != null
+                        ? formatPoMoney(unitCost, currency)
+                        : "—"}
+                    </td>
+                    <td className="py-2 text-right align-top tabular-nums font-medium text-stone-900">
+                      {formatPoMoney(lineTotal, currency)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-stone-200">
+                <td className="pt-2 pr-3 font-medium text-stone-900">Total</td>
+                <td className="pt-2 pr-3 text-right tabular-nums font-medium text-stone-900">
+                  {formatNumber(totals.totalQty, 2)}
+                </td>
+                <td className="pt-2 pr-3" />
+                <td className="pt-2 text-right tabular-nums font-medium text-stone-900">
+                  {formatPoMoney(totals.subtotal, currency)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+export function SinglePoGantt({ entry, po }: SinglePoGanttProps) {
   const chart = useMemo(() => {
     const bars = buildPoGanttBars(
       {
@@ -82,14 +187,19 @@ export function SinglePoGantt({ entry }: SinglePoGanttProps) {
     return { bars, rangeStart, rangeEnd, today, ticks };
   }, [entry]);
 
+  const pricing = po ? <PoLinePricingDetails po={po} /> : null;
+
   if (!chart) {
     return (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">PO timeline</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-stone-500">
-          Set an expected delivery date or log a shipment to see the schedule.
+        <CardContent className="space-y-4 text-sm text-stone-500">
+          <p>
+            Set an expected delivery date or log a shipment to see the schedule.
+          </p>
+          {pricing}
         </CardContent>
       </Card>
     );
@@ -120,6 +230,7 @@ export function SinglePoGantt({ entry }: SinglePoGanttProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {pricing}
         <GanttAxis
           ticks={chart.ticks}
           rangeStart={chart.rangeStart}
