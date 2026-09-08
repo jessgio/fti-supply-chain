@@ -40,7 +40,17 @@ import type { PoTimelineEntry, PurchaseOrder } from "@/types/database";
 interface SinglePoGanttProps {
   entry: PoTimelineEntry;
   /** When provided, shows a collapsible qty / unit cost / line total table. */
-  po?: Pick<PurchaseOrder, "lines" | "currency" | "status">;
+  po?: Pick<
+    PurchaseOrder,
+    | "lines"
+    | "currency"
+    | "status"
+    | "discount_amount"
+    | "tax_pct"
+    | "pph_pct"
+    | "other_charges"
+    | "down_payment_pct"
+  >;
 }
 
 function statusBadgeClass(status: string): string {
@@ -54,11 +64,9 @@ function formatStatusLabel(status: string): string {
   );
 }
 
-function PoLinePricingDetails({
-  po,
-}: {
-  po: Pick<PurchaseOrder, "lines" | "currency" | "status">;
-}) {
+type PoPricingSource = NonNullable<SinglePoGanttProps["po"]>;
+
+function PoLinePricingDetails({ po }: { po: PoPricingSource }) {
   const lines = po.lines ?? [];
   if (lines.length === 0) return null;
 
