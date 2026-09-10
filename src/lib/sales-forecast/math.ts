@@ -1,4 +1,8 @@
-import { VAT_DIVISOR } from "@/lib/sales-forecast/constants";
+import {
+  isPreTaxWmsChannel,
+  isShopeeChannel,
+  VAT_DIVISOR,
+} from "@/lib/sales-forecast/constants";
 
 export function clampDiscountPct(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -24,12 +28,18 @@ export function postTaxNet(vatInclusive: number): number {
 }
 
 /**
- * WMS "Nett Sales" is already post-tax (PPN excluded).
- * Returning it unchanged keeps S&OP actuals on the same basis as the file;
- * dividing by 1.11 here would strip VAT a second time.
+ * Convert Jubelio/WMS Nett Sales to S&OP post-tax.
+ * - SHOPEE: Nett Sales ≈ recognized post-tax ÷ 1.11 → multiply by 1.11
+ * - Shop | Tokopedia / TOKOPEDIA (TikTok): Nett Sales ≈ pre-tax → ÷ 1.11
+ * - Other channels: treat Nett Sales as already post-tax
  */
-export function postTaxFromWmsNet(netSales: number): number {
+export function postTaxFromWmsNet(
+  netSales: number,
+  channelName?: string | null,
+): number {
   if (!Number.isFinite(netSales)) return 0;
+  if (isShopeeChannel(channelName)) return netSales * VAT_DIVISOR;
+  if (isPreTaxWmsChannel(channelName)) return netSales / VAT_DIVISOR;
   return netSales;
 }
 

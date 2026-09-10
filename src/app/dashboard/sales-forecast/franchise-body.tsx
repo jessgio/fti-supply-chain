@@ -522,6 +522,7 @@ export function FranchiseBody({
         row.l3m_qty,
         row.l3m_post_tax,
         0,
+        row.retail_price,
       )) {
         const acc = ensureFranchise(part.franchise);
         if (!acc) continue;
@@ -536,6 +537,7 @@ export function FranchiseBody({
         row.l6m_qty,
         row.l6m_post_tax,
         0,
+        row.retail_price,
       )) {
         const acc = ensureFranchise(part.franchise);
         if (!acc) continue;
@@ -587,6 +589,7 @@ export function FranchiseBody({
           actualQty,
           actualPostTax,
           actualList,
+          monthRsp,
         )) {
           const acc = ensureFranchise(part.franchise);
           if (!acc) continue;
@@ -604,6 +607,7 @@ export function FranchiseBody({
           qty,
           postTax,
           listValue,
+          monthRsp,
         )) {
           const acc = ensureFranchise(part.franchise);
           if (!acc) continue;

@@ -24,6 +24,7 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import {
   franchisesForRow,
   rowMatchesFranchiseFilter,
+  withExplodedSingleActuals,
 } from "@/lib/sales-forecast/franchise-rollup";
 import { FORECAST_CSV_HEADERS, MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
 import { startOfMonthIso } from "@/lib/db/sku-retail-prices";
@@ -422,6 +423,11 @@ function SalesForecastClient() {
     return yearData.groups[workspace].rows;
   }, [yearData, workspace, combined]);
 
+  const skuTableRows = useMemo(
+    () => withExplodedSingleActuals(tableRows),
+    [tableRows],
+  );
+
   const inactiveTableRows = useMemo(() => {
     if (!yearData) return [];
     if (combined) {
@@ -478,7 +484,9 @@ function SalesForecastClient() {
   );
 
   const filteredRows = useMemo(() => {
-    const rows = filterSkuRows(tableRows);
+    const rows = filterSkuRows(
+      viewMode === "franchise" ? tableRows : skuTableRows,
+    );
     const activeMonth = yearData ? calendarActiveMonth(yearData.year) : null;
     const onlineById = new Map(
       (yearData?.groups.online.rows ?? []).map((row) => [row.sku_id, row]),
@@ -562,6 +570,8 @@ function SalesForecastClient() {
     });
   }, [
     tableRows,
+    skuTableRows,
+    viewMode,
     filterSkuRows,
     sortKey,
     sortDir,
@@ -573,9 +583,14 @@ function SalesForecastClient() {
   ]);
 
   const filteredInactiveRows = useMemo(() => {
-    const rows = filterSkuRows(inactiveTableRows);
+    const rows = filterSkuRows(
+      withExplodedSingleActuals(inactiveTableRows, [
+        ...tableRows,
+        ...inactiveTableRows,
+      ]),
+    );
     return [...rows].sort((a, b) => a.sku_code.localeCompare(b.sku_code));
-  }, [inactiveTableRows, filterSkuRows]);
+  }, [inactiveTableRows, tableRows, filterSkuRows]);
 
   const onDraft = useCallback(
     (skuId: string, month: number, field: "qty" | "disc", value: string) => {
@@ -972,9 +987,10 @@ function SalesForecastClient() {
           </h1>
           <p className="mt-1 max-w-3xl text-stone-600">
             Online and offline monthly targets (post-tax IDR) plus SKU and bundle
-            quantity plans. Historical L3M/L6M and monthly actuals use WMS Nett
-            Sales as-is (already post-tax). Planned net = qty × RSP × (1 −
-            discount) ÷ 1.11. Edit RSP on a SKU
+            quantity plans. Historical L3M/L6M and monthly actuals use Jubelio
+            Nett Sales with channel VAT fixes (Shopee ×1.11; Tokopedia/TikTok
+            ÷1.11). Single-SKU qty and net include units sold inside bundles.
+            Planned net = qty × RSP × (1 − discount) ÷ 1.11. Edit RSP on a SKU
             row to plan new launches before any sales exist.
           </p>
         </div>

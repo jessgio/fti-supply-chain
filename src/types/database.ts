@@ -37,7 +37,7 @@ export interface SopBomComponent {
   qty_per_bundle: number;
   /** Component franchise; null when unmapped / packaging / unknown. */
   franchise_name: string | null;
-  /** Component RSP for allocating bundle net sales across franchises. */
+  /** Component RSP; set residual is spread equally on top when exploding net. */
   retail_price: number | null;
   /**
    * Nested BOM when this component is itself a bundle. Franchise view

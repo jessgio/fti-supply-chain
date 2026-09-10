@@ -4,6 +4,7 @@ import { memo, useMemo, useSyncExternalStore, type MutableRefObject } from "reac
 import { ArrowDown, ArrowUp, ArrowUpDown, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MONTH_LABELS, MONTHS } from "@/lib/sales-forecast/constants";
+import { withExplodedSingleActuals } from "@/lib/sales-forecast/franchise-rollup";
 import {
   eomProjectionFromMtd,
   eomVsForecastPct,
@@ -502,17 +503,18 @@ export function CombinedSkuBody({
     const allowed = new Set(filteredOnlineRows.map((row) => row.sku_id));
     const order = filteredOnlineRows.map((row) => row.sku_id);
     const merged = mergeLiveSkuRows(
-      yearData.groups.online.rows.filter((row) => allowed.has(row.sku_id)),
-      yearData.groups.offline.rows.filter((row) => allowed.has(row.sku_id)),
+      yearData.groups.online.rows,
+      yearData.groups.offline.rows,
       draftsRef.current.online,
       draftsRef.current.offline,
       yearData.current_month,
       yearData.read_only,
     );
-    const byId = new Map(merged.map((row) => [row.sku_id, row]));
+    const exploded = withExplodedSingleActuals(merged);
+    const byId = new Map(exploded.map((row) => [row.sku_id, row]));
     return order
       .map((id) => byId.get(id))
-      .filter((row): row is SopSkuRow => row != null);
+      .filter((row): row is SopSkuRow => row != null && allowed.has(row.sku_id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearData, filteredOnlineRows, version]);
 

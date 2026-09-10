@@ -284,6 +284,9 @@ export async function loadSalesAccuracy(
   const channelGroup = new Map(
     channels.map((c) => [c.id, c.sop_group] as const),
   );
+  const channelNameById = new Map(
+    channels.map((c) => [c.id, c.name] as const),
+  );
   const mappedChannelIds = new Set(
     channels.filter((c) => c.sop_group).map((c) => c.id),
   );
@@ -363,7 +366,10 @@ export async function loadSalesAccuracy(
     const bucket = actualByGroup[group];
     const prev = bucket.get(key) ?? { qty: 0, post_tax: 0 };
     prev.qty += Number(row.qty);
-    prev.post_tax += postTaxFromWmsNet(Number(row.net_sales));
+    prev.post_tax += postTaxFromWmsNet(
+      Number(row.net_sales),
+      channelNameById.get(row.channel_id),
+    );
     bucket.set(key, prev);
   }
 
