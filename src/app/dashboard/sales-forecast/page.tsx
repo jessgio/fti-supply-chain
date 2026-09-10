@@ -987,9 +987,10 @@ function SalesForecastClient() {
           </h1>
           <p className="mt-1 max-w-3xl text-stone-600">
             Online and offline monthly targets (post-tax IDR) plus SKU and bundle
-            quantity plans. Historical L3M/L6M and monthly actuals use Jubelio
-            Nett Sales with channel VAT fixes (Shopee ×1.11; Tokopedia/TikTok
-            ÷1.11). Single-SKU qty and net include units sold inside bundles.
+            quantity plans. Historical L3M/L6M and monthly actuals use online
+            (Subtotal − Diskon Per Barang − Diskon Lainnya) ÷ 1.11; INTERNAL
+            stays on Nett Sales. Single-SKU qty and net include units sold inside
+            bundles.
             Planned net = qty × RSP × (1 − discount) ÷ 1.11. Edit RSP on a SKU
             row to plan new launches before any sales exist.
           </p>

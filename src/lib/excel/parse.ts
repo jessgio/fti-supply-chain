@@ -5,6 +5,7 @@ import {
   isIncludedWmsSalesRow,
   parseWmsSalesNumber,
 } from "@/lib/excel/sales-filters";
+import { wmsStoredNetSales } from "@/lib/excel/wms-net";
 import {
   isStockImportLocation,
   STOCK_QTY_COLUMN,
@@ -27,6 +28,15 @@ function sheetToRows(buffer: ArrayBuffer): Record<string, unknown>[] {
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function hasKey(row: Record<string, unknown>, aliases: string[]): boolean {
+  const entries = Object.entries(row);
+  for (const alias of aliases) {
+    const normalized = normalizeKey(alias);
+    if (entries.some(([k]) => normalizeKey(k) === normalized)) return true;
+  }
+  return false;
 }
 
 function pick<T>(row: Record<string, unknown>, aliases: string[]): T | undefined {
@@ -111,21 +121,27 @@ function parseWmsSalesRows(rows: Record<string, unknown>[]): SalesRow[] {
       const qty_sold = parseWmsSalesNumber(
         pick(row, ["qty", "quantity", "qty_sold"]),
       );
-      const net_sales = parseWmsSalesNumber(
-        pick(row, [
+      const channel = String(
+        pick(row, ["channel", "sales_channel", "platform", "marketplace"]) ??
+          "",
+      ).trim();
+      const net_sales = wmsStoredNetSales({
+        channel,
+        subtotal: pick(row, ["sub total", "subtotal"]),
+        itemDiscount: pick(row, ["diskon per barang", "diskonperbarang"]),
+        otherDiscount: pick(row, ["diskon lainnya", "diskonlainnya"]),
+        nettSales: pick(row, [
           "nett sales",
           "nettsales",
           "net sales",
           "netsales",
           "net_sales",
         ]),
-      );
+        hasSubtotalColumn: hasKey(row, ["sub total", "subtotal"]),
+      });
       const parsed = salesSchema.safeParse({
         sale_date: parseExcelDate(pick(row, ["tanggal", "sale_date", "date"])),
-        channel: String(
-          pick(row, ["channel", "sales_channel", "platform", "marketplace"]) ??
-            "",
-        ).trim(),
+        channel,
         sku_code: String(
           pick(row, ["sku", "sku_code", "product_sku", "item_sku"]) ?? "",
         ).trim(),

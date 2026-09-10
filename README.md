@@ -79,7 +79,8 @@ For a **full historical reprocess** (e.g. after return-qty import fixes), check 
 | SKU | sku_code |
 | QTY | qty_sold |
 | Harga | retail_price (RSP) — stored on SKU for bundle net-sales split |
-| Nett Sales | net_sales |
+| Sub Total, Diskon Per Barang, Diskon Lainnya | online `net_sales` = Sub Total − both discounts (VAT-inclusive). S&OP post-tax = that ÷ 1.11. INTERNAL/DEALPOS keep Nett Sales as already post-tax. |
+| Nett Sales | fallback `net_sales` when Sub Total is missing; always used for INTERNAL/DEALPOS |
 
 **Bundle net sales split:** each component receives  
 `bundle_nett_sales × (component_Harga × qty_per_bundle) / Σ(component_Harga × qty_per_bundle)`.  

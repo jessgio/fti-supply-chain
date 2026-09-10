@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "No valid sales rows found. For FTI Sales.xlsx, ensure Tanggal, Channel, SKU, QTY, Harga, and Nett Sales columns. FAKTUR rows are imported; CANCELED orders are excluded.",
+            "No valid sales rows found. For FTI Sales.xlsx, ensure Tanggal, Channel, SKU, QTY, Harga, Sub Total, Diskon Per Barang, Diskon Lainnya, and Nett Sales columns. FAKTUR rows are imported; CANCELED orders are excluded.",
         },
         { status: 400 },
       );

@@ -1,6 +1,5 @@
 import {
-  isPreTaxWmsChannel,
-  isShopeeChannel,
+  isOfflineWmsChannel,
   VAT_DIVISOR,
 } from "@/lib/sales-forecast/constants";
 
@@ -28,19 +27,17 @@ export function postTaxNet(vatInclusive: number): number {
 }
 
 /**
- * Convert Jubelio/WMS Nett Sales to S&OP post-tax.
- * - SHOPEE: Nett Sales ≈ recognized post-tax ÷ 1.11 → multiply by 1.11
- * - Shop | Tokopedia / TOKOPEDIA (TikTok): Nett Sales ≈ pre-tax → ÷ 1.11
- * - Other channels: treat Nett Sales as already post-tax
+ * Convert stored WMS net (VAT-inclusive seller proceeds) to S&OP post-tax.
+ * Online: ÷ 1.11. Offline (INTERNAL / DEALPOS): already post-tax.
+ * Stored online net is Subtotal − Diskon Per Barang − Diskon Lainnya.
  */
 export function postTaxFromWmsNet(
   netSales: number,
   channelName?: string | null,
 ): number {
   if (!Number.isFinite(netSales)) return 0;
-  if (isShopeeChannel(channelName)) return netSales * VAT_DIVISOR;
-  if (isPreTaxWmsChannel(channelName)) return netSales / VAT_DIVISOR;
-  return netSales;
+  if (isOfflineWmsChannel(channelName)) return netSales;
+  return netSales / VAT_DIVISOR;
 }
 
 /**

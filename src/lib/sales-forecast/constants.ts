@@ -1,25 +1,12 @@
 /** Indonesian PPN. VAT-inclusive net / 1.11 = post-tax net. */
 export const VAT_DIVISOR = 1.11;
 
-/** Jubelio SHOPEE Nett Sales ≈ seller post-tax ÷ 1.11 — undo that strip. */
-export const SHOPEE_CHANNEL_NAME = "SHOPEE";
+/** WMS / Jubelio channels that are offline. Nett Sales is already post-tax. */
+export const OFFLINE_WMS_CHANNEL_NAMES = ["INTERNAL", "DEALPOS"] as const;
 
-/**
- * Jubelio channels that store TikTok/Tokopedia Nett Sales as pre-tax
- * (SKU Subtotal Before Discount − Seller Discount). Divide by 1.11 once.
- */
-export const PRE_TAX_WMS_CHANNEL_NAMES = [
-  "Shop | Tokopedia",
-  "TOKOPEDIA",
-] as const;
-
-export function isShopeeChannel(name: string | null | undefined): boolean {
-  return (name ?? "").trim().toUpperCase() === SHOPEE_CHANNEL_NAME;
-}
-
-export function isPreTaxWmsChannel(name: string | null | undefined): boolean {
-  const n = (name ?? "").trim();
-  return (PRE_TAX_WMS_CHANNEL_NAMES as readonly string[]).includes(n);
+export function isOfflineWmsChannel(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim().toUpperCase();
+  return (OFFLINE_WMS_CHANNEL_NAMES as readonly string[]).includes(n);
 }
 
 export type SopChannelGroup = "online" | "offline";

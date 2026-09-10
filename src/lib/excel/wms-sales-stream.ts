@@ -5,6 +5,7 @@ import {
   isIncludedWmsSalesRow,
   parseWmsSalesNumber,
 } from "@/lib/excel/sales-filters";
+import { wmsStoredNetSales } from "@/lib/excel/wms-net";
 import { parseExcelDate } from "@/lib/excel/date-parse";
 import type { SalesRow } from "@/types/database";
 
@@ -170,7 +171,15 @@ function rowToSales(
   values: string[],
   columnMap: Record<string, number>,
 ): SalesRow | null {
-  const get = (key: string) => values[columnMap[key] ?? -1] ?? "";
+  const get = (key: string) => {
+    if (columnMap[key] !== undefined) return values[columnMap[key]!] ?? "";
+    const prefix = Object.keys(columnMap).find((k) => k.startsWith(key));
+    if (prefix) return values[columnMap[prefix]!] ?? "";
+    return "";
+  };
+  const hasColumn = (key: string) =>
+    columnMap[key] !== undefined ||
+    Object.keys(columnMap).some((k) => k.startsWith(key));
 
   const tipe = get("tipetransaksi");
   const status = get("status");
@@ -192,7 +201,14 @@ function rowToSales(
     channel,
     sku_code: sku,
     qty_sold: parseWmsSalesNumber(get("qty")),
-    net_sales: parseWmsSalesNumber(get("nettsales")),
+    net_sales: wmsStoredNetSales({
+      channel,
+      subtotal: get("subtotal"),
+      itemDiscount: get("diskonperbarang"),
+      otherDiscount: get("diskonlainnya"),
+      nettSales: get("nettsales"),
+      hasSubtotalColumn: hasColumn("subtotal"),
+    }),
     retail_price: harga > 0 ? harga : undefined,
   };
 }
