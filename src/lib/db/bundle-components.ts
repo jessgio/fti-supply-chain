@@ -24,6 +24,7 @@ function mapLinkRow(row: LinkRow): BundleBomLink {
     component_sku_id: row.component_sku_id,
     component_sku_code: row.component?.sku_code ?? "",
     component_name: row.component?.name ?? null,
+    component_is_bundle: Boolean(row.component?.is_bundle),
     qty_per_bundle: Number(row.qty_per_bundle),
   };
 }
@@ -84,8 +85,10 @@ export async function createBundleBomLink(
   if (!bundle.is_bundle) {
     throw new Error("The parent SKU must be marked as a bundle.");
   }
-  if (component.is_bundle) {
-    throw new Error("Bundle components must be single (non-bundle) SKUs.");
+  if (await bomWouldCycle(supabase, input.bundle_sku_id, input.component_sku_id)) {
+    throw new Error(
+      "That component would create a circular BOM (a bundle cannot contain itself, even through nested bundles).",
+    );
   }
 
   const { data, error } = await supabase
@@ -147,6 +150,7 @@ export interface ComponentSkuOption {
   name: string | null;
   franchise_name: string | null;
   is_active: boolean;
+  is_bundle: boolean;
 }
 
 type ComponentSkuRow = {
@@ -154,6 +158,7 @@ type ComponentSkuRow = {
   sku_code: string;
   name: string | null;
   is_active: boolean;
+  is_bundle: boolean;
   product_franchises: { name: string } | null;
 };
 
@@ -202,8 +207,7 @@ export async function listComponentSkuOptions(
   const rows = await fetchAllRows<ComponentSkuRow>(() =>
     supabase
       .from("skus")
-      .select("id, sku_code, name, is_active, product_franchises(name)")
-      .eq("is_bundle", false)
+      .select("id, sku_code, name, is_active, is_bundle, product_franchises(name)")
       .order("sku_code") as unknown as Parameters<
       typeof fetchAllRows<ComponentSkuRow>
     >[0] extends () => infer Q
@@ -217,5 +221,46 @@ export async function listComponentSkuOptions(
     name: row.name,
     franchise_name: row.product_franchises?.name ?? null,
     is_active: row.is_active,
+    is_bundle: Boolean(row.is_bundle),
   }));
+}
+
+/** True if adding componentId under parentId would loop back to the parent. */
+async function bomWouldCycle(
+  supabase: SupabaseClient,
+  parentId: string,
+  componentId: string,
+): Promise<boolean> {
+  if (parentId === componentId) return true;
+
+  const rows = await fetchAllRows<{
+    bundle_sku_id: string;
+    component_sku_id: string;
+  }>(() =>
+    supabase
+      .from("bundle_components")
+      .select("bundle_sku_id, component_sku_id") as unknown as Parameters<
+      typeof fetchAllRows<{ bundle_sku_id: string; component_sku_id: string }>
+    >[0] extends () => infer Q
+      ? Q
+      : never,
+  );
+
+  const children = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = children.get(row.bundle_sku_id) ?? [];
+    list.push(row.component_sku_id);
+    children.set(row.bundle_sku_id, list);
+  }
+
+  const stack = [componentId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === parentId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const child of children.get(id) ?? []) stack.push(child);
+  }
+  return false;
 }

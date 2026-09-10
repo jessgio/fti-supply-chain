@@ -16,6 +16,7 @@ import {
 } from "@/lib/sales-forecast/math";
 import {
   extraCompleteSetsFromInbound,
+  bomLeafComponents,
   nestBundleBoms,
 } from "@/lib/sales-forecast/franchise-rollup";
 import {
@@ -257,17 +258,18 @@ function monthsWithSales(
   return count;
 }
 
-/** Buildable bundle units = min over BOM of floor(component stock / qty per bundle). */
+/** Buildable bundle units from leaf SKUs after nested BOM explosion. */
 function bundleStockFromBom(
   components: SopBomComponent[],
   stockBySku: Map<string, number>,
 ): number {
-  if (components.length === 0) return 0;
+  const leaves = bomLeafComponents(components);
+  if (leaves.length === 0) return 0;
   let min = Infinity;
-  for (const component of components) {
-    const qtyPer = component.qty_per_bundle;
+  for (const leaf of leaves) {
+    const qtyPer = leaf.qty_per_bundle;
     if (!Number.isFinite(qtyPer) || qtyPer <= 0) continue;
-    const onHand = stockBySku.get(component.sku_id) ?? 0;
+    const onHand = stockBySku.get(leaf.sku_id) ?? 0;
     const buildable = Math.floor(onHand / qtyPer);
     if (buildable < min) min = buildable;
   }

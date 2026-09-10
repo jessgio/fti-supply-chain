@@ -177,7 +177,8 @@ export async function importMappings(
   }
   await upsertSkuRows(supabase, [...singleByCode.values()]);
 
-  // Bundle sheet: parent bundle SKUs (no franchise); components must be single SKUs.
+  // Bundle sheet: parent bundle SKUs (no franchise). Components may be
+  // single SKUs or nested bundles (S&OP explodes to leaves).
   const bundleSkuCodes = [...new Set(bundles.map((b) => b.bundle_sku_code))];
   await upsertSkuRows(
     supabase,

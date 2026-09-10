@@ -327,6 +327,7 @@ export interface BundleBomLink {
   component_sku_id: string;
   component_sku_code: string;
   component_name: string | null;
+  component_is_bundle: boolean;
   qty_per_bundle: number;
 }
 

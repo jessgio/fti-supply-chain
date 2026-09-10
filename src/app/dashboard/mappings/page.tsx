@@ -1051,8 +1051,8 @@ export default function MappingsPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-stone-600">
           <p>
-            1. <strong>Bundle sales</strong> are split into component single
-            SKUs using the bundle breakdown sheet.
+            1. <strong>Bundle sales</strong> are split into leaf component
+            SKUs using the BOM (nested bundles explode through).
           </p>
           <p>
             2. <strong>Single-SKU totals</strong> combine direct sales and
@@ -1085,10 +1085,11 @@ export default function MappingsPage() {
         <CardHeader>
           <CardTitle>Bundle breakdown sheet</CardTitle>
           <CardDescription>
-            Defines how bundle parent SKUs decompose into single SKUs. Net sales
-            are split by each component&apos;s RSP share: (component Harga ×
-            qty_per_bundle) ÷ sum of all component RSP contributions. Quantity
-            still uses qty_per_bundle.
+            Defines how bundle parent SKUs decompose into component SKUs
+            (singles or nested bundles). Nested BOMs explode to leaf SKUs in
+            forecast. Net sales are split by each leaf&apos;s RSP share:
+            (component Harga × qty_per_bundle) ÷ sum of all component RSP
+            contributions. Quantity still uses qty_per_bundle.
           </CardDescription>
         </CardHeader>
         <CardContent>

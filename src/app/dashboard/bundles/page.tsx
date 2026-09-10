@@ -68,12 +68,14 @@ function BundleBomInner() {
             name: string | null;
             franchise_name: string | null;
             is_active: boolean;
+            is_bundle?: boolean;
           }) => ({
             id: s.id,
             sku_code: s.sku_code,
             name: s.name,
             franchise_name: s.franchise_name,
             is_active: s.is_active,
+            is_bundle: Boolean(s.is_bundle),
           }),
         ),
       );
@@ -159,8 +161,10 @@ function BundleBomInner() {
 
   const availableComponents = useMemo(() => {
     const linked = new Set(bundleLinks.map((l) => l.component_sku_id));
-    return componentSkus.filter((s) => !linked.has(s.id));
-  }, [componentSkus, bundleLinks]);
+    return componentSkus.filter(
+      (s) => !linked.has(s.id) && s.id !== selectedBundle?.id,
+    );
+  }, [componentSkus, bundleLinks, selectedBundle?.id]);
 
   const searchOptions: SkuSearchOption[] = useMemo(
     () =>
@@ -284,9 +288,9 @@ function BundleBomInner() {
             </h1>
           </div>
           <p className="mt-1 max-w-3xl text-stone-600">
-            Find bundles missing a BOM and set which single SKUs they contain —
-            no Excel re-upload required. Bundle sales explode into these
-            components for forecast and stock.
+            Find bundles missing a BOM and set which SKUs they contain —
+            including nested bundles. No Excel re-upload required. Bundle sales
+            explode into leaf components for forecast and stock.
           </p>
         </div>
       </div>
@@ -441,8 +445,8 @@ function BundleBomInner() {
           <CardHeader>
             <CardTitle className="text-base">Bundle</CardTitle>
             <CardDescription>
-              Search by SKU code or name — then add each component SKU and
-              quantity per bundle.
+              Search by SKU code or name — then add each component (single SKU
+              or nested bundle) and quantity per bundle.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -511,13 +515,37 @@ function BundleBomInner() {
                               className="border-b border-stone-100 last:border-0"
                             >
                               <td className="px-3 py-2">
-                                <span className="font-mono text-xs">
-                                  {link.component_sku_code}
-                                </span>
-                                {link.component_name && (
-                                  <span className="block text-xs text-stone-500">
-                                    {link.component_name}
-                                  </span>
+                                {link.component_is_bundle ? (
+                                  <button
+                                    type="button"
+                                    className="text-left hover:underline"
+                                    onClick={() =>
+                                      selectBundleById(link.component_sku_id)
+                                    }
+                                  >
+                                    <span className="font-mono text-xs">
+                                      {link.component_sku_code}
+                                    </span>
+                                    <span className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700">
+                                      Bundle
+                                    </span>
+                                    {link.component_name && (
+                                      <span className="block text-xs text-stone-500">
+                                        {link.component_name}
+                                      </span>
+                                    )}
+                                  </button>
+                                ) : (
+                                  <>
+                                    <span className="font-mono text-xs">
+                                      {link.component_sku_code}
+                                    </span>
+                                    {link.component_name && (
+                                      <span className="block text-xs text-stone-500">
+                                        {link.component_name}
+                                      </span>
+                                    )}
+                                  </>
                                 )}
                               </td>
                               <td className="px-3 py-2 text-right">
@@ -559,7 +587,7 @@ function BundleBomInner() {
                       options={availableComponents}
                       value={addComponent}
                       onChange={setAddComponent}
-                      placeholder="Search single SKU…"
+                      placeholder="Search SKU or nested bundle…"
                       disabled={saving || availableComponents.length === 0}
                     />
                     <Input
@@ -591,7 +619,7 @@ function BundleBomInner() {
                     )}
                   {componentSkus.length === 0 && (
                     <p className="mt-2 text-xs text-stone-500">
-                      No single SKUs found. Add products on Master Data first.
+                      No SKUs found. Add products on Master Data first.
                     </p>
                   )}
                 </div>
@@ -638,6 +666,11 @@ function BundleBomInner() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
                         {link.component_sku_code}
+                        {link.component_is_bundle ? (
+                          <span className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700">
+                            Bundle
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatNumber(link.qty_per_bundle)}

@@ -114,7 +114,7 @@ Single SKUs only — franchises aggregate standalone sales plus units derived fr
 | Column | Notes |
 |--------|-------|
 | bundle_sku_code | Parent bundle SKU |
-| component_sku_code | Component SKU |
+| component_sku_code | Component SKU (single or nested bundle) |
 | qty_per_bundle | Units of component per bundle sold |
 
 ## Deploy
