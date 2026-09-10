@@ -55,38 +55,55 @@ export function MultiSelect<T extends string>({
   useEffect(() => {
     if (!open) return;
 
+    function eventInsideMenu(event: Event) {
+      const menu = menuRef.current;
+      if (!menu) return false;
+      const target = event.target;
+      if (target instanceof Node && menu.contains(target)) return true;
+      if (!(event instanceof MouseEvent)) return false;
+      const rect = menu.getBoundingClientRect();
+      return (
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      );
+    }
+
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node;
       if (buttonRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
-      setMenuRect(null);
+      if (eventInsideMenu(event)) return;
+      close();
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        setMenuRect(null);
-      }
+      if (event.key === "Escape") close();
     }
 
-    function handleViewportChange() {
-      setOpen(false);
-      setMenuRect(null);
+    function handleScroll(event: Event) {
+      // Capture listens to every overflow container. Ignore the menu's own
+      // list scroll so a long franchise list can be wheeled or dragged.
+      if (eventInsideMenu(event)) return;
+      close();
+    }
+
+    function handleResize() {
+      close();
     }
 
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleViewportChange, {
+    window.addEventListener("scroll", handleScroll, {
       capture: true,
       passive: true,
     });
-    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("resize", handleResize);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleViewportChange, true);
-      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
     };
   }, [open]);
 
@@ -122,7 +139,7 @@ export function MultiSelect<T extends string>({
               id={listId}
               role="listbox"
               aria-multiselectable="true"
-              className="fixed z-50 max-h-64 overflow-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
+              className="fixed z-50 max-h-64 overflow-auto overscroll-contain rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
               style={{
                 top: menuRect.bottom + 4,
                 left: menuRect.left,
