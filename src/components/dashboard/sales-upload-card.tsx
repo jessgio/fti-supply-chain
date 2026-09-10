@@ -38,6 +38,26 @@ async function postImport(body: unknown) {
   return data;
 }
 
+function storageUploadMessage(error: unknown, file: File): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : "Upload failed";
+  if (/exceeded the maximum allowed size/i.test(message)) {
+    const mb = file.size / (1024 * 1024);
+    return (
+      `This file is ${mb.toFixed(1)} MB, over Supabase Storage’s 50 MB global limit. ` +
+      `In the Supabase dashboard go to Storage → Configuration and raise Global file size limit to 100 MB, then retry.`
+    );
+  }
+  return message;
+}
+
 export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
   const [file, setFile] = useState<File | null>(null);
   const [fullReprocess, setFullReprocess] = useState(false);
@@ -64,7 +84,9 @@ export function SalesUploadCard({ title, description }: SalesUploadCardProps) {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        throw new Error(storageUploadMessage(uploadError, file));
+      }
 
       setStatus(
         fullReprocess
