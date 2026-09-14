@@ -1,18 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getPurchaseOrder, getSupplier } from "@/lib/db/procurement";
 import { getShipment, listShipments } from "@/lib/db/shipments";
 import {
   defaultShipmentApProject,
-  defaultShipmentApSupplierText,
-  formatShipmentPaymentRemarks,
   type ShipmentApInvoiceKind,
 } from "@/lib/lark/shipment-ap";
-import { isApFormCurrency, type ApFormCurrency } from "@/lib/lark/ap-form";
 import type {
   LarkApprovalStatus,
   Shipment,
   ShipmentLarkSubmission,
-  Supplier,
 } from "@/types/database";
 
 const SUBMISSION_SELECT = `
@@ -145,12 +140,7 @@ export async function updateShipmentLarkSubmission(
 
 export type ShipmentApContext = {
   shipment: Shipment;
-  remarks: string;
   project: string;
-  taxCurrency: ApFormCurrency;
-  taxAmount: number;
-  poSuppliers: Supplier[];
-  taxSupplierText: string;
   submissions: ShipmentLarkSubmission[];
 };
 
@@ -161,52 +151,11 @@ export async function getShipmentApContext(
   const shipment = await getShipment(supabase, shipmentId);
   if (!shipment) return null;
 
-  const poIds = [...new Set((shipment.purchase_orders ?? []).map((po) => po.id))];
-  const purchaseOrders = (
-    await Promise.all(poIds.map((id) => getPurchaseOrder(supabase, id)))
-  ).filter((po) => po != null);
-
-  const supplierIds = [
-    ...new Set(
-      purchaseOrders
-        .map((po) => po.supplier_id)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const poSuppliers = (
-    await Promise.all(supplierIds.map((id) => getSupplier(supabase, id)))
-  ).filter((s): s is Supplier => !!s);
-
-  let taxAmount = 0;
-  let taxCurrency: ApFormCurrency = "IDR";
-  const currencies = new Set<string>();
-  for (const po of purchaseOrders) {
-    const currency = (po.currency ?? "IDR").toUpperCase();
-    currencies.add(currency);
-    const shipped = shipment.purchase_orders?.find((item) => item.id === po.id);
-    for (const item of shipped?.items ?? []) {
-      const line = po.lines?.find((l) => l.id === item.po_line_id);
-      taxAmount += (line?.unit_cost ?? 0) * (Number(item.quantity) || 0);
-    }
-  }
-  if (currencies.size === 1) {
-    const only = [...currencies][0];
-    if (isApFormCurrency(only)) taxCurrency = only;
-  } else if (purchaseOrders[0] && isApFormCurrency(purchaseOrders[0].currency ?? "")) {
-    taxCurrency = purchaseOrders[0].currency as ApFormCurrency;
-  }
-
-  const remarks = formatShipmentPaymentRemarks(shipment);
   const submissions = await listShipmentLarkSubmissions(supabase, shipmentId);
 
   return {
     shipment,
-    remarks,
     project: defaultShipmentApProject(shipment),
-    taxCurrency,
-    taxAmount,
-    poSuppliers,
-    taxSupplierText: defaultShipmentApSupplierText("tax", poSuppliers),
     submissions,
   };
 }

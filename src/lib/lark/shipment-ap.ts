@@ -22,6 +22,16 @@ export function isShipmentApInvoiceKind(
   return (SHIPMENT_AP_INVOICE_KINDS as readonly string[]).includes(value);
 }
 
+/** Prefill for tax AP payment details — paid to DJBC, not the PO supplier. */
+export const TAX_AP_PAYMENT_DETAILS_TEMPLATE = "NOMOR BILLING: \nDOCUMENT: ";
+
+/** Default DJBC account lines on a tax / PIB payment plan. Amounts stay empty. */
+export const DEFAULT_TAX_AP_DUTY_LINES = [
+  "411212 - PPN Import",
+  "411123 - PPH Impor",
+  "412111 - Bea Masuk",
+] as const;
+
 function formatQty(qty: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(
     qty,
@@ -53,14 +63,24 @@ export function shipmentPaymentParts(shipment: Shipment): {
 }
 
 /** Remarks for shipment AP forms: payment plan rows and the general remarks field. */
-export function formatShipmentPaymentRemarks(shipment: Shipment): string {
+export function formatShipmentPaymentRemarks(
+  shipment: Shipment,
+  invoiceKind: ShipmentApInvoiceKind = "shipping",
+): string {
   const { poNumbers, productNames, qty } = shipmentPaymentParts(shipment);
   const poPart = poNumbers.join(", ") || shipment.shipment_number;
   const products = productNames.join(", ");
+  const kindLabel =
+    invoiceKind === "tax" ? "PIB payment" : "Shipment payment";
   if (products) {
-    return `Shipment payment for ${poPart} - ${products} for ${formatQty(qty)}`;
+    return `${kindLabel} for ${poPart} - ${products} for ${formatQty(qty)}`;
   }
-  return `Shipment payment for ${poPart} for ${formatQty(qty)}`;
+  return `${kindLabel} for ${poPart} for ${formatQty(qty)}`;
+}
+
+export function shipmentPoLabel(shipment: Shipment): string {
+  const { poNumbers } = shipmentPaymentParts(shipment);
+  return poNumbers.join(", ") || shipment.shipment_number;
 }
 
 export function defaultShipmentApProject(shipment: Shipment): string {
@@ -72,18 +92,11 @@ export function defaultShipmentApSupplierText(
   suppliers: Supplier[],
   selectedSupplierId?: string | null,
 ): string {
-  if (invoiceKind === "shipping") {
-    const selected = suppliers.find((s) => s.id === selectedSupplierId) ?? null;
-    return formatSupplierPaymentDetails(selected) || selected?.name?.trim() || "";
+  if (invoiceKind === "tax") {
+    return TAX_AP_PAYMENT_DETAILS_TEMPLATE;
   }
-  const unique = new Map<string, Supplier>();
-  for (const supplier of suppliers) {
-    unique.set(supplier.id, supplier);
-  }
-  return [...unique.values()]
-    .map((supplier) => formatSupplierPaymentDetails(supplier) || supplier.name)
-    .filter((text) => text.trim())
-    .join("\n\n");
+  const selected = suppliers.find((s) => s.id === selectedSupplierId) ?? null;
+  return formatSupplierPaymentDetails(selected) || selected?.name?.trim() || "";
 }
 
 export function buildShipmentPaymentPlanRow(input: {
@@ -103,4 +116,17 @@ export function buildShipmentPaymentPlanRow(input: {
     currency: currency as ApFormCurrency,
     remarks: input.remarks,
   };
+}
+
+export function defaultTaxApPaymentPlanRows(
+  poLabel: string,
+): PaymentPlanRow[] {
+  const suffix = poLabel.trim();
+  return DEFAULT_TAX_AP_DUTY_LINES.map((line) =>
+    buildShipmentPaymentPlanRow({
+      remarks: suffix ? `${line}, ${suffix}` : line,
+      amount: 0,
+      currency: "IDR",
+    }),
+  );
 }

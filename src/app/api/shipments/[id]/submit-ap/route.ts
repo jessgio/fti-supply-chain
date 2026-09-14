@@ -327,7 +327,7 @@ export async function POST(
     await insertShipmentLarkSubmission(supabase, {
       shipment_id: shipment.id,
       invoice_kind: invoiceKind,
-      supplier_id: invoiceKind === "shipping" ? supplierId : supplierId ?? null,
+      supplier_id: invoiceKind === "shipping" ? supplierId : null,
       lark_instance_code: result.instance_code,
       lark_serial_number: serialNumber,
       lark_approval_status: approvalStatus,

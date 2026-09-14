@@ -18,13 +18,14 @@ import {
   localTodayYmd,
   type ApBrandValue,
   type ApExpenseCategoryValue,
-  type ApFormCurrency,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
 import {
   SHIPMENT_AP_INVOICE_LABELS,
+  TAX_AP_PAYMENT_DETAILS_TEMPLATE,
   buildShipmentPaymentPlanRow,
   defaultShipmentApSupplierText,
+  defaultTaxApPaymentPlanRows,
   type ShipmentApInvoiceKind,
 } from "@/lib/lark/shipment-ap";
 import { formatPoMoney } from "@/lib/procurement/currencies";
@@ -101,10 +102,7 @@ type Props = {
   remarks: string;
   project: string;
   suppliers: Supplier[];
-  poSuppliers: Supplier[];
-  taxSupplierText: string;
-  taxAmount: number;
-  taxCurrency: ApFormCurrency;
+  poLabel: string;
   submissions: ShipmentLarkSubmission[];
   onSubmitted?: () => void;
 };
@@ -115,10 +113,7 @@ export function ShipmentApRequestForm({
   remarks: initialRemarks,
   project: initialProject,
   suppliers,
-  poSuppliers,
-  taxSupplierText,
-  taxAmount,
-  taxCurrency,
+  poLabel,
   submissions,
   onSubmitted,
 }: Props) {
@@ -139,22 +134,22 @@ export function ShipmentApRequestForm({
   const [approverQuery, setApproverQuery] = useState("");
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [project, setProject] = useState(initialProject);
-  const [selectedSupplierId, setSelectedSupplierId] = useState(
-    isShipping ? "" : (poSuppliers[0]?.id ?? ""),
-  );
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [supplier, setSupplier] = useState(() =>
-    isShipping
-      ? ""
-      : taxSupplierText || defaultShipmentApSupplierText("tax", poSuppliers),
+    isShipping ? "" : TAX_AP_PAYMENT_DETAILS_TEMPLATE,
   );
   const [remarks, setRemarks] = useState(initialRemarks);
-  const [planRows, setPlanRows] = useState<PaymentPlanRow[]>(() => [
-    buildShipmentPaymentPlanRow({
-      remarks: initialRemarks,
-      amount: isShipping ? 0 : taxAmount,
-      currency: isShipping ? "IDR" : taxCurrency,
-    }),
-  ]);
+  const [planRows, setPlanRows] = useState<PaymentPlanRow[]>(() =>
+    isShipping
+      ? [
+          buildShipmentPaymentPlanRow({
+            remarks: initialRemarks,
+            amount: 0,
+            currency: "IDR",
+          }),
+        ]
+      : defaultTaxApPaymentPlanRows(poLabel),
+  );
   const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(
     submissions[0]?.id ?? null,
   );
@@ -264,19 +259,28 @@ export function ShipmentApRequestForm({
 
   function applySupplier(id: string) {
     setSelectedSupplierId(id);
-    setSupplier(
-      defaultShipmentApSupplierText(
-        invoiceKind,
-        isShipping ? suppliers : poSuppliers,
-        id || null,
-      ),
-    );
+    setSupplier(defaultShipmentApSupplierText(invoiceKind, suppliers, id || null));
   }
 
   function updatePlanRow(index: number, patch: Partial<PaymentPlanRow>) {
     setPlanRows((prev) =>
       prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
+  }
+
+  function addPlanRow() {
+    setPlanRows((prev) => [
+      ...prev,
+      buildShipmentPaymentPlanRow({
+        remarks: "",
+        amount: 0,
+        currency: prev[prev.length - 1]?.currency ?? "IDR",
+      }),
+    ]);
+  }
+
+  function removePlanRow(index: number) {
+    setPlanRows((prev) => prev.filter((_, i) => i !== index));
   }
 
   function addExtraFiles(list: FileList | null) {
@@ -329,7 +333,8 @@ export function ShipmentApRequestForm({
       setError("Select at least one approver");
       return;
     }
-    if (planRows.length === 0 || planRows.some((row) => row.amount <= 0)) {
+    const filledPlanRows = planRows.filter((row) => row.amount > 0);
+    if (filledPlanRows.length === 0) {
       setError("Enter a payment amount greater than zero");
       return;
     }
@@ -371,9 +376,11 @@ export function ShipmentApRequestForm({
       form.append("project", project);
       form.append("supplier", supplier);
       form.append("remarks", remarks);
-      form.append("planRows", JSON.stringify(planRows));
+      form.append("planRows", JSON.stringify(filledPlanRows));
       form.append("storagePaths", JSON.stringify(storagePaths));
-      if (selectedSupplierId) form.append("supplierId", selectedSupplierId);
+      if (isShipping && selectedSupplierId) {
+        form.append("supplierId", selectedSupplierId);
+      }
 
       await readApiJson(
         await fetch(`/api/shipments/${shipmentId}/submit-ap`, {
@@ -616,7 +623,7 @@ export function ShipmentApRequestForm({
             <p className="mt-1 text-sm text-stone-500">
               {isShipping
                 ? "Choose the freight supplier and fill in the shipping invoice amount. Payment details go into the Supplier field."
-                : "Prefills the tax invoice from shipped quantity × PO unit cost. Edit the amount before submit if needed."}
+                : "PIB / DJBC payment. Fill billing and document numbers, then enter each duty line amount from the billing."}
             </p>
             {alreadySubmitted ? (
               <button
@@ -660,14 +667,18 @@ export function ShipmentApRequestForm({
                 <textarea
                   value={supplier}
                   onChange={(e) => setSupplier(e.target.value)}
-                  rows={8}
-                  placeholder="Supplier name and payment / banking details"
+                  rows={isShipping ? 8 : 4}
+                  placeholder={
+                    isShipping
+                      ? "Supplier name and payment / banking details"
+                      : TAX_AP_PAYMENT_DETAILS_TEMPLATE
+                  }
                   className={`${fieldClass} resize-y font-mono text-xs`}
                 />
                 <span className="mt-0.5 block text-[11px] font-normal text-stone-500">
                   {isShipping
                     ? "Filled from the selected supplier. Edit before submit if needed."
-                    : "Prefills from the PO supplier banking details."}
+                    : "Paid to DJBC (customs), not the PO supplier. Fill in the billing number and PIB document number."}
                 </span>
               </label>
 
@@ -725,22 +736,27 @@ export function ShipmentApRequestForm({
               </label>
 
               <div>
-                <p className="text-xs font-medium text-stone-600">
-                  Payment plan (付款计划)
-                </p>
-                {!isShipping ? (
-                  <p className="mt-1 text-[11px] text-stone-500">
-                    Estimated from shipped qty × PO unit cost
-                    {taxAmount > 0
-                      ? `: ${formatPoMoney(taxAmount, taxCurrency)}`
-                      : ""}
-                    .
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[11px] text-stone-500">
-                    Enter the shipping invoice amount.
-                  </p>
-                )}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium text-stone-600">
+                      Payment plan (付款计划)
+                    </p>
+                    <p className="mt-1 text-[11px] text-stone-500">
+                      {isShipping
+                        ? "Enter the shipping invoice amount."
+                        : "Defaults to PPN Import, PPh Impor, and Bea Masuk. Leave unused lines empty or remove them, then fill amounts from the billing."}
+                    </p>
+                  </div>
+                  {!isShipping ? (
+                    <button
+                      type="button"
+                      onClick={addPlanRow}
+                      className="shrink-0 text-xs font-medium text-stone-700 underline hover:text-stone-900"
+                    >
+                      Add line
+                    </button>
+                  ) : null}
+                </div>
                 <div className="mt-1.5 space-y-2">
                   {planRows.map((row, index) => (
                     <div
@@ -764,10 +780,13 @@ export function ShipmentApRequestForm({
                             type="number"
                             step="any"
                             min={0}
-                            value={row.amount}
+                            value={row.amount || ""}
                             onChange={(e) =>
                               updatePlanRow(index, {
-                                amount: Number(e.target.value) || 0,
+                                amount:
+                                  e.target.value === ""
+                                    ? 0
+                                    : Number(e.target.value) || 0,
                               })
                             }
                             className={fieldClass}
@@ -793,7 +812,10 @@ export function ShipmentApRequestForm({
                         </select>
                       </label>
                       <label className="block text-[11px] text-stone-500">
-                        Remarks · {formatPoMoney(row.amount, row.currency)}
+                        Remarks
+                        {row.amount > 0
+                          ? ` · ${formatPoMoney(row.amount, row.currency)}`
+                          : ""}
                         <input
                           type="text"
                           value={row.remarks}
@@ -803,8 +825,23 @@ export function ShipmentApRequestForm({
                           className={fieldClass}
                         />
                       </label>
+                      {!isShipping ? (
+                        <button
+                          type="button"
+                          onClick={() => removePlanRow(index)}
+                          className="text-[11px] font-medium text-stone-500 underline hover:text-red-700"
+                        >
+                          Remove line
+                        </button>
+                      ) : null}
                     </div>
                   ))}
+                  {!isShipping && planRows.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-stone-300 bg-white px-3 py-3 text-xs text-stone-500">
+                      No duty lines yet. Add PPN, PPh, Bea Masuk, or another
+                      account.
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
