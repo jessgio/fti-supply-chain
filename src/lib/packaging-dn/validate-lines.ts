@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PackagingCatalogTable } from "@/lib/packaging-dn/catalog";
+import {
+  poHasManufacturingLine,
+  type PackagingDnPoLineRef,
+} from "@/lib/packaging-dn/open-pos";
 
 export interface PackagingDnLineInput {
   packaging_item_id: string;
@@ -10,6 +14,8 @@ export interface PackagingDnLineInput {
 export interface ValidatePackagingDnPoAndLinesOptions {
   allowClosedPoId?: string;
   allowInactivePackagingIds?: string[];
+  /** When true, reject packaging-only / extract-only POs (primary packaging DN). */
+  requireManufacturingPo?: boolean;
 }
 
 export interface ValidatedPackagingDnPoAndLines {
@@ -24,22 +30,49 @@ export interface ValidatedPackagingDnPoAndLines {
   }>;
 }
 
+const PO_SELECT_BASIC = "id, po_number, status" as const;
+const PO_SELECT_WITH_LINES =
+  "id, po_number, status, purchase_order_lines ( skus!sku_id ( is_packaging, is_extract ) )" as const;
+
 export async function validatePackagingDnPoAndLines(
   supabase: SupabaseClient,
   catalogTable: PackagingCatalogTable,
   input: { po_id: string; lines: PackagingDnLineInput[] },
   options: ValidatePackagingDnPoAndLinesOptions = {},
 ): Promise<ValidatedPackagingDnPoAndLines> {
-  const { data: po, error: poError } = await supabase
-    .from("purchase_orders")
-    .select("id, po_number, status")
-    .eq("id", input.po_id)
-    .maybeSingle();
+  const poQuery = options.requireManufacturingPo
+    ? supabase
+        .from("purchase_orders")
+        .select(PO_SELECT_WITH_LINES)
+        .eq("id", input.po_id)
+        .maybeSingle()
+    : supabase
+        .from("purchase_orders")
+        .select(PO_SELECT_BASIC)
+        .eq("id", input.po_id)
+        .maybeSingle();
+
+  const { data: po, error: poError } = await poQuery;
   if (poError) throw poError;
   if (!po) throw new Error("Purchase order not found.");
   if (po.status === "received" || po.status === "cancelled") {
     if (!options.allowClosedPoId || po.id !== options.allowClosedPoId) {
       throw new Error("Selected PO is closed.");
+    }
+  }
+  if (options.requireManufacturingPo) {
+    const keepingExistingPo =
+      Boolean(options.allowClosedPoId) && po.id === options.allowClosedPoId;
+    if (!keepingExistingPo) {
+      const lines =
+        ("purchase_order_lines" in po
+          ? (po.purchase_order_lines ?? [])
+          : []) as PackagingDnPoLineRef[];
+      if (!poHasManufacturingLine(lines)) {
+        throw new Error(
+          "Select a manufacturing (filling) purchase order, not a packaging-production PO.",
+        );
+      }
     }
   }
   if (input.lines.length === 0) {

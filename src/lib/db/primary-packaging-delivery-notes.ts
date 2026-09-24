@@ -25,7 +25,12 @@ import {
 } from "@/lib/packaging-dn/settings";
 import { validatePackagingDnPoAndLines } from "@/lib/packaging-dn/validate-lines";
 
-export { listOpenPosForPackagingDn as listOpenPosForPrimaryPackaging };
+/** Open manufacturing (filling) POs only — not packaging-production POs. */
+export async function listOpenPosForPrimaryPackaging(
+  supabase: Parameters<typeof listOpenPosForPackagingDn>[0],
+) {
+  return listOpenPosForPackagingDn(supabase, { scope: "manufacturing" });
+}
 
 const CATALOG_TABLE = "primary_packaging_inbound_cosmax" as const;
 
@@ -65,7 +70,7 @@ async function validateInput(
     supabase,
     CATALOG_TABLE,
     input,
-    options,
+    { ...options, requireManufacturingPo: true },
   );
   return {
     po: { id: po.id, po_number: po.po_number },
