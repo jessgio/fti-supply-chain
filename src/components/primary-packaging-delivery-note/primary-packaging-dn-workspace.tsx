@@ -21,7 +21,7 @@ const PRIMARY_LABELS = {
   formTitleNew: "New Primary Packaging Inbound",
   formTitleEdit: "Edit Primary Packaging Inbound",
   formDescription:
-    "Ship primary packaging to Cosmax. Select the related PO, choose items from the catalog, and generate a PDF for signing.",
+    "Ship primary packaging to Cosmax. Select the related manufacturing (filling) PO, choose items from the catalog, and generate a PDF for signing.",
   lineItemsDescription:
     "Search by item code or product name. Cartons × pcs/carton = total pcs.",
   historyDescription:
