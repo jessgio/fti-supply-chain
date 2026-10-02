@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { listOpenPoBatchesBySkus } from "@/lib/db/procurement";
+import { fetchAllRpc } from "@/lib/supabase/fetch-all";
+import { CODE_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 import type { NpdStockRow } from "@/types/database";
 
 /**
@@ -10,18 +12,26 @@ import type { NpdStockRow } from "@/types/database";
 export async function loadNpdStockSkus(
   supabase: SupabaseClient,
 ): Promise<NpdStockRow[]> {
-  const { data, error } = await supabase.rpc("get_npd_stock_skus");
-  if (error) throw error;
-
-  const rows = (data ?? []) as Record<string, unknown>[];
+  const rows = await fetchAllRpc<Record<string, unknown>>(
+    supabase,
+    "get_npd_stock_skus",
+    {},
+  );
   if (rows.length === 0) return [];
 
   const skuCodes = rows.map((r) => String(r.sku_code));
-  const { data: skuRows, error: skuError } = await supabase
-    .from("skus")
-    .select("id, sku_code")
-    .in("sku_code", skuCodes);
-  if (skuError) throw skuError;
+  const skuRows = await queryInChunks(
+    skuCodes,
+    CODE_IN_CHUNK,
+    async (chunk) => {
+      const { data, error } = await supabase
+        .from("skus")
+        .select("id, sku_code")
+        .in("sku_code", chunk);
+      if (error) throw error;
+      return data ?? [];
+    },
+  );
 
   const idByCode = new Map<string, string>();
   for (const row of skuRows ?? []) {

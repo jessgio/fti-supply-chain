@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getCachedGrowthAnalytics } from "@/lib/analytics/growth-cache";
 import { computeGrowthMetrics } from "@/lib/analytics/growth";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
@@ -59,18 +60,26 @@ async function loadOverview(): Promise<Overview | null> {
   try {
     const supabase = createAdminClient();
 
-    const [{ recommendations, skuCount }, posRes, stockRes, salesMomPct] =
+    const [{ recommendations, skuCount }, pos, stockRes, salesMomPct] =
       await Promise.all([
         loadRestockRecommendations(supabase),
-        supabase
-          .from("purchase_orders")
-          .select("status, purchase_order_lines(qty_ordered, qty_received)")
-          .in("status", [
-            "planned",
-            "ordered",
-            "in_production",
-            "in_transit",
-          ]),
+        fetchAllRows<{
+          status: string;
+          purchase_order_lines: {
+            qty_ordered: number;
+            qty_received: number;
+          }[] | null;
+        }>(() =>
+          supabase
+            .from("purchase_orders")
+            .select("status, purchase_order_lines(qty_ordered, qty_received)")
+            .in("status", [
+              "planned",
+              "ordered",
+              "in_production",
+              "in_transit",
+            ]),
+        ),
         supabase
           .from("stock_levels")
           .select("as_of_date")
@@ -112,10 +121,6 @@ async function loadOverview(): Promise<Overview | null> {
       0,
     );
 
-    const pos = (posRes.data ?? []) as {
-      status: string;
-      purchase_order_lines: { qty_ordered: number; qty_received: number }[];
-    }[];
     const openPos = pos.length;
     const unitsOnOrder = pos
       .filter((p) =>

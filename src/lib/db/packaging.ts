@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PACKAGING_STOCK_LOCATIONS } from "@/lib/stock/locations";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { fetchAllRpc, fetchAllRows } from "@/lib/supabase/fetch-all";
+import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 import { listProductPackagingLinks } from "@/lib/db/product-packaging";
 import { loadRestockRecommendations } from "@/lib/forecast/service";
 import { computePackagingRestockNeed } from "@/lib/packaging/restock-needs";
@@ -61,31 +62,35 @@ export async function listPackagingOverview(
 
   const [
     stockRows,
-    onOrderRes,
+    onOrderRows,
     links,
     { recommendations },
     openPoLines,
   ] = await Promise.all([
     stockAsOf
-      ? fetchAllRows<{
-          sku_id: string;
-          qty_on_hand: number;
-        }>(() =>
-          supabase
-            .from("stock_levels")
-            .select("sku_id, qty_on_hand")
-            .in("sku_id", skuIds)
-            .eq("as_of_date", stockAsOf)
-            .in("location", [...PACKAGING_STOCK_LOCATIONS]),
+      ? queryInChunks(skuIds, ID_IN_CHUNK, (chunk) =>
+          fetchAllRows<{
+            sku_id: string;
+            qty_on_hand: number;
+          }>(() =>
+            supabase
+              .from("stock_levels")
+              .select("sku_id, qty_on_hand")
+              .in("sku_id", chunk)
+              .eq("as_of_date", stockAsOf)
+              .in("location", [...PACKAGING_STOCK_LOCATIONS]),
+          ),
         )
       : Promise.resolve([]),
-    supabase.rpc("get_on_order_qty_by_sku"),
+    fetchAllRpc<{ sku_id: string; on_order_qty: number }>(
+      supabase,
+      "get_on_order_qty_by_sku",
+      {},
+    ),
     listProductPackagingLinks(supabase),
     loadRestockRecommendations(supabase),
     listOpenPackagingPoLines(supabase, skuIds),
   ]);
-
-  if (onOrderRes.error) throw onOrderRes.error;
 
   const stockBySku = new Map<string, number>();
   for (const row of stockRows) {
@@ -96,8 +101,8 @@ export async function listPackagingOverview(
   }
 
   const onOrderBySku = new Map<string, number>();
-  for (const row of onOrderRes.data ?? []) {
-    onOrderBySku.set(row.sku_id as string, Number(row.on_order_qty));
+  for (const row of onOrderRows) {
+    onOrderBySku.set(row.sku_id, Number(row.on_order_qty));
   }
 
   const recBySku = new Map(recommendations.map((r) => [r.sku_code, r]));
@@ -159,28 +164,27 @@ export async function listOpenPackagingPoLines(
 ): Promise<PackagingPoLine[]> {
   if (packagingSkuIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from("purchase_order_lines")
-    .select(
-      "qty_ordered, qty_received, skus!sku_id(sku_code), " +
-        "purchase_orders!inner(id, po_number, status, expected_date, suppliers(name))",
-    )
-    .in("sku_id", packagingSkuIds)
-    .in("purchase_orders.status", [
-      "planned",
-      "ordered",
-      "in_production",
-      "in_transit",
-    ])
-    .order("expected_date", {
-      ascending: true,
-      nullsFirst: false,
-      foreignTable: "purchase_orders",
-    });
-  if (error) throw error;
+  const data = await queryInChunks(packagingSkuIds, ID_IN_CHUNK, (chunk) =>
+    fetchAllRows<PackagingPoLineRow>(
+      () =>
+        supabase
+          .from("purchase_order_lines")
+          .select(
+            "qty_ordered, qty_received, skus!sku_id(sku_code), " +
+              "purchase_orders!inner(id, po_number, status, expected_date, suppliers(name))",
+          )
+          .in("sku_id", chunk)
+          .in("purchase_orders.status", [
+            "planned",
+            "ordered",
+            "in_production",
+            "in_transit",
+          ]) as never,
+    ),
+  );
 
   const lines: PackagingPoLine[] = [];
-  for (const line of (data ?? []) as unknown as PackagingPoLineRow[]) {
+  for (const line of data) {
     const po = line.purchase_orders;
     if (!po || !line.skus) continue;
     const qtyOpen = Math.max(
@@ -200,6 +204,13 @@ export async function listOpenPackagingPoLines(
       qty_open: qtyOpen,
     });
   }
+
+  lines.sort((a, b) => {
+    if (a.expected_date == null && b.expected_date == null) return 0;
+    if (a.expected_date == null) return 1;
+    if (b.expected_date == null) return -1;
+    return a.expected_date.localeCompare(b.expected_date);
+  });
 
   return lines;
 }

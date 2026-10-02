@@ -21,19 +21,23 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { TablePager, usePagedItems } from "@/components/ui/table-pager";
+import { writeUnclassifiedCountCache } from "@/lib/skus/unclassified-count-cache";
 import { cn } from "@/lib/utils";
 
 /** Keeps keystrokes local so the heavy SKU table does not re-render on every character. */
 function DeferredSearchInput({
   placeholder,
+  initialQuery = "",
   onQueryChange,
   className,
 }: {
   placeholder: string;
+  initialQuery?: string;
   onQueryChange: (query: string) => void;
   className?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialQuery);
   const deferredValue = useDeferredValue(value);
 
   useEffect(() => {
@@ -110,9 +114,14 @@ function SkuTypeBadge({
 export default function MappingsPage() {
   const [skus, setSkus] = useState<SkuRow[]>([]);
   const [unclassified, setUnclassified] = useState<SkuRow[]>([]);
+  const [unclassifiedTotal, setUnclassifiedTotal] = useState<number | null>(
+    null,
+  );
+  const [unclassifiedLoaded, setUnclassifiedLoaded] = useState(false);
   const [franchises, setFranchises] = useState<FranchiseOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [unclassifiedLoading, setUnclassifiedLoading] = useState(true);
+  const [unclassifiedLoading, setUnclassifiedLoading] = useState(false);
+  const [searchRevision, setSearchRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -134,6 +143,7 @@ export default function MappingsPage() {
   const [addSkuRsp, setAddSkuRsp] = useState("");
   const [addSaving, setAddSaving] = useState(false);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
+  const unclassifiedCountGen = useRef(0);
 
   const loadMappedSkus = useCallback(async () => {
     setLoading(true);
@@ -150,7 +160,22 @@ export default function MappingsPage() {
     }
   }, []);
 
+  const loadUnclassifiedCount = useCallback(async () => {
+    const generation = ++unclassifiedCountGen.current;
+    try {
+      const res = await fetch("/api/skus?scope=unclassified&count_only=1");
+      const data = await res.json();
+      if (!res.ok || generation !== unclassifiedCountGen.current) return;
+      const count = typeof data.count === "number" ? data.count : 0;
+      setUnclassifiedTotal(count);
+      writeUnclassifiedCountCache(count);
+    } catch {
+      // Badge falls back to the loaded list when that request succeeds.
+    }
+  }, []);
+
   const loadUnclassified = useCallback(async () => {
+    unclassifiedCountGen.current += 1;
     setUnclassifiedLoading(true);
     try {
       const res = await fetch("/api/skus?scope=unclassified");
@@ -158,7 +183,11 @@ export default function MappingsPage() {
       if (!res.ok) {
         throw new Error(data.error ?? "Failed to load unclassified SKUs");
       }
-      setUnclassified(data.skus ?? []);
+      const rows = (data.skus ?? []) as SkuRow[];
+      setUnclassified(rows);
+      setUnclassifiedLoaded(true);
+      setUnclassifiedTotal(rows.length);
+      writeUnclassifiedCountCache(rows.length);
     } catch (err) {
       setError(
         err instanceof Error
@@ -171,12 +200,33 @@ export default function MappingsPage() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadMappedSkus(), loadUnclassified()]);
-  }, [loadMappedSkus, loadUnclassified]);
+    await Promise.all([
+      loadMappedSkus(),
+      loadUnclassified(),
+      loadUnclassifiedCount(),
+    ]);
+  }, [loadMappedSkus, loadUnclassified, loadUnclassifiedCount]);
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    void loadMappedSkus();
+    void loadUnclassifiedCount();
+  }, [loadMappedSkus, loadUnclassifiedCount]);
+
+  useEffect(() => {
+    if (listTab !== "unclassified" || unclassifiedLoaded) return;
+    void loadUnclassified();
+  }, [listTab, unclassifiedLoaded, loadUnclassified]);
+
+  const unclassifiedBadge = unclassifiedLoaded
+    ? unclassified.length
+    : (unclassifiedTotal ?? 0);
+
+  function revealSku(skuCode: string, tab: ListTab) {
+    setListTab(tab);
+    setSearch(skuCode);
+    setSearchRevision((n) => n + 1);
+    setHighlightSkuCode(skuCode);
+  }
 
   useEffect(() => {
     fetch("/api/metadata")
@@ -192,6 +242,11 @@ export default function MappingsPage() {
     const timer = window.setTimeout(() => setHighlightSkuCode(null), 8000);
     return () => window.clearTimeout(timer);
   }, [highlightSkuCode]);
+
+  useEffect(() => {
+    if (!unclassifiedLoaded) return;
+    writeUnclassifiedCountCache(unclassified.length);
+  }, [unclassifiedLoaded, unclassified.length]);
 
   const filteredMapped = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -308,6 +363,7 @@ export default function MappingsPage() {
 
       const updated = data.sku as SkuRow;
       setSkus((prev) => prev.filter((row) => row.id !== sku.id));
+      if (!unclassifiedLoaded) void loadUnclassifiedCount();
       setUnclassified((prev) => {
         const next = prev.some((row) => row.id === sku.id)
           ? prev.map((row) =>
@@ -628,9 +684,7 @@ export default function MappingsPage() {
   }
 
   function openUnclassifiedForCode(skuCode: string) {
-    setListTab("unclassified");
-    setSearch(skuCode);
-    setHighlightSkuCode(skuCode);
+    revealSku(skuCode, "unclassified");
   }
 
   async function handleAddSku() {
@@ -689,7 +743,6 @@ export default function MappingsPage() {
               `${existing.sku_code} already exists and needs classification.`,
             );
             openUnclassifiedForCode(existing.sku_code);
-            await loadUnclassified();
           } else {
             setError(
               `${existing.sku_code} already exists as ${skuTypeLabel(existing)}.`,
@@ -700,9 +753,7 @@ export default function MappingsPage() {
               existing.is_extract ||
               existing.franchise_id
             ) {
-              setListTab("mapped");
-              setSearch(existing.sku_code);
-              setHighlightSkuCode(existing.sku_code);
+            revealSku(existing.sku_code, "mapped");
             }
           }
           return;
@@ -739,6 +790,7 @@ export default function MappingsPage() {
           });
         }
       } else {
+        if (!unclassifiedLoaded) void loadUnclassifiedCount();
         setUnclassified((prev) =>
           [...prev, created].sort((a, b) =>
             a.sku_code.localeCompare(b.sku_code),
@@ -928,9 +980,9 @@ export default function MappingsPage() {
               onClick={() => setListTab("unclassified")}
             >
               Needs classification
-              {unclassified.length > 0 && (
+              {unclassifiedBadge > 0 && (
                 <Badge className="ml-1.5 bg-amber-100 text-amber-900">
-                  {unclassified.length}
+                  {unclassifiedBadge}
                 </Badge>
               )}
             </Button>
@@ -938,11 +990,13 @@ export default function MappingsPage() {
 
           <div className="flex flex-wrap gap-3">
             <DeferredSearchInput
+              key={searchRevision}
               placeholder={
                 listTab === "mapped"
                   ? "Search SKU or franchise…"
                   : "Search unclassified SKU…"
               }
+              initialQuery={searchRevision === 0 ? "" : search}
               onQueryChange={setSearch}
               className="max-w-xs"
             />
@@ -991,6 +1045,7 @@ export default function MappingsPage() {
             ) : (
               <MappedSkuTable
                 skus={filteredMapped}
+                resetKey={`${search}|${statusFilter}`}
                 franchiseOptions={franchiseOptions}
                 updatingId={updatingId}
                 editingFranchiseId={editingFranchiseId}
@@ -1027,6 +1082,7 @@ export default function MappingsPage() {
           ) : (
             <UnclassifiedSkuTable
               skus={filteredUnclassified}
+              resetKey={search}
               franchises={franchises}
               classifyFranchiseId={classifyFranchiseId}
               updatingId={updatingId}
@@ -1111,6 +1167,7 @@ export default function MappingsPage() {
 
 function MappedSkuTable({
   skus,
+  resetKey,
   franchiseOptions,
   updatingId,
   editingFranchiseId,
@@ -1129,6 +1186,7 @@ function MappedSkuTable({
   onChangeKind,
 }: {
   skus: SkuRow[];
+  resetKey: string;
   franchiseOptions: FranchiseOption[];
   updatingId: string | null;
   editingFranchiseId: string | null;
@@ -1157,8 +1215,25 @@ function MappedSkuTable({
   const [toSingleFranchiseId, setToSingleFranchiseId] = useState<
     Record<string, string>
   >({});
+  const pager = usePagedItems(skus, resetKey);
+  const { setPage, pageSize } = pager;
+  const highlightedCode = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!highlightSkuCode) {
+      highlightedCode.current = null;
+      return;
+    }
+    const index = skus.findIndex((sku) => sku.sku_code === highlightSkuCode);
+    if (index < 0) return;
+    const token = `${highlightSkuCode}:${index}`;
+    if (highlightedCode.current === token) return;
+    highlightedCode.current = token;
+    setPage(Math.floor(index / pageSize));
+  }, [highlightSkuCode, skus, pageSize, setPage]);
 
   return (
+    <div className="space-y-2">
     <div className="overflow-x-auto rounded-lg border border-stone-200">
       <table className="w-full min-w-[72rem] text-left text-sm">
         <thead>
@@ -1176,7 +1251,7 @@ function MappedSkuTable({
           </tr>
         </thead>
         <tbody>
-          {skus.map((sku) => {
+          {pager.slice.map((sku) => {
             const isTyped =
               sku.is_bundle || sku.is_packaging || sku.is_extract;
             const busy = updatingId === sku.id;
@@ -1428,11 +1503,21 @@ function MappedSkuTable({
         </tbody>
       </table>
     </div>
+    <TablePager
+      page={pager.page}
+      pageCount={pager.pageCount}
+      start={pager.start}
+      pageSize={pager.pageSize}
+      total={pager.total}
+      onPageChange={pager.setPage}
+    />
+    </div>
   );
 }
 
 function UnclassifiedSkuTable({
   skus,
+  resetKey,
   franchises,
   classifyFranchiseId,
   updatingId,
@@ -1443,6 +1528,7 @@ function UnclassifiedSkuTable({
   onDeleteSku,
 }: {
   skus: SkuRow[];
+  resetKey: string;
   franchises: FranchiseOption[];
   classifyFranchiseId: Record<string, string>;
   updatingId: string | null;
@@ -1456,7 +1542,25 @@ function UnclassifiedSkuTable({
   ) => void;
   onDeleteSku: (sku: SkuRow) => void;
 }) {
+  const pager = usePagedItems(skus, resetKey);
+  const { setPage, pageSize } = pager;
+  const highlightedCode = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!highlightSkuCode) {
+      highlightedCode.current = null;
+      return;
+    }
+    const index = skus.findIndex((sku) => sku.sku_code === highlightSkuCode);
+    if (index < 0) return;
+    const token = `${highlightSkuCode}:${index}`;
+    if (highlightedCode.current === token) return;
+    highlightedCode.current = token;
+    setPage(Math.floor(index / pageSize));
+  }, [highlightSkuCode, skus, pageSize, setPage]);
+
   return (
+    <div className="space-y-2">
     <div className="overflow-x-auto rounded-lg border border-stone-200">
       <table className="w-full min-w-[48rem] text-left text-sm">
         <thead>
@@ -1469,7 +1573,7 @@ function UnclassifiedSkuTable({
           </tr>
         </thead>
         <tbody>
-          {skus.map((sku) => {
+          {pager.slice.map((sku) => {
             const franchiseId = classifyFranchiseId[sku.id] ?? "";
             const busy = updatingId === sku.id;
             return (
@@ -1555,6 +1659,15 @@ function UnclassifiedSkuTable({
           })}
         </tbody>
       </table>
+    </div>
+    <TablePager
+      page={pager.page}
+      pageCount={pager.pageCount}
+      start={pager.start}
+      pageSize={pager.pageSize}
+      total={pager.total}
+      onPageChange={pager.setPage}
+    />
     </div>
   );
 }

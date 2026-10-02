@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TablePager, usePagedItems } from "@/components/ui/table-pager";
 import type { SkuCogsRow } from "@/types/database";
 import { formatCurrency, formatPct } from "@/lib/utils";
 
@@ -69,10 +70,11 @@ export default function SkuCogsPage() {
       (s) =>
         s.sku_code.toLowerCase().includes(q) ||
         (s.product_name?.toLowerCase().includes(q) ?? false) ||
-        (s.franchise_name?.toLowerCase().includes(q) ?? false) ||
-        (draft[s.sku_id]?.includes(q) ?? false),
+        (s.franchise_name?.toLowerCase().includes(q) ?? false),
     );
-  }, [skus, search, draft]);
+  }, [skus, search]);
+
+  const cogsPage = usePagedItems(filtered, search);
 
   const changedCount = useMemo(
     () =>
@@ -114,12 +116,16 @@ export default function SkuCogsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      const rows = (data.skus ?? []) as SkuCogsRow[];
-      setSkus(rows);
-      setDraft(
-        Object.fromEntries(
-          rows.map((r) => [r.sku_id, formatCogsInput(r.unit_cogs)]),
-        ),
+      setSkus((prev) =>
+        prev.map((row) => {
+          const raw = (draft[row.sku_id] ?? "").trim();
+          const original = formatCogsInput(row.unit_cogs).trim();
+          if (raw === original) return row;
+          return {
+            ...row,
+            unit_cogs: raw ? Number(raw.replace(/,/g, "")) : null,
+          };
+        }),
       );
       setSaved(true);
     } catch (err) {
@@ -222,7 +228,7 @@ export default function SkuCogsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((row) => {
+                  {cogsPage.slice.map((row) => {
                     const draftValue = draft[row.sku_id] ?? "";
                     const parsedCogs = draftValue.trim()
                       ? Number(draftValue.replace(/,/g, ""))
@@ -278,6 +284,14 @@ export default function SkuCogsPage() {
                   })}
                 </tbody>
               </table>
+              <TablePager
+                page={cogsPage.page}
+                pageCount={cogsPage.pageCount}
+                start={cogsPage.start}
+                pageSize={cogsPage.pageSize}
+                total={cogsPage.total}
+                onPageChange={cogsPage.setPage}
+              />
             </div>
           )}
           {saved && !error && (

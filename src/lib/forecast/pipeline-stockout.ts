@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { listOpenPoBatchesBySkus } from "@/lib/db/procurement";
+import { CODE_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 import {
   projectSkuPipelineCoverage,
   type IncomingBatch,
@@ -17,11 +18,18 @@ export async function enrichWithIncomingBatchStockout(
   if (recommendations.length === 0) return recommendations;
 
   const skuCodes = recommendations.map((r) => r.sku_code);
-  const { data: skuRows, error: skuError } = await supabase
-    .from("skus")
-    .select("id, sku_code")
-    .in("sku_code", skuCodes);
-  if (skuError) throw skuError;
+  const skuRows = await queryInChunks(
+    skuCodes,
+    CODE_IN_CHUNK,
+    async (chunk) => {
+      const { data, error } = await supabase
+        .from("skus")
+        .select("id, sku_code")
+        .in("sku_code", chunk);
+      if (error) throw error;
+      return data ?? [];
+    },
+  );
 
   const skuIds = (skuRows ?? []).map((row) => row.id as string);
   const batches = await listOpenPoBatchesBySkus(supabase, skuIds);

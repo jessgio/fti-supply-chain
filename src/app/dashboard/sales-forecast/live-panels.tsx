@@ -352,6 +352,8 @@ export function InactiveMonthHeaders({ year }: { year: number }) {
 
 export const EditableSkuBody = memo(function EditableSkuBody({
   rows,
+  windowStart = 0,
+  windowEnd,
   year,
   currentMonth,
   readOnly,
@@ -368,6 +370,8 @@ export const EditableSkuBody = memo(function EditableSkuBody({
   onChangeExistingRsp,
 }: {
   rows: SopSkuRow[];
+  windowStart?: number;
+  windowEnd?: number;
   year: number;
   currentMonth: number;
   readOnly: boolean;
@@ -398,13 +402,15 @@ export const EditableSkuBody = memo(function EditableSkuBody({
     return sumStoredPlanPostTax(rows, month);
   }, [rows, year]);
 
+  const visibleRows = rows.slice(windowStart, windowEnd ?? rows.length);
+
   return (
     <tbody>
-      {rows.map((row, index) => (
+      {visibleRows.map((row, index) => (
         <ForecastRow
           key={`${workspace}-${draftSeed}-${row.sku_id}`}
           row={row}
-          rowIndex={index}
+          rowIndex={windowStart + index}
           year={year}
           currentMonth={currentMonth}
           readOnly={readOnly}
@@ -428,11 +434,15 @@ export const EditableSkuBody = memo(function EditableSkuBody({
 /** Read-only SKU rows for channel-inactive SKUs (sales reference only). */
 export const InactiveSkuBody = memo(function InactiveSkuBody({
   rows,
+  windowStart = 0,
+  windowEnd,
   year,
   currentMonth,
   draftSeed,
 }: {
   rows: SopSkuRow[];
+  windowStart?: number;
+  windowEnd?: number;
   year: number;
   currentMonth: number;
   draftSeed: number;
@@ -443,13 +453,15 @@ export const InactiveSkuBody = memo(function InactiveSkuBody({
     return sumStoredPlanPostTax(rows, month);
   }, [rows, year]);
 
+  const visibleRows = rows.slice(windowStart, windowEnd ?? rows.length);
+
   return (
     <tbody>
-      {rows.map((row, index) => (
+      {visibleRows.map((row, index) => (
         <ForecastRow
           key={`inactive-${draftSeed}-${row.sku_id}`}
           row={row}
-          rowIndex={index}
+          rowIndex={windowStart + index}
           year={year}
           currentMonth={currentMonth}
           readOnly
@@ -471,6 +483,8 @@ export function CombinedSkuBody({
   yearData,
   draftsRef,
   filteredOnlineRows,
+  windowStart = 0,
+  windowEnd,
   focusSku,
   getDrafts,
   onDraft,
@@ -482,6 +496,8 @@ export function CombinedSkuBody({
   yearData: SopYearForecast;
   draftsRef: MutableRefObject<Record<SopChannelGroup, GroupDrafts>>;
   filteredOnlineRows: SopSkuRow[];
+  windowStart?: number;
+  windowEnd?: number;
   focusSku: string;
   getDrafts: (skuId: string, month: number, field: "qty" | "disc") => string;
   onDraft: (
@@ -524,13 +540,15 @@ export function CombinedSkuBody({
     return sumStoredPlanPostTax(rows, month);
   }, [rows, yearData.year]);
 
+  const visibleRows = rows.slice(windowStart, windowEnd ?? rows.length);
+
   return (
     <tbody>
-      {rows.map((row, index) => (
+      {visibleRows.map((row, index) => (
         <ForecastRow
           key={`combined-${draftSeed}-${row.sku_id}`}
           row={row}
-          rowIndex={index}
+          rowIndex={windowStart + index}
           year={yearData.year}
           currentMonth={yearData.current_month}
           readOnly

@@ -10,6 +10,8 @@ import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
 import { deletePoDocuments } from "@/lib/db/po-documents";
 import { buildCommittedPatchFromPayment } from "@/lib/procurement/committed-payment-amounts";
 import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 
 export interface NewPoLineInput {
   sku_id: string;
@@ -817,22 +819,26 @@ export async function listOpenPoBatchesBySkus(
 ): Promise<OpenPoBatch[]> {
   if (skuIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from("purchase_order_lines")
-    .select(
-      "id, sku_id, qty_ordered, qty_received, is_closed, skus!sku_id(sku_code), purchase_orders!inner(id, expected_date, status)",
-    )
-    .in("sku_id", skuIds)
-    .in("purchase_orders.status", [
-      "planned",
-      "ordered",
-      "in_production",
-      "in_transit",
-    ]);
-  if (error) throw error;
+  const lines = await queryInChunks(skuIds, ID_IN_CHUNK, (chunk) =>
+    fetchAllRows<OpenPoLineRow>(
+      () =>
+        supabase
+          .from("purchase_order_lines")
+          .select(
+            "id, sku_id, qty_ordered, qty_received, is_closed, skus!sku_id(sku_code), purchase_orders!inner(id, expected_date, status)",
+          )
+          .in("sku_id", chunk)
+          .in("purchase_orders.status", [
+            "planned",
+            "ordered",
+            "in_production",
+            "in_transit",
+          ]) as never,
+    ),
+  );
 
   const batches: OpenPoBatch[] = [];
-  for (const line of (data ?? []) as unknown as OpenPoLineRow[]) {
+  for (const line of lines) {
     const po = line.purchase_orders;
     if (!po) continue;
     if (line.is_closed) continue;

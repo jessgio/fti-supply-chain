@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import { requireReadRole } from "@/lib/auth";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export async function GET() {
   try {
@@ -9,15 +10,24 @@ export async function GET() {
     if (denied) return denied;
 
     const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from("skus")
-      .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_extract, product_franchises(name)",
-      )
-      .order("sku_code");
-    if (error) throw error;
+    const data = await fetchAllRows<{
+      id: string;
+      sku_code: string;
+      name: string | null;
+      is_bundle: boolean;
+      is_packaging: boolean;
+      is_extract: boolean;
+      product_franchises: unknown;
+    }>(() =>
+      supabase
+        .from("skus")
+        .select(
+          "id, sku_code, name, is_bundle, is_packaging, is_extract, product_franchises(name)",
+        )
+        .order("sku_code"),
+    );
 
-    const skus = (data ?? []).map((row) => {
+    const skus = data.map((row) => {
       const franchise = row.product_franchises as unknown as
         | { name: string }
         | { name: string }[]
