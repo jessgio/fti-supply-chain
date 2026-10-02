@@ -7,30 +7,14 @@ import {
   BarChart3,
   Beaker,
   Boxes,
-  Calculator,
-  FlaskConical,
-  FolderKanban,
+  ChevronDown,
   GanttChart,
   LayoutDashboard,
-  Layers,
-  Lightbulb,
-  CalendarClock,
-  CalendarRange,
-  Crosshair,
-  Target,
-  Link2,
   LogOut,
-  Banknote,
-  FileText,
-  Receipt,
-  MessageSquareText,
   Package,
-  PackageCheck,
   PanelLeft,
   PanelLeftClose,
   ShoppingCart,
-  TestTube2,
-  TrendingUp,
   Truck,
   Upload,
   Users,
@@ -45,227 +29,145 @@ import type { UserRole } from "@/types/database";
 interface NavLink {
   href: string;
   label: string;
-  icon: typeof LayoutDashboard;
+  icon?: typeof LayoutDashboard;
   roles?: UserRole[];
   /** When true, only highlight on exact path match (not sub-routes). */
   exact?: boolean;
+  /** Also highlight on these sections, including sibling routes that do not share href. */
+  activePrefixes?: string[];
 }
 
 interface NavItem extends NavLink {
+  icon: typeof LayoutDashboard;
   children?: NavLink[];
 }
 
+const SUPPLY_CHAIN: UserRole[] = ["admin", "supply_chain"];
+
 const links: NavItem[] = [
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   {
-    href: "/dashboard",
-    label: "Overview",
-    icon: LayoutDashboard,
+    href: "/dashboard/sales",
+    label: "Sales",
+    icon: BarChart3,
     children: [
-      { href: "/dashboard/sales", label: "Sales Growth", icon: BarChart3 },
-      {
-        href: "/dashboard/commercial",
-        label: "Sales & Marketing",
-        icon: TrendingUp,
-      },
+      { href: "/dashboard/commercial", label: "Commercial" },
       {
         href: "/dashboard/sales-forecast",
-        label: "Sales Forecast",
-        icon: Target,
-        roles: ["admin", "supply_chain", "sales_marketing", "viewer"],
-      },
-      {
-        href: "/dashboard/sales-accuracy",
-        label: "Sales Accuracy",
-        icon: Crosshair,
-        roles: ["admin", "supply_chain", "sales_marketing", "viewer"],
+        label: "Forecast",
+        activePrefixes: ["/dashboard/sales-forecast", "/dashboard/sales-accuracy"],
       },
     ],
   },
   {
     href: "/dashboard/inventory",
-    label: "Inventory & Forecast",
+    label: "Inventory",
     icon: Package,
     children: [
       {
-        href: "/dashboard/procurement",
-        label: "Procurement",
-        icon: ShoppingCart,
-        roles: ["admin", "supply_chain"],
+        href: "/dashboard/batches",
+        label: "Stock batches",
+        roles: SUPPLY_CHAIN,
       },
+      { href: "/dashboard/insights", label: "Insights" },
+    ],
+  },
+  {
+    href: "/dashboard/procurement",
+    label: "Procurement",
+    icon: ShoppingCart,
+    roles: SUPPLY_CHAIN,
+    children: [
       {
         href: "/dashboard/po-timeline",
-        label: "PO Timeline",
+        label: "Timeline",
         icon: GanttChart,
         roles: ["admin", "supply_chain", "viewer"],
-      },
-      {
-        href: "/dashboard/timeline-adjustment",
-        label: "Timeline Adjustment",
-        icon: CalendarRange,
-        roles: ["admin", "supply_chain"],
+        activePrefixes: ["/dashboard/po-timeline", "/dashboard/timeline-adjustment"],
       },
       {
         href: "/dashboard/payments",
-        label: "PO Payments",
-        icon: Banknote,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/shipment-payments",
-        label: "Shipment Payments",
-        icon: Receipt,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/shipments",
-        label: "Shipments",
-        icon: Truck,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/inbound",
-        label: "Inbound Receives",
-        icon: PackageCheck,
-        roles: ["admin", "supply_chain"],
+        label: "Payments",
+        roles: SUPPLY_CHAIN,
+        activePrefixes: ["/dashboard/payments", "/dashboard/shipment-payments"],
       },
       {
         href: "/dashboard/status-updates",
-        label: "Status Updates",
-        icon: MessageSquareText,
-        roles: ["admin", "supply_chain"],
+        label: "Status updates",
+        roles: SUPPLY_CHAIN,
+      },
+    ],
+  },
+  {
+    href: "/dashboard/shipments",
+    label: "Shipments",
+    icon: Truck,
+    roles: SUPPLY_CHAIN,
+    children: [
+      {
+        href: "/dashboard/inbound",
+        label: "Inbound receives",
+        roles: SUPPLY_CHAIN,
       },
       {
-        href: "/dashboard/batches",
-        label: "Stock Batches",
-        icon: CalendarClock,
-        roles: ["admin", "supply_chain"],
+        href: "/dashboard/extract-inbound-delivery-notes",
+        label: "Delivery notes",
+        roles: SUPPLY_CHAIN,
+        activePrefixes: [
+          "/dashboard/extract-inbound-delivery-notes",
+          "/dashboard/primary-packaging-delivery-notes",
+          "/dashboard/delivery-notes",
+        ],
       },
+    ],
+  },
+  {
+    href: "/dashboard/mappings",
+    label: "Products",
+    icon: Boxes,
+    children: [
       {
-        href: "/dashboard/extracts",
-        label: "Extracts",
-        icon: FlaskConical,
-        roles: ["admin", "supply_chain"],
-        exact: true,
-      },
-      {
-        href: "/dashboard/extracts/formulas",
-        label: "Extract Formulas",
-        icon: Calculator,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/extracts/calculator",
-        label: "Extract Calculator",
-        icon: Beaker,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/extracts/mappings",
-        label: "Extract Action Codes",
-        icon: Link2,
-        roles: ["admin", "supply_chain"],
+        href: "/dashboard/bundles",
+        label: "Bundles",
+        roles: SUPPLY_CHAIN,
       },
       {
         href: "/dashboard/packaging",
         label: "Packaging",
-        icon: Layers,
-        roles: ["admin", "supply_chain"],
-        exact: true,
+        roles: SUPPLY_CHAIN,
       },
       {
-        href: "/dashboard/packaging/links",
-        label: "Packaging BOM",
-        icon: Link2,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/bundles",
-        label: "Bundle BOM",
-        icon: Boxes,
-        roles: ["admin", "supply_chain"],
+        href: "/dashboard/extracts",
+        label: "Extracts",
+        roles: SUPPLY_CHAIN,
       },
     ],
   },
   {
-    href: "/dashboard/extract-inbound-delivery-notes",
-    label: "Delivery Notes",
-    icon: FileText,
-    roles: ["admin", "supply_chain"],
-    exact: true,
-    children: [
-      {
-        href: "/dashboard/extract-inbound-delivery-notes",
-        label: "Extract Inbound",
-        icon: FlaskConical,
-        roles: ["admin", "supply_chain"],
-        exact: true,
-      },
-      {
-        href: "/dashboard/primary-packaging-delivery-notes",
-        label: "Primary Packaging Inbound",
-        icon: Layers,
-        roles: ["admin", "supply_chain"],
-      },
-      {
-        href: "/dashboard/delivery-notes",
-        label: "Secondary Packaging Inbound",
-        icon: Boxes,
-        roles: ["admin", "supply_chain"],
-      },
-    ],
-  },
-  { href: "/dashboard/insights", label: "Supply Chain Insights", icon: Lightbulb },
-  {
-    href: "/dashboard/product-development",
-    label: "Product Development",
+    href: "/dashboard/product-development/projects",
+    label: "Product development",
     icon: Beaker,
-    roles: ["admin", "supply_chain"],
+    roles: SUPPLY_CHAIN,
+    activePrefixes: ["/dashboard/product-development"],
     children: [
-      {
-        href: "/dashboard/product-development/projects",
-        label: "Projects",
-        icon: FolderKanban,
-        roles: ["admin", "supply_chain"],
-      },
       {
         href: "/dashboard/product-development/formula-tracker",
-        label: "Formula Tracker",
-        icon: TestTube2,
-        roles: ["admin", "supply_chain"],
+        label: "Formula tracker",
+        roles: SUPPLY_CHAIN,
       },
     ],
   },
   {
     href: "/dashboard/uploads",
-    label: "Data Uploads",
+    label: "Data uploads",
     icon: Upload,
-    roles: ["admin", "supply_chain"],
+    roles: SUPPLY_CHAIN,
   },
   {
     href: "/dashboard/lark-users",
     label: "Lark users",
     icon: Users,
     roles: ["admin"],
-  },
-  {
-    href: "/dashboard/mappings",
-    label: "Master Data",
-    icon: Boxes,
-    exact: true,
-    children: [
-      {
-        href: "/dashboard/mappings",
-        label: "SKUs & Franchises",
-        icon: Boxes,
-        exact: true,
-      },
-      {
-        href: "/dashboard/mappings/cogs",
-        label: "COGS",
-        icon: Banknote,
-        roles: ["admin", "supply_chain"],
-      },
-    ],
   },
 ];
 
@@ -276,11 +178,29 @@ const ROLE_LABELS: Record<UserRole, string> = {
   viewer: "Viewer",
 };
 
-function isLinkActive(
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function isHrefActive(
   pathname: string,
   href: string,
   exact?: boolean,
 ): boolean {
+  if (pathname === href) return true;
+  if (exact || href === "/dashboard") return false;
+  return pathname.startsWith(`${href}/`);
+}
+
+function isLinkActive(
+  pathname: string,
+  href: string,
+  exact?: boolean,
+  activePrefixes?: string[],
+): boolean {
+  if (activePrefixes?.some((prefix) => matchesPrefix(pathname, prefix))) {
+    return true;
+  }
   if (pathname === href) return true;
   if (exact || href === "/dashboard") return false;
   return pathname.startsWith(`${href}/`);
@@ -292,9 +212,16 @@ function isChildActive(
 ): boolean {
   return (
     children?.some((child) =>
-      isLinkActive(pathname, child.href, child.exact),
+      isLinkActive(pathname, child.href, child.exact, child.activePrefixes),
     ) ?? false
   );
+}
+
+function roleCanSee(
+  roles: UserRole[] | undefined,
+  role: UserRole | null | undefined,
+): boolean {
+  return !roles || !role || roles.includes(role);
 }
 
 function filterNavItems(
@@ -304,23 +231,44 @@ function filterNavItems(
   const result: NavItem[] = [];
 
   for (const item of items) {
-    const visibleChildren = item.children?.filter(
-      (child) => !child.roles || !role || child.roles.includes(role),
+    const visibleChildren = item.children?.filter((child) =>
+      roleCanSee(child.roles, role),
     );
-    const parentVisible =
-      !item.roles || !role || item.roles.includes(role);
-    if (
-      !parentVisible &&
-      (!visibleChildren || visibleChildren.length === 0)
-    ) {
+    const parentVisible = roleCanSee(item.roles, role);
+    if (!parentVisible && (!visibleChildren || visibleChildren.length === 0)) {
       continue;
     }
+
+    let href = item.href;
+    let label = item.label;
+    let exact = item.exact;
+    let activePrefixes = item.activePrefixes;
+    let icon = item.icon;
+    let children = visibleChildren;
+
+    // A viewer who can open the timeline must not land on procurement itself.
+    if (!parentVisible && children && children.length > 0) {
+      const [first, ...rest] = children;
+      href = first.href;
+      label = first.label;
+      exact = first.exact;
+      activePrefixes = first.activePrefixes;
+      icon = first.icon ?? item.icon;
+      children = rest;
+    }
+
+    if (children && children.length > 0) {
+      children = children.filter((child) => child.href !== href);
+    }
+
     result.push({
       ...item,
-      children:
-        visibleChildren && visibleChildren.length > 0
-          ? visibleChildren
-          : undefined,
+      href,
+      label,
+      exact,
+      activePrefixes,
+      icon,
+      children: children && children.length > 0 ? children : undefined,
     });
   }
 
@@ -343,8 +291,22 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
     number | null
   >(null);
   const unclassifiedCount = cachedUnclassifiedCount ?? fetchedUnclassifiedCount ?? 0;
+  const [pin, setPin] = useState<{ path: string; href: string | null } | null>(
+    null,
+  );
 
   const visibleLinks = filterNavItems(links, role);
+  const activeGroupHref =
+    visibleLinks.find(
+      (item) =>
+        isLinkActive(pathname, item.href, item.exact, item.activePrefixes) ||
+        isChildActive(pathname, item.children),
+    )?.href ?? null;
+  const expandedHref = pin?.path === pathname ? pin.href : activeGroupHref;
+
+  function toggleGroup(href: string) {
+    setPin({ path: pathname, href: expandedHref === href ? null : href });
+  }
 
   useEffect(() => {
     if (readUnclassifiedCountCache() != null) return;
@@ -433,66 +395,114 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
       </div>
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {visibleLinks.map((item) => {
-          const { href, label, icon: Icon, exact, children } = item;
+          const { href, label, icon: Icon, exact, activePrefixes, children } =
+            item;
+          const selfActive = isLinkActive(pathname, href, exact, activePrefixes);
           const childActive = isChildActive(pathname, children);
-          const active =
-            isLinkActive(pathname, href, exact) || childActive;
+          const active = selfActive || childActive;
+          const open =
+            !collapsed && expandedHref === href && Boolean(children?.length);
+          const showUnclassifiedBadge =
+            href === "/dashboard/mappings" && unclassifiedCount > 0;
 
           return (
             <div key={href} className="flex flex-col gap-0.5">
-              <Link
-                href={href}
-                title={collapsed ? label : undefined}
+              <div
                 className={cn(
-                  "flex items-center rounded-lg text-sm font-medium transition-colors",
-                  collapsed
-                    ? "justify-center px-2 py-2.5"
-                    : "gap-3 px-3 py-2.5",
+                  "flex items-stretch rounded-lg transition-colors",
                   active
                     ? "bg-emerald-700 text-white"
                     : "text-stone-700 hover:bg-stone-100",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span className="truncate">{label}</span>}
-              </Link>
-              {!collapsed &&
-                children?.map(
-                  ({ href: childHref, label: childLabel, exact: childExact }) => {
-                    const childIsActive = isLinkActive(
-                      pathname,
-                      childHref,
-                      childExact,
-                    );
-                    const showUnclassifiedBadge =
-                      childHref === "/dashboard/mappings" &&
-                      unclassifiedCount > 0;
-                    return (
-                      <Link
-                        key={childHref}
-                        href={childHref}
-                        className={cn(
-                          "flex items-center rounded-lg py-2 pl-9 pr-3 text-sm transition-colors",
-                          childIsActive
-                            ? "bg-emerald-100 font-medium text-emerald-900"
-                            : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
-                        )}
-                      >
-                        <span className="truncate">{childLabel}</span>
-                        {showUnclassifiedBadge && (
-                          <span
-                            className="ml-auto shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-900"
-                            title={`${unclassifiedCount} SKU${unclassifiedCount === 1 ? "" : "s"} need classification`}
-                          >
-                            {unclassifiedCount > 99
-                              ? "99+"
-                              : unclassifiedCount}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  },
+                <Link
+                  href={href}
+                  title={
+                    collapsed
+                      ? showUnclassifiedBadge
+                        ? `${label} (${unclassifiedCount} unclassified)`
+                        : label
+                      : undefined
+                  }
+                  aria-current={
+                    isHrefActive(pathname, href, exact) ? "page" : undefined
+                  }
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center text-sm font-medium",
+                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+                  )}
+                >
+                  <span className="relative shrink-0">
+                    <Icon className="h-4 w-4" />
+                    {collapsed && showUnclassifiedBadge && (
+                      <span className="absolute -right-1.5 -top-1.5 h-2 w-2 rounded-full bg-amber-400" />
+                    )}
+                  </span>
+                  {!collapsed && <span className="truncate">{label}</span>}
+                  {!collapsed && showUnclassifiedBadge && (
+                    <span
+                      className={cn(
+                        "ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                        active
+                          ? "bg-amber-200 text-amber-950"
+                          : "bg-amber-100 text-amber-900",
+                      )}
+                      title={`${unclassifiedCount} SKU${unclassifiedCount === 1 ? "" : "s"} need classification`}
+                    >
+                      {unclassifiedCount > 99 ? "99+" : unclassifiedCount}
+                    </span>
+                  )}
+                </Link>
+                {!collapsed && children && children.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(href)}
+                    aria-expanded={open}
+                    aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
+                    className={cn(
+                      "shrink-0 rounded-r-lg px-2",
+                      active
+                        ? "text-emerald-100 hover:bg-emerald-800 hover:text-white"
+                        : "text-stone-500 hover:bg-stone-200 hover:text-stone-800",
+                    )}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 transition-transform",
+                        open && "rotate-180",
+                      )}
+                    />
+                  </button>
                 )}
+              </div>
+              {open &&
+                children?.map((child) => {
+                  const childIsActive = isLinkActive(
+                    pathname,
+                    child.href,
+                    child.exact,
+                    child.activePrefixes,
+                  );
+                  return (
+                    <Link
+                      key={child.href}
+                      href={child.href}
+                      aria-current={
+                        isHrefActive(pathname, child.href, child.exact)
+                          ? "page"
+                          : undefined
+                      }
+                      className={cn(
+                        "block truncate rounded-lg py-2 pl-9 pr-3 text-sm transition-colors",
+                        childIsActive
+                          ? "bg-emerald-100 font-medium text-emerald-900"
+                          : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
+                      )}
+                    >
+                      {child.label}
+                    </Link>
+                  );
+                })}
             </div>
           );
         })}
