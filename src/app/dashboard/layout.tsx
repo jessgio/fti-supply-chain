@@ -1,3 +1,4 @@
+import { SectionTabs } from "@/components/dashboard/section-tabs";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { getCurrentProfile } from "@/lib/auth";
@@ -17,7 +18,10 @@ export default async function DashboardLayout({
         email={profile?.email ?? null}
         userId={profile?.id ?? null}
       />
-      <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+      <main className="min-w-0 flex-1 overflow-auto">
+        <SectionTabs role={profile?.role ?? null} />
+        {children}
+      </main>
     </SidebarProvider>
   );
 }
