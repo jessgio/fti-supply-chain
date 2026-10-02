@@ -36,6 +36,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { readUnclassifiedCountCache, writeUnclassifiedCountCache } from "@/lib/skus/unclassified-count-cache";
 import { createClient } from "@/lib/supabase/client";
 import { NotificationBell } from "@/components/dashboard/notification-bell";
 import { useSidebar } from "@/components/dashboard/sidebar-context";
@@ -337,21 +338,27 @@ export function Sidebar({ role, displayName, email, userId }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggleCollapsed } = useSidebar();
-  const [unclassifiedCount, setUnclassifiedCount] = useState(0);
+  const cachedUnclassifiedCount = readUnclassifiedCountCache();
+  const [fetchedUnclassifiedCount, setFetchedUnclassifiedCount] = useState<
+    number | null
+  >(null);
+  const unclassifiedCount = cachedUnclassifiedCount ?? fetchedUnclassifiedCount ?? 0;
 
   const visibleLinks = filterNavItems(links, role);
 
   useEffect(() => {
+    if (readUnclassifiedCountCache() != null) return;
     let cancelled = false;
     fetch("/api/skus?scope=unclassified&count_only=1")
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
         const count = typeof data.count === "number" ? data.count : 0;
-        setUnclassifiedCount(count);
+        writeUnclassifiedCountCache(count);
+        setFetchedUnclassifiedCount(count);
       })
       .catch(() => {
-        if (!cancelled) setUnclassifiedCount(0);
+        if (!cancelled) setFetchedUnclassifiedCount(0);
       });
     return () => {
       cancelled = true;

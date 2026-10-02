@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireWriteRole } from "@/lib/auth";
+import { requireReadRole, requireWriteRole } from "@/lib/auth";
 import { createSku, SkuAlreadyExistsError } from "@/lib/db/skus";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 type SkuScope = "mapped" | "unclassified" | "all";
 
@@ -42,8 +43,14 @@ function mapSkuRow(row: {
   };
 }
 
+const SKU_LIST_SELECT =
+  "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, retail_price, product_franchises(name)";
+
 export async function GET(request: Request) {
   try {
+    const denied = await requireReadRole();
+    if (denied) return denied;
+
     const { searchParams } = new URL(request.url);
     const scopeParam = searchParams.get("scope");
     const scope: SkuScope =
@@ -66,29 +73,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ count: count ?? 0 });
     }
 
-    let query = supabase
-      .from("skus")
-      .select(
-        "id, sku_code, name, is_bundle, is_packaging, is_extract, is_clearance, is_active, franchise_id, retail_price, product_franchises(name)",
-      )
-      .order("sku_code");
+    // PostgREST silently caps a single response at 1000 rows. Page through
+    // the catalog so SKUs past that cap are not dropped from the module.
+    const data = await fetchAllRows<Parameters<typeof mapSkuRow>[0]>(() => {
+      let query = supabase
+        .from("skus")
+        .select(SKU_LIST_SELECT)
+        .order("sku_code");
 
-    if (scope === "mapped") {
-      query = query.or(
-        "franchise_id.not.is.null,is_bundle.eq.true,is_packaging.eq.true,is_extract.eq.true",
-      );
-    } else if (scope === "unclassified") {
-      query = query
-        .eq("is_bundle", false)
-        .eq("is_packaging", false)
-        .eq("is_extract", false)
-        .is("franchise_id", null);
-    }
+      if (scope === "mapped") {
+        query = query.or(
+          "franchise_id.not.is.null,is_bundle.eq.true,is_packaging.eq.true,is_extract.eq.true",
+        );
+      } else if (scope === "unclassified") {
+        query = query
+          .eq("is_bundle", false)
+          .eq("is_packaging", false)
+          .eq("is_extract", false)
+          .is("franchise_id", null);
+      }
 
-    const { data, error } = await query;
-    if (error) throw error;
+      return query;
+    });
 
-    const skus = (data ?? []).map(mapSkuRow);
+    const skus = data.map(mapSkuRow);
     return NextResponse.json({ skus, count: skus.length });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

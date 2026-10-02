@@ -59,8 +59,7 @@ export async function PATCH(request: Request) {
 
     const supabase = createAdminClient();
     await upsertSkuCogs(supabase, updates);
-    const skus = await listSkuCogs(supabase);
-    return NextResponse.json({ skus });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

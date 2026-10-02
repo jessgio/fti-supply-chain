@@ -2,7 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { listProductPackagingLinks } from "@/lib/db/product-packaging";
 import { computePackagingRestockNeed } from "@/lib/packaging/restock-needs";
 import { PACKAGING_STOCK_LOCATIONS } from "@/lib/stock/locations";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { fetchAllRpc, fetchAllRows } from "@/lib/supabase/fetch-all";
+import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 import type {
   ProductLinkedPackagingRow,
   RestockRecommendation,
@@ -36,20 +37,25 @@ export async function loadPackagingByProduct(
   const packagingSkuIds = [...new Set(links.map((l) => l.packaging_sku_id))];
   const stockAsOf = await latestPackagingStockDate(supabase);
 
-  const [stockRows, onOrderRes] = await Promise.all([
+  const [stockRows, onOrderRows] = await Promise.all([
     stockAsOf
-      ? fetchAllRows<{ sku_id: string; qty_on_hand: number }>(() =>
-          supabase
-            .from("stock_levels")
-            .select("sku_id, qty_on_hand")
-            .in("sku_id", packagingSkuIds)
-            .eq("as_of_date", stockAsOf)
-            .in("location", [...PACKAGING_STOCK_LOCATIONS]),
+      ? queryInChunks(packagingSkuIds, ID_IN_CHUNK, (chunk) =>
+          fetchAllRows<{ sku_id: string; qty_on_hand: number }>(() =>
+            supabase
+              .from("stock_levels")
+              .select("sku_id, qty_on_hand")
+              .in("sku_id", chunk)
+              .eq("as_of_date", stockAsOf)
+              .in("location", [...PACKAGING_STOCK_LOCATIONS]),
+          ),
         )
       : Promise.resolve([]),
-    supabase.rpc("get_on_order_qty_by_sku"),
+    fetchAllRpc<{ sku_id: string; on_order_qty: number }>(
+      supabase,
+      "get_on_order_qty_by_sku",
+      {},
+    ),
   ]);
-  if (onOrderRes.error) throw onOrderRes.error;
 
   const stockBySkuId = new Map<string, number>();
   for (const row of stockRows) {
@@ -60,11 +66,8 @@ export async function loadPackagingByProduct(
   }
 
   const onOrderBySkuId = new Map<string, number>();
-  for (const row of onOrderRes.data ?? []) {
-    onOrderBySkuId.set(
-      row.sku_id as string,
-      Number(row.on_order_qty),
-    );
+  for (const row of onOrderRows) {
+    onOrderBySkuId.set(row.sku_id, Number(row.on_order_qty));
   }
 
   const recBySku = new Map(recommendations.map((r) => [r.sku_code, r]));

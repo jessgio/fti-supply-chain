@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { TablePager, usePagedItems } from "@/components/ui/table-pager";
 import { MultiSelect } from "@/components/ui/multi-select";
 import {
   franchisesForRow,
@@ -591,6 +592,33 @@ function SalesForecastClient() {
     );
     return [...rows].sort((a, b) => a.sku_code.localeCompare(b.sku_code));
   }, [inactiveTableRows, tableRows, filterSkuRows]);
+
+  const forecastPage = usePagedItems(
+    filteredRows,
+    [
+      viewMode,
+      workspace,
+      String(year),
+      debouncedSearch,
+      sortKey,
+      sortDir,
+      typeFilter.join(","),
+      npdFilter.join(","),
+      franchiseFilter.join(","),
+    ].join("|"),
+    20,
+  );
+  const inactivePage = usePagedItems(
+    filteredInactiveRows,
+    [
+      workspace,
+      debouncedSearch,
+      typeFilter.join(","),
+      npdFilter.join(","),
+      franchiseFilter.join(","),
+    ].join("|"),
+    20,
+  );
 
   const onDraft = useCallback(
     (skuId: string, month: number, field: "qty" | "disc", value: string) => {
@@ -1518,6 +1546,8 @@ function SalesForecastClient() {
                     yearData={yearData}
                     draftsRef={draftsRef}
                     filteredOnlineRows={filteredRows}
+                    windowStart={forecastPage.start}
+                    windowEnd={forecastPage.start + forecastPage.pageSize}
                     focusSku={focusSku}
                     getDrafts={getDrafts}
                     onDraft={onDraft}
@@ -1528,6 +1558,8 @@ function SalesForecastClient() {
                 ) : (
                   <EditableSkuBody
                     rows={filteredRows}
+                    windowStart={forecastPage.start}
+                    windowEnd={forecastPage.start + forecastPage.pageSize}
                     year={yearData.year}
                     currentMonth={yearData.current_month}
                     readOnly={readOnly}
@@ -1551,6 +1583,18 @@ function SalesForecastClient() {
               </table>
             </div>
           )}
+          {!loading && viewMode === "sku" && filteredRows.length > 0 ? (
+            <div className="px-5 pb-4">
+              <TablePager
+                page={forecastPage.page}
+                pageCount={forecastPage.pageCount}
+                start={forecastPage.start}
+                pageSize={forecastPage.pageSize}
+                total={forecastPage.total}
+                onPageChange={forecastPage.setPage}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1619,11 +1663,23 @@ function SalesForecastClient() {
                 </thead>
                 <InactiveSkuBody
                   rows={filteredInactiveRows}
+                  windowStart={inactivePage.start}
+                  windowEnd={inactivePage.start + inactivePage.pageSize}
                   year={yearData.year}
                   currentMonth={yearData.current_month}
                   draftSeed={draftSeed}
                 />
               </table>
+            </div>
+            <div className="px-5 pb-4">
+              <TablePager
+                page={inactivePage.page}
+                pageCount={inactivePage.pageCount}
+                start={inactivePage.start}
+                pageSize={inactivePage.pageSize}
+                total={inactivePage.total}
+                onPageChange={inactivePage.setPage}
+              />
             </div>
           </CardContent>
         </Card>

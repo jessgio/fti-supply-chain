@@ -9,7 +9,7 @@ import {
 } from "@/lib/forecast/demand";
 import { enrichWithIncomingBatchStockout } from "@/lib/forecast/pipeline-stockout";
 import { applyClearanceToRecommendations } from "@/lib/forecast/stock-status";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { fetchAllRpc, fetchAllRows } from "@/lib/supabase/fetch-all";
 import type { RestockRecommendation } from "@/types/database";
 
 export interface ForecastParams {
@@ -39,12 +39,16 @@ export async function loadRestockRecommendationsUncached(
   const historyDays = params.historyDays ?? 90;
   const ewmaDays = params.ewmaDays ?? 30;
 
-  const [{ data, error }, onOrderRes, skuFlags] = await Promise.all([
-    supabase.rpc("get_sku_forecast_base", {
+  const [data, onOrderRows, skuFlags] = await Promise.all([
+    fetchAllRpc<Record<string, unknown>>(supabase, "get_sku_forecast_base", {
       p_history_days: historyDays,
       p_ewma_days: ewmaDays,
     }),
-    supabase.rpc("get_on_order_qty_by_sku"),
+    fetchAllRpc<{ sku_code: string; on_order_qty: number }>(
+      supabase,
+      "get_on_order_qty_by_sku",
+      {},
+    ),
     fetchAllRows<{
       sku_code: string;
       is_clearance: boolean;
@@ -57,9 +61,6 @@ export async function loadRestockRecommendationsUncached(
         .or("is_clearance.eq.true,is_packaging.eq.true,is_extract.eq.true"),
     ),
   ]);
-  if (error) throw error;
-  if (onOrderRes.error) throw onOrderRes.error;
-
   const supplementaryCodes = new Set<string>();
   const clearanceCodes: string[] = [];
   for (const row of skuFlags) {
@@ -69,7 +70,7 @@ export async function loadRestockRecommendationsUncached(
     if (row.is_clearance) clearanceCodes.push(row.sku_code);
   }
 
-  const inputs: SkuForecastInput[] = (data ?? [])
+  const inputs: SkuForecastInput[] = data
     .map((row: Record<string, unknown>) => ({
       sku_code: String(row.sku_code),
       franchise_name: row.franchise_name ? String(row.franchise_name) : null,
@@ -87,7 +88,7 @@ export async function loadRestockRecommendationsUncached(
     .filter((row: SkuForecastInput) => !supplementaryCodes.has(row.sku_code));
 
   const onOrderBySku = new Map<string, number>();
-  for (const row of (onOrderRes.data ?? []) as Record<string, unknown>[]) {
+  for (const row of onOrderRows) {
     onOrderBySku.set(String(row.sku_code), Number(row.on_order_qty));
   }
 

@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TablePager, usePagedItems } from "@/components/ui/table-pager";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { matchesSkuSearchOption } from "@/components/packaging/sku-search-input";
@@ -152,6 +153,11 @@ export default function PackagingPage() {
       return matchesSkuSearchOption(sku, q);
     });
   }, [toggleSkus, search, packagingFilter]);
+
+  const togglePage = usePagedItems(
+    filteredToggleSkus,
+    `${search}|${packagingFilter}`,
+  );
 
   const packagingCount = toggleSkus.filter((s) => s.is_packaging).length;
 
@@ -593,7 +599,7 @@ export default function PackagingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredToggleSkus.map((sku) => (
+                  {togglePage.slice.map((sku) => (
                     <tr
                       key={sku.id}
                       className="border-b border-stone-100 last:border-0"
@@ -651,6 +657,16 @@ export default function PackagingPage() {
               </table>
             </div>
           )}
+          {!toggleLoading && filteredToggleSkus.length > 0 ? (
+            <TablePager
+              page={togglePage.page}
+              pageCount={togglePage.pageCount}
+              start={togglePage.start}
+              pageSize={togglePage.pageSize}
+              total={togglePage.total}
+              onPageChange={togglePage.setPage}
+            />
+          ) : null}
         </CardContent>
       </Card>
     </PageShell>

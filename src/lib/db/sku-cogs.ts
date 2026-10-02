@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SkuCogsRow } from "@/types/database";
-import { updateSku } from "@/lib/db/skus";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export type { SkuCogsRow };
 
@@ -37,22 +37,45 @@ const SELECT =
 export async function listSkuCogs(
   supabase: SupabaseClient,
 ): Promise<SkuCogsRow[]> {
-  const { data, error } = await supabase
-    .from("skus")
-    .select(SELECT)
-    .eq("is_bundle", false)
-    .not("franchise_id", "is", null)
-    .order("sku_code");
-  if (error) throw error;
-  return ((data ?? []) as unknown as SkuRow[]).map(mapRow);
+  const rows = await fetchAllRows<SkuRow>(() =>
+    supabase
+      .from("skus")
+      .select(SELECT)
+      .eq("is_bundle", false)
+      .not("franchise_id", "is", null)
+      .order("sku_code"),
+  );
+  return rows.map(mapRow);
 }
+
+const COGS_WRITE_CONCURRENCY = 20;
 
 export async function upsertSkuCogs(
   supabase: SupabaseClient,
   updates: { sku_id: string; unit_cogs: number | null }[],
 ): Promise<void> {
   for (const update of updates) {
-    await updateSku(supabase, update.sku_id, { unit_cogs: update.unit_cogs });
+    if (
+      update.unit_cogs != null &&
+      (!Number.isFinite(update.unit_cogs) || update.unit_cogs < 0)
+    ) {
+      throw new Error("Unit COGS cannot be negative.");
+    }
+  }
+
+  for (let i = 0; i < updates.length; i += COGS_WRITE_CONCURRENCY) {
+    const chunk = updates.slice(i, i + COGS_WRITE_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map((update) =>
+        supabase
+          .from("skus")
+          .update({ unit_cogs: update.unit_cogs })
+          .eq("id", update.sku_id),
+      ),
+    );
+    for (const { error } of results) {
+      if (error) throw error;
+    }
   }
 }
 

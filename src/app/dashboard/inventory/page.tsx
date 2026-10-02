@@ -18,6 +18,7 @@ import {
   Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TablePager, usePagedItems } from "@/components/ui/table-pager";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -593,6 +594,15 @@ export default function InventoryPage() {
     sortDir,
   ]);
 
+  const forecastPage = usePagedItems(
+    filtered,
+    `${search}|${needsActionOnly}|${sortKey}|${sortDir}|${columnFilters.status.join()}|${columnFilters.velocity.join()}|${columnFilters.pattern.join()}|${columnFilters.confidence.join()}|${columnFilters.extra.join()}|${columnFilters.franchise}`,
+  );
+  const npdPage = usePagedItems(
+    npdSkus,
+    `${npdSkus.length}|${npdSkus[0]?.sku_code ?? ""}|${npdSkus.at(-1)?.sku_code ?? ""}`,
+  );
+
   const hasColumnFilters =
     columnFilters.status.length > 0 ||
     columnFilters.velocity.length > 0 ||
@@ -975,7 +985,7 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
               <tbody>
-                {filtered.map((row) => {
+                {forecastPage.slice.map((row) => {
                   const risk = riskOf(row);
                   const badge = RISK_BADGE[risk];
                   const packagingLinks = packagingByProduct[row.sku_code] ?? [];
@@ -1222,6 +1232,18 @@ export default function InventoryPage() {
               </table>
             </div>
           )}
+          {!loading && filtered.length > 0 ? (
+            <div className="px-5 pb-4">
+              <TablePager
+                page={forecastPage.page}
+                pageCount={forecastPage.pageCount}
+                start={forecastPage.start}
+                pageSize={forecastPage.pageSize}
+                total={forecastPage.total}
+                onPageChange={forecastPage.setPage}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1260,7 +1282,7 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {npdSkus.map((row) => (
+                  {npdPage.slice.map((row) => (
                     <tr
                       key={row.sku_code}
                       className="border-b border-stone-100 last:border-0"
@@ -1289,6 +1311,16 @@ export default function InventoryPage() {
               </table>
             </div>
           )}
+          {!loading && npdSkus.length > 0 ? (
+            <TablePager
+              page={npdPage.page}
+              pageCount={npdPage.pageCount}
+              start={npdPage.start}
+              pageSize={npdPage.pageSize}
+              total={npdPage.total}
+              onPageChange={npdPage.setPage}
+            />
+          ) : null}
         </CardContent>
       </Card>
       </div>
