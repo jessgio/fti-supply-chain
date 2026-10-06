@@ -3,8 +3,12 @@ import type { SalesRow } from "@/types/database";
 
 export type SalesImportMode = "incremental" | "full";
 
-/** Rolling upload window: current month plus the two prior calendar months. */
-export const SALES_UPLOAD_MONTHS = 3;
+/**
+ * Rolling upload window: the current month plus the four prior calendar months.
+ * A June–October file uploaded in October must keep July; a 3-month window
+ * (August–October) dropped June and July on the way in.
+ */
+export const SALES_UPLOAD_MONTHS = 5;
 
 export function getSalesUploadCutoff(referenceDate = new Date()): string {
   const currentMonthStart = startOfMonth(referenceDate);
