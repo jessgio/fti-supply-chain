@@ -7,6 +7,10 @@ import {
   SALES_UPLOAD_MONTHS,
   type SalesImportMode,
 } from "@/lib/sales/upload-window";
+import {
+  remapSkuIdsToCanonical,
+  sumStockQtyBySkuLocationDate,
+} from "@/lib/skus/alias-resolve";
 import { slugify } from "@/lib/utils";
 import type { BundleComponent, MappingRow, SalesRow, StockRow } from "@/types/database";
 
@@ -138,6 +142,29 @@ async function ensureSkuIdsInCache(
       cache.set(row.sku_code, row.id);
     }
   }
+
+  await remapCachedSkuIdsToCanonical(supabase, cache);
+}
+
+async function remapCachedSkuIdsToCanonical(
+  supabase: SupabaseClient,
+  cache: Map<string, string>,
+): Promise<void> {
+  const ids = [...new Set(cache.values())];
+  if (ids.length === 0) return;
+
+  const aliases: { alias_sku_id: string; canonical_sku_id: string }[] = [];
+  for (let i = 0; i < ids.length; i += SKU_LOOKUP_CHUNK) {
+    const chunk = ids.slice(i, i + SKU_LOOKUP_CHUNK);
+    const { data, error } = await supabase
+      .from("sku_aliases")
+      .select("alias_sku_id, canonical_sku_id")
+      .in("alias_sku_id", chunk);
+    if (error) throw error;
+    aliases.push(...(data ?? []));
+  }
+
+  remapSkuIdsToCanonical(cache, aliases);
 }
 
 export async function importMappings(
@@ -565,44 +592,30 @@ export async function importStock(
     aggregated.map((row) => row.sku_code),
   );
 
-  const chunkSize = 2000;
-  let chunk: {
-    sku_id: string;
-    location: string;
-    qty_on_hand: number;
-    as_of_date: string;
-    upload_batch_id: string;
-  }[] = [];
-
-  async function flushChunk() {
-    if (chunk.length === 0) return;
-    const { error } = await supabase.from("stock_levels").upsert(chunk, {
-      onConflict: "sku_id,location,as_of_date",
-    });
-    if (error) throw error;
-    chunk = [];
-  }
-
-  for (const row of aggregated) {
+  const resolved = aggregated.map((row) => {
     const skuId = skuCache.get(row.sku_code);
     if (!skuId) {
       throw new Error(`SKU not found after import: ${row.sku_code}`);
     }
-
-    chunk.push({
+    return {
       sku_id: skuId,
       location: row.location,
       qty_on_hand: row.qty_on_hand,
       as_of_date: row.as_of_date,
       upload_batch_id: batch.id,
-    });
+    };
+  });
+  const collapsed = sumStockQtyBySkuLocationDate(resolved);
 
-    if (chunk.length >= chunkSize) {
-      await flushChunk();
-    }
+  const chunkSize = 2000;
+  for (let i = 0; i < collapsed.length; i += chunkSize) {
+    const { error } = await supabase
+      .from("stock_levels")
+      .upsert(collapsed.slice(i, i + chunkSize), {
+        onConflict: "sku_id,location,as_of_date",
+      });
+    if (error) throw error;
   }
-
-  await flushChunk();
 
   return { batchId: batch.id, rowCount: aggregated.length };
 }

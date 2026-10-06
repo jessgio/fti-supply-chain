@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { TablePager, usePagedItems } from "@/components/ui/table-pager";
+import { SkuAliasCard } from "@/components/dashboard/sku-alias-card";
 import { writeUnclassifiedCountCache } from "@/lib/skus/unclassified-count-cache";
 import { cn } from "@/lib/utils";
 
@@ -821,7 +822,8 @@ export default function MappingsPage() {
           Unmapped codes from sales/stock uploads appear under Needs
           classification. Mark retired SKUs as inactive to keep them in
           historical sales without showing them in the inventory forecast. Set
-          unit costs from{" "}
+          a pre-order code as an alias of the regular SKU when they are the same
+          product. Set unit costs from{" "}
           <Link
             href="/dashboard/mappings/cogs"
             className="font-medium text-emerald-700 hover:text-emerald-800"
@@ -951,6 +953,8 @@ export default function MappingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <SkuAliasCard />
 
       <Card>
         <CardHeader>

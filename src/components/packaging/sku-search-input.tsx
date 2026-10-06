@@ -36,6 +36,7 @@ interface SkuSearchInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  id?: string;
   /** Minimum typed characters before showing matches. Default 1. */
   minQueryLength?: number;
   /** Max dropdown rows. Default 50. */
@@ -109,6 +110,7 @@ export function SkuSearchInput({
   placeholder = "Search SKU, name, or franchise…",
   disabled = false,
   className,
+  id,
   minQueryLength = DEFAULT_MIN_QUERY_LENGTH,
   maxResults = DEFAULT_MAX_RESULTS,
 }: SkuSearchInputProps) {
@@ -192,6 +194,7 @@ export function SkuSearchInput({
     <div ref={rootRef} className={cn("relative", className)}>
       <textarea
         ref={textareaRef}
+        id={id}
         rows={1}
         value={query}
         disabled={disabled}

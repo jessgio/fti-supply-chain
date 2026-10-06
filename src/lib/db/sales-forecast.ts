@@ -24,6 +24,7 @@ import {
   rspByMonthForYear,
   type SkuPriceHistoryRow,
 } from "@/lib/db/sku-retail-prices";
+import { listAliasSkuIds } from "@/lib/db/sku-aliases";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { listForecastPendingSkus } from "@/lib/db/sales-forecast-pending";
 import { isForecastDefectSku } from "@/lib/sales-forecast/resolve-csv-skus";
@@ -112,20 +113,23 @@ export async function saveChannelGroups(
 export async function listEligibleSkus(
   supabase: SupabaseClient,
 ): Promise<EligibleSku[]> {
-  const rows = await fetchAllRows<ForecastSkuRow>(() =>
-    supabase
-      .from("skus")
-      .select(FORECAST_SKU_SELECT)
-      .eq("is_active", true)
-      .eq("is_packaging", false)
-      .eq("is_extract", false)
-      .or("is_bundle.eq.true,franchise_id.not.is.null")
-      .order("sku_code"),
-  );
+  const [rows, aliasIds] = await Promise.all([
+    fetchAllRows<ForecastSkuRow>(() =>
+      supabase
+        .from("skus")
+        .select(FORECAST_SKU_SELECT)
+        .eq("is_active", true)
+        .eq("is_packaging", false)
+        .eq("is_extract", false)
+        .or("is_bundle.eq.true,franchise_id.not.is.null")
+        .order("sku_code"),
+    ),
+    listAliasSkuIds(supabase),
+  ]);
 
   return rows
     .map(mapEligibleSku)
-    .filter((row): row is EligibleSku => row != null);
+    .filter((row): row is EligibleSku => row != null && !aliasIds.has(row.id));
 }
 
 const ID_CHUNK = 100;
@@ -137,18 +141,24 @@ export async function listSellableSkusByIds(
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return [];
 
-  const rows: ForecastSkuRow[] = [];
-  for (let i = 0; i < unique.length; i += ID_CHUNK) {
-    const chunk = unique.slice(i, i + ID_CHUNK);
-    const page = await fetchAllRows<ForecastSkuRow>(() =>
-      supabase.from("skus").select(FORECAST_SKU_SELECT).in("id", chunk),
-    );
-    rows.push(...page);
-  }
+  const [rows, aliasIds] = await Promise.all([
+    (async () => {
+      const loaded: ForecastSkuRow[] = [];
+      for (let i = 0; i < unique.length; i += ID_CHUNK) {
+        const chunk = unique.slice(i, i + ID_CHUNK);
+        const page = await fetchAllRows<ForecastSkuRow>(() =>
+          supabase.from("skus").select(FORECAST_SKU_SELECT).in("id", chunk),
+        );
+        loaded.push(...page);
+      }
+      return loaded;
+    })(),
+    listAliasSkuIds(supabase),
+  ]);
 
   return rows
     .map(mapEligibleSku)
-    .filter((row): row is EligibleSku => row != null);
+    .filter((row): row is EligibleSku => row != null && !aliasIds.has(row.id));
 }
 
 async function loadStockBySkuId(
