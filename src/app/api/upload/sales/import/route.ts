@@ -34,7 +34,7 @@ const processFileSchema = z.object({
   phase: z.literal("process"),
   storagePath: z.string().min(1),
   filename: z.string().min(1),
-  /** Replace every sale_date in the file (signed qty / returns). Default: last 3 months only. */
+  /** Replace every sale_date in the file (signed qty / returns). Default: last 5 months only. */
   fullReprocess: z.boolean().optional(),
 });
 

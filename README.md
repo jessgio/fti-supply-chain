@@ -58,7 +58,7 @@ Supply chain and sales intelligence platform for **From This Island**. Upload Ex
 ## Recommended data flow
 
 1. Upload **Franchise & bundle mappings** (`/dashboard/uploads`)
-2. Upload **Sales transactions** (last 3 calendar months only; older data is preserved and overlapping dates are replaced)
+2. Upload **Sales transactions** (last 5 calendar months only; older data is preserved and overlapping dates are replaced)
 3. Upload **Stock levels**
 4. Review **Sales Growth** and **Inventory & Forecast** dashboards
 
@@ -68,9 +68,9 @@ Supply chain and sales intelligence platform for **From This Island**. Upload Ex
 
 Sheet `Data1`. Every row is imported except `CANCELED` orders. QTY and Nett Sales are taken from the file with their sign preserved: sales (`FAKTUR`) stay positive and returns (`Tipe Transaksi` = `RETUR`, already negative in the export) stay negative, so a returned order's invoice and its return net out without any sign-flipping.
 
-Re-upload only the **last 3 calendar months** (current month plus the two prior). Rows older than that window are ignored. Existing records for the same date range are removed before import so duplicates are replaced; sales before the window are kept.
+Re-upload only the **last 5 calendar months** (current month plus the four prior). In October that is June through October, so July is not dropped. Rows older than that window are ignored. Existing records for the same date range are removed before import so duplicates are replaced; sales before the window are kept.
 
-For a **full historical reprocess** (e.g. after return-qty import fixes), check **Full reprocess** on the sales upload card or run `npx tsx scripts/reprocess-all-sales.ts path/to/FTI\ Sales.xlsx`. That replaces every `sale_date` present in the WMS file, not just the rolling 3-month window.
+For a **full historical reprocess** (e.g. after return-qty import fixes), check **Full reprocess** on the sales upload card or run `npx tsx scripts/reprocess-all-sales.ts path/to/FTI\ Sales.xlsx`. That replaces every `sale_date` present in the WMS file, not just the rolling 5-month window.
 
 | WMS column | Maps to |
 |------------|---------|

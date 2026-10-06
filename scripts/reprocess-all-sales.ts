@@ -1,6 +1,6 @@
 /**
  * Full sales reprocess: re-parse a WMS export with signed RETURNED qty and
- * replace every sale_date present in the file (not just the last 3 months).
+ * replace every sale_date present in the file (not just the rolling upload window).
  *
  * Usage:
  *   npx tsx scripts/reprocess-all-sales.ts path/to/FTI\ Sales.xlsx
