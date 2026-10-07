@@ -498,6 +498,13 @@ export async function deleteSku(
   if (poError) throw poError;
   if ((poCount ?? 0) > 0) blockers.push("purchase orders");
 
+  const { count: aliasTargetCount, error: aliasTargetError } = await supabase
+    .from("sku_aliases")
+    .select("alias_sku_id", { count: "exact", head: true })
+    .eq("canonical_sku_id", id);
+  if (aliasTargetError) throw aliasTargetError;
+  if ((aliasTargetCount ?? 0) > 0) blockers.push("SKU aliases");
+
   if (blockers.length > 0) {
     throw new Error(
       `Cannot delete ${existing.sku_code} because it is linked to ${blockers.join(
