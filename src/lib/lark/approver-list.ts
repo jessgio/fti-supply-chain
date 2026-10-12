@@ -5,6 +5,18 @@ export type ApproverListEntry = {
   is_default_approver?: boolean;
 };
 
+/**
+ * The Lark users "Default AP" checkbox is the only switch for pre-selecting
+ * an approver. Open ids in LARK_DEFAULT_APPROVER_OPEN_ID are ignored, so
+ * unchecking someone in the directory is not overwritten on the AP form.
+ */
+export function isDirectoryDefaultApprover(
+  row: { is_default_approver?: boolean },
+  _envDefaultOpenIds: readonly string[] = [],
+): boolean {
+  return !!row.is_default_approver;
+}
+
 function compareAlphabetically(
   a: ApproverListEntry,
   b: ApproverListEntry,

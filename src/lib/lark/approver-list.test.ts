@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { orderApproversForForm, type ApproverListEntry } from "./approver-list";
+import {
+  isDirectoryDefaultApprover,
+  orderApproversForForm,
+  type ApproverListEntry,
+} from "./approver-list";
 
 function person(
   name: string,
@@ -51,6 +55,24 @@ test("rechecking a default moves them back to the top", () => {
   assert.deepEqual(
     rechecked.map((c) => c.full_name),
     ["Zoe Default", "Alex", "Bea Default", "Cara"],
+  );
+});
+
+test("an env open id does not keep an unchecked directory row as a default", () => {
+  const openId = "ou_unchecked";
+  assert.equal(
+    isDirectoryDefaultApprover(
+      { is_default_approver: false },
+      [openId],
+    ),
+    false,
+  );
+  assert.equal(
+    isDirectoryDefaultApprover(
+      { is_default_approver: true },
+      [],
+    ),
+    true,
   );
 });
 
