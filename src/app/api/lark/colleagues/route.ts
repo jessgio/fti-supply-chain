@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireReadRole, getCurrentProfile } from "@/lib/auth";
+import { isDirectoryDefaultApprover } from "@/lib/lark/approver-list";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type DirectoryRow = {
@@ -62,20 +63,9 @@ function dedupeByOpenId(rows: DirectoryRow[]): DirectoryRow[] {
   });
 }
 
-function envDefaultOpenIds(): string[] {
-  const fromList = (process.env.LARK_DEFAULT_APPROVER_OPEN_IDS ?? "")
-    .split(/[,\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => /^ou_[a-zA-Z0-9]+$/.test(s));
-  const single = process.env.LARK_DEFAULT_APPROVER_OPEN_ID?.trim() ?? "";
-  if (single && /^ou_[a-zA-Z0-9]+$/.test(single)) {
-    fromList.push(single);
-  }
-  return [...new Set(fromList)];
-}
-
 /**
  * Current user (submitter) + deduped Lark directory for approver multi-select.
+ * Default approvers come only from the Lark users Default AP checkbox.
  */
 export async function GET() {
   const denied = await requireReadRole();
@@ -108,15 +98,13 @@ export async function GET() {
   }
 
   const deduped = dedupeByOpenId((directory ?? []) as DirectoryRow[]);
-  const envDefaults = envDefaultOpenIds();
 
   const colleagues = deduped.map((row) => ({
     id: row.lark_open_id,
     email: row.email,
     full_name: row.display_name || null,
     lark_open_id: row.lark_open_id,
-    is_default_approver:
-      row.is_default_approver || envDefaults.includes(row.lark_open_id),
+    is_default_approver: isDirectoryDefaultApprover(row),
   }));
 
   const defaultApproverOpenIds = [
