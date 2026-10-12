@@ -28,6 +28,7 @@ import {
   defaultTaxApPaymentPlanRows,
   type ShipmentApInvoiceKind,
 } from "@/lib/lark/shipment-ap";
+import { orderApproversForForm } from "@/lib/lark/approver-list";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { readApiJson } from "@/lib/http";
 import { uploadToSignedDataUploads } from "@/lib/storage/browser-upload";
@@ -179,13 +180,15 @@ export function ShipmentApRequestForm({
   );
   const filteredApprovers = useMemo(() => {
     const q = approverQuery.trim().toLowerCase();
-    if (!q) return selectableApprovers;
-    return selectableApprovers.filter((c) => {
-      const name = (c.full_name ?? "").toLowerCase();
-      const email = c.email.toLowerCase();
-      return name.includes(q) || email.includes(q);
-    });
-  }, [approverQuery, selectableApprovers]);
+    const matched = !q
+      ? selectableApprovers
+      : selectableApprovers.filter((c) => {
+          const name = (c.full_name ?? "").toLowerCase();
+          const email = c.email.toLowerCase();
+          return name.includes(q) || email.includes(q);
+        });
+    return orderApproversForForm(matched, selectedApproverIds);
+  }, [approverQuery, selectableApprovers, selectedApproverIds]);
 
   useEffect(() => {
     if (showSubmitForm) void loadPeople();
