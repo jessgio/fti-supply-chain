@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireWriteRole } from "@/lib/auth";
 import {
-  isApFormCurrency,
   isApPaymentPlanScope,
   isLarkApprovalStatus,
-  localTodayYmd,
   submittedAmountFromLarkForm,
   type ApPaymentPlanScope,
 } from "@/lib/lark/ap-form";
-import {
-  buildCommittedPatchFromAp,
-} from "@/lib/procurement/committed-payment-amounts";
 import {
   getApprovalInstanceDetails,
   resolveApprovalInstance,
@@ -154,25 +149,6 @@ export async function POST(
             remarks: row.remarks,
           }))
         : null;
-    const freezeRows =
-      planRows.length > 0
-        ? planRows
-        : fromLark
-          ? [
-              {
-                dateYmd: localTodayYmd(),
-                amount: fromLark.amount,
-                currency: isApFormCurrency(fromLark.currency)
-                  ? fromLark.currency
-                  : "IDR",
-                remarks: "",
-              },
-            ]
-          : [];
-    const committedPatch =
-      freezeRows.length > 0
-        ? buildCommittedPatchFromAp(po, paymentScope, freezeRows)
-        : null;
 
     const { data: inserted, error: insertErr } = await supabase
       .from("purchase_order_lark_submissions")
@@ -222,7 +198,6 @@ export async function POST(
         lark_approval_status: approvalStatus,
         lark_status_synced_at: syncedAt,
         lark_submitted_at: syncedAt,
-        ...(committedPatch ?? {}),
       })
       .eq("id", po.id);
 

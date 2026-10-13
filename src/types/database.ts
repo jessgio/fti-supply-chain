@@ -651,8 +651,9 @@ export interface PurchaseOrder {
   currency: string;
   notes: string | null;
   /**
-   * Frozen payment schedule after AP Form submit and/or first logged payment.
-   * Expected DP/balance and PDF payment section use these instead of live lines.
+   * Down-payment amount locked after a payment is logged.
+   * While the PO has no payments, the invoice summary follows down_payment_pct
+   * and these columns are ignored.
    */
   committed_invoice_total?: number | null;
   committed_down_payment?: number | null;

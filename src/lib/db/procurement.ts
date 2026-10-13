@@ -8,7 +8,10 @@ import type {
 } from "@/types/database";
 import { recalculatePoStatus } from "@/lib/db/po-lifecycle";
 import { deletePoDocuments } from "@/lib/db/po-documents";
-import { buildCommittedPatchFromPayment } from "@/lib/procurement/committed-payment-amounts";
+import {
+  buildCommittedPatchFromPayment,
+  CLEARED_COMMITTED_PAYMENT_AMOUNTS,
+} from "@/lib/procurement/committed-payment-amounts";
 import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
@@ -349,12 +352,17 @@ function mapPoRow(row: PoRow): PurchaseOrder {
       })),
     }),
   );
-  const payments = (row.po_payments ?? [])
-    .map((p) => ({
-      ...mapPoPayment(p),
-      po_id: row.id,
-    }))
-    .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
+  // A missing key means payments were not queried. Null or [] means they
+  // were queried and none exist — the invoice schedule must tell those apart.
+  const payments =
+    row.po_payments === undefined
+      ? undefined
+      : (row.po_payments ?? [])
+          .map((p) => ({
+            ...mapPoPayment(p),
+            po_id: row.id,
+          }))
+          .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
   const pdProject = Array.isArray(row.pd_projects)
     ? (row.pd_projects[0] ?? null)
     : row.pd_projects;
@@ -683,6 +691,15 @@ export async function updatePurchaseOrder(
     await recalculatePoStatus(supabase, id);
   }
 
+  if (
+    existing.committed_down_payment != null ||
+    existing.committed_balance != null ||
+    existing.committed_invoice_total != null ||
+    existing.payment_amounts_committed_at != null
+  ) {
+    await releaseCommittedPaymentAmountsIfUnpaid(supabase, id);
+  }
+
   const updated = await getPurchaseOrder(supabase, id);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
@@ -949,6 +966,12 @@ export async function createPoPayment(
   if (poMetaErr) throw poMetaErr;
   if (!poMeta) throw new Error("Purchase order not found.");
 
+  const { count: priorPaymentCount, error: priorPaymentErr } = await supabase
+    .from("po_payments")
+    .select("id", { count: "exact", head: true })
+    .eq("po_id", poId);
+  if (priorPaymentErr) throw priorPaymentErr;
+
   const currency = input.currency ?? poMeta.currency ?? "IDR";
   const exchangeRate =
     currency === "IDR" ? null : (input.exchange_rate ?? null);
@@ -987,6 +1010,8 @@ export async function createPoPayment(
       fullPo,
       input.purpose.trim(),
       input.amount,
+      new Date().toISOString(),
+      { replaceExisting: (priorPaymentCount ?? 0) === 0 },
     );
     if (committedPatch) {
       const { error: commitErr } = await supabase
@@ -1105,9 +1130,28 @@ export async function deletePoPayment(
     .eq("po_id", poId);
   if (error) throw error;
 
+  await releaseCommittedPaymentAmountsIfUnpaid(supabase, poId);
   await recalculatePoStatus(supabase, poId);
 
   const updated = await getPurchaseOrder(supabase, poId);
   if (!updated) throw new Error("Purchase order not found.");
   return updated;
+}
+
+async function releaseCommittedPaymentAmountsIfUnpaid(
+  supabase: SupabaseClient,
+  poId: string,
+): Promise<void> {
+  const { count, error } = await supabase
+    .from("po_payments")
+    .select("id", { count: "exact", head: true })
+    .eq("po_id", poId);
+  if (error) throw error;
+  if ((count ?? 0) > 0) return;
+
+  const { error: clearErr } = await supabase
+    .from("purchase_orders")
+    .update(CLEARED_COMMITTED_PAYMENT_AMOUNTS)
+    .eq("id", poId);
+  if (clearErr) throw clearErr;
 }
