@@ -1,4 +1,3 @@
-import type { ApPaymentPlanScope } from "@/lib/lark/ap-form";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 import type { PurchaseOrder } from "@/types/database";
 
@@ -10,11 +9,11 @@ export type CommittedPaymentSchedule = {
   downPayment: number;
   balance: number;
   invoiceTotal: number;
-  /** Share of the live invoice total represented by the (possibly locked) down payment. */
+  /** Share of the live invoice total represented by the down payment. */
   downPaymentPct: number;
   /** Share of the live invoice total remaining after the down payment. */
   finalPaymentPct: number;
-  /** True when at least one committed amount is stored on the PO. */
+  /** True when a logged payment is holding the down-payment amount fixed. */
   isCommitted: boolean;
 };
 
@@ -52,6 +51,12 @@ export function finalPaymentLabel(pct: number): string {
   return `Final payment (${formatPaymentPct(pct)}%)`;
 }
 
+export type SchedulePaymentRef = {
+  purpose: string;
+  amount: number;
+  currency?: string | null;
+};
+
 type PoWithCommitted = Pick<
   PurchaseOrder,
   | "lines"
@@ -66,7 +71,37 @@ type PoWithCommitted = Pick<
   | "payment_amounts_committed_at"
 > & {
   status?: PurchaseOrder["status"];
+  /**
+   * Loaded payments. An empty list means none are logged, so the schedule
+   * follows `down_payment_pct`. Omit the field when payments were not queried.
+   */
+  payments?: SchedulePaymentRef[] | null;
 };
+
+/** Nulls written when a PO has no payments left to lock the schedule. */
+export const CLEARED_COMMITTED_PAYMENT_AMOUNTS = {
+  committed_invoice_total: null,
+  committed_down_payment: null,
+  committed_balance: null,
+  payment_amounts_committed_at: null,
+} as const;
+
+function liveSchedule(
+  live: ReturnType<typeof computePoInvoiceTotals>,
+): CommittedPaymentSchedule {
+  return {
+    downPayment: live.downPayment,
+    balance: live.finalPayment,
+    invoiceTotal: live.invoiceTotal,
+    downPaymentPct: live.downPaymentPct,
+    finalPaymentPct: Math.max(0, 100 - live.downPaymentPct),
+    isCommitted: false,
+  };
+}
+
+function hasLoggedPayment(payments: SchedulePaymentRef[]): boolean {
+  return payments.some((payment) => Number(payment.amount) > 0);
+}
 
 export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
   return round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
@@ -75,15 +110,22 @@ export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
 /**
  * Payment schedule for PDF / expectations / remaining balance.
  *
- * Invoice total always follows live lines and charges. Once a down payment has
- * been logged (or frozen on the PO), that exact amount is kept even if qty or
- * price later change. The remaining balance is live invoice minus that down
- * payment. Percentages are always derived from those amounts vs the new total.
+ * Invoice total always follows live lines and charges. Until a payment is
+ * logged, the down payment is `down_payment_pct` of that total. A stored
+ * committed amount is ignored in that case, including one left behind by an
+ * AP filing or a payment that was later removed. Once a payment is logged,
+ * that down-payment amount stays fixed even if qty, price, or the percentage
+ * later change, and the label is that amount's share of the current invoice.
+ * The balance is the live invoice minus the down payment.
  */
 export function resolvePaymentSchedule(
   po: PoWithCommitted,
 ): CommittedPaymentSchedule {
   const live = computePoInvoiceTotals(po);
+  if (po.payments != null && !hasLoggedPayment(po.payments)) {
+    return liveSchedule(live);
+  }
+
   const hasCommitted =
     po.committed_down_payment != null ||
     po.committed_balance != null ||
@@ -91,14 +133,7 @@ export function resolvePaymentSchedule(
     po.payment_amounts_committed_at != null;
 
   if (!hasCommitted) {
-    return {
-      downPayment: live.downPayment,
-      balance: live.finalPayment,
-      invoiceTotal: live.invoiceTotal,
-      downPaymentPct: live.downPaymentPct,
-      finalPaymentPct: Math.max(0, 100 - live.downPaymentPct),
-      isCommitted: false,
-    };
+    return liveSchedule(live);
   }
 
   const downPayment =
@@ -129,103 +164,23 @@ export type CommittedAmountsPatch = {
   payment_amounts_committed_at: string;
 };
 
-function splitPlanAmounts(
-  scope: ApPaymentPlanScope,
-  planRows: PlanAmountRow[],
-  liveDown: number,
-  liveBalance: number,
-  liveInvoice: number,
-): { down: number; balance: number; invoice: number } {
-  const planTotal = sumPlanRowAmounts(planRows);
-
-  if (scope === "down_payment") {
-    return {
-      down: planTotal,
-      balance: liveBalance,
-      invoice: round2(planTotal + liveBalance),
-    };
-  }
-  if (scope === "balance") {
-    return {
-      down: liveDown,
-      balance: planTotal,
-      invoice: round2(liveDown + planTotal),
-    };
-  }
-
-  if (planRows.length >= 2) {
-    const down = round2(Number(planRows[0]?.amount || 0));
-    const balance = round2(Number(planRows[1]?.amount || 0));
-    return { down, balance, invoice: round2(down + balance) };
-  }
-
-  // Full-payment single row: keep live DP/balance split proportions when possible.
-  if (liveInvoice > 0 && liveDown + liveBalance > 0) {
-    const down = round2(planTotal * (liveDown / liveInvoice));
-    const balance = round2(planTotal - down);
-    return { down, balance, invoice: planTotal };
-  }
-
-  return { down: 0, balance: planTotal, invoice: planTotal };
-}
-
-/**
- * Build PO patch that freezes payment schedule amounts from an AP Form filing.
- * Already-frozen sides are left unchanged (first filed amount wins).
- */
-export function buildCommittedPatchFromAp(
-  po: PoWithCommitted,
-  scope: ApPaymentPlanScope,
-  planRows: PlanAmountRow[],
-  committedAt = new Date().toISOString(),
-): CommittedAmountsPatch | null {
-  if (!planRows.length) return null;
-
-  const live = computePoInvoiceTotals(po);
-  const fromPlan = splitPlanAmounts(
-    scope,
-    planRows,
-    live.downPayment,
-    live.finalPayment,
-    live.invoiceTotal,
-  );
-
-  const down =
-    po.committed_down_payment != null
-      ? Number(po.committed_down_payment)
-      : scope === "down_payment" || scope === "both"
-        ? fromPlan.down
-        : live.downPayment;
-  const balance =
-    po.committed_balance != null
-      ? Number(po.committed_balance)
-      : scope === "balance" || scope === "both"
-        ? fromPlan.balance
-        : live.finalPayment;
-
-  return {
-    committed_down_payment: round2(down),
-    committed_balance: round2(balance),
-    committed_invoice_total: round2(down + balance),
-    payment_amounts_committed_at:
-      po.payment_amounts_committed_at ?? committedAt,
-  };
-}
-
 /** Freeze from live totals, overriding the purpose being logged with its actual amount. */
 export function buildCommittedPatchFromPayment(
   po: PoWithCommitted,
   purpose: string,
   amount: number,
   committedAt = new Date().toISOString(),
+  options?: { replaceExisting?: boolean },
 ): CommittedAmountsPatch | null {
-  if (po.payment_amounts_committed_at) return null;
-  if (
-    po.committed_down_payment != null ||
-    po.committed_balance != null ||
-    po.committed_invoice_total != null
-  ) {
-    return null;
+  if (!options?.replaceExisting) {
+    if (po.payment_amounts_committed_at) return null;
+    if (
+      po.committed_down_payment != null ||
+      po.committed_balance != null ||
+      po.committed_invoice_total != null
+    ) {
+      return null;
+    }
   }
 
   const live = computePoInvoiceTotals(po);

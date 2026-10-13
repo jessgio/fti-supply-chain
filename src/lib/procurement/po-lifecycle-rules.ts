@@ -155,6 +155,7 @@ function paymentSummary(input: PoLifecycleInput) {
     committed_down_payment: input.committed_down_payment,
     committed_balance: input.committed_balance,
     payment_amounts_committed_at: input.payment_amounts_committed_at,
+    payments: input.payments,
     lines: input.lines.map(
       (line) =>
         ({

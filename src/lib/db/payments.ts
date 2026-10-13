@@ -400,10 +400,6 @@ export async function computePaymentDashboardSummary(
     if (po.status === "cancelled") continue;
 
     const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
-    const schedule = resolvePaymentSchedule(po);
-    const rate = await poRate(po);
-    const invoiceIdr = Math.round(schedule.invoiceTotal * rate);
-
     const poPayments = (paymentsByPo.get(po.id) ?? []).map((payment) => ({
       amount: Number(payment.amount),
       currency: payment.currency ?? DEFAULT_PO_CURRENCY,
@@ -414,6 +410,12 @@ export async function computePaymentDashboardSummary(
       purpose: payment.purpose,
       payment_date: payment.payment_date,
     }));
+    const schedule = resolvePaymentSchedule({
+      ...po,
+      payments: poPayments,
+    });
+    const rate = await poRate(po);
+    const invoiceIdr = Math.round(schedule.invoiceTotal * rate);
 
     let paidTotalIdr = 0;
     for (const payment of poPayments) {
