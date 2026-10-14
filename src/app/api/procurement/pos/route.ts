@@ -24,7 +24,9 @@ export async function GET(request: Request) {
     const includeOpenValue = searchParams.get("include") === "open_value";
     const supabase = createAdminClient();
     const [ordersResult, inboundResult] = await Promise.allSettled([
-      listPurchaseOrders(supabase, status ?? undefined),
+      listPurchaseOrders(supabase, status ?? undefined, {
+        includePayments: true,
+      }),
       listLastKnownInboundDateByPo(supabase),
     ]);
     if (ordersResult.status === "rejected") throw ordersResult.reason;

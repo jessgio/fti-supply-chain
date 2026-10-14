@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
-import { buildPoSearchRows, purchaseOrdersForStatusTab } from "./po-search-results";
+import {
+  buildPoSearchRows,
+  EMPTY_PO_SEARCH_FILTERS,
+  filterPoSearchRows,
+  purchaseOrdersForStatusTab,
+  sortPoSearchRows,
+} from "./po-search-results";
+import type { PoPayment } from "@/types/database";
 
 function line(
   sku: string,
@@ -112,4 +119,111 @@ test("search rows keep commercial fields and packaging types for every status", 
   ]);
   assert.equal(row.qty, 200);
   assert.equal(row.lines.every((item) => item.matched), true);
+  assert.equal(row.paymentStatus, null);
+});
+
+function payment(amount: number): PoPayment {
+  return {
+    id: `pay-${amount}`,
+    po_id: "po",
+    payment_date: "2026-02-01",
+    amount,
+    payment_request_number: "PR",
+    currency: "IDR",
+    exchange_rate: null,
+    purpose: "Balance payment",
+  };
+}
+
+test("search filters combine month, dates, supplier, type, status, and payment", () => {
+  const rows = buildPoSearchRows(
+    [
+      po({
+        id: "jan-paid",
+        po_number: "PO-JAN",
+        supplier_name: "Acme",
+        status: "received",
+        order_date: "2026-01-20",
+        other_charges: 0,
+        payments: [payment(11100)],
+        lines: [line("FG", 10, 1000, { sku_id: "fg", sku_name: "Serum" })],
+      }),
+      po({
+        id: "mar-open",
+        po_number: "PO-MAR",
+        supplier_name: "Beta",
+        status: "ordered",
+        order_date: "2026-03-02",
+        other_charges: 0,
+        payments: [],
+        lines: [
+          line("UB", 4, 100, {
+            sku_id: "ub",
+            sku_code: "FCR-PRF-PLUMPINGCREAM-15ML-UB",
+            sku_name: "Unit box",
+          }),
+        ],
+      }),
+    ],
+    [
+      { id: "fg", is_packaging: false, is_extract: false },
+      { id: "ub", is_packaging: true, is_extract: false },
+    ],
+    "po",
+  );
+
+  assert.equal(rows.find((row) => row.id === "jan-paid")?.fullyPaid, true);
+  assert.equal(rows.find((row) => row.id === "mar-open")?.fullyPaid, false);
+
+  assert.deepEqual(
+    filterPoSearchRows(rows, { ...EMPTY_PO_SEARCH_FILTERS, month: "2026-03" }).map(
+      (row) => row.id,
+    ),
+    ["mar-open"],
+  );
+  assert.deepEqual(
+    filterPoSearchRows(rows, {
+      ...EMPTY_PO_SEARCH_FILTERS,
+      from: "2026-01-01",
+      to: "2026-01-31",
+      supplier: "Acme",
+      status: "received",
+      paid: "paid",
+    }).map((row) => row.id),
+    ["jan-paid"],
+  );
+  assert.deepEqual(
+    filterPoSearchRows(rows, {
+      ...EMPTY_PO_SEARCH_FILTERS,
+      productType: "secondary_packaging",
+      paid: "unpaid",
+    }).map((row) => row.id),
+    ["mar-open"],
+  );
+});
+
+test("search rows sort by total and keep missing dates last", () => {
+  const rows = buildPoSearchRows(
+    [
+      po({ id: "low", po_number: "PO-B", order_date: null, other_charges: 0 }),
+      po({
+        id: "high",
+        po_number: "PO-A",
+        order_date: "2026-05-01",
+        other_charges: 0,
+        lines: [line("FG", 10, 5000)],
+      }),
+    ],
+    [],
+    "po",
+  );
+
+  assert.deepEqual(
+    sortPoSearchRows(rows, "total", "desc").map((row) => row.id),
+    ["high", "low"],
+  );
+  assert.deepEqual(
+    sortPoSearchRows(rows, "orderDate", "asc").map((row) => row.id),
+    ["high", "low"],
+  );
 });

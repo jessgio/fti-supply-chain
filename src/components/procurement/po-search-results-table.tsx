@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -19,11 +20,23 @@ import {
 } from "@/lib/procurement/po-product-type";
 import {
   buildPoSearchRows,
+  defaultPoSearchSortDir,
+  EMPTY_PO_SEARCH_FILTERS,
+  filterPoSearchRows,
+  poSearchFiltersActive,
+  sortPoSearchRows,
+  type PoSearchFilters,
   type PoSearchLineView,
   type PoSearchRowView,
   type PoSearchSkuMeta,
+  type PoSearchSortDir,
+  type PoSearchSortKey,
 } from "@/lib/procurement/po-search-results";
-import { STATUS_LABELS, STATUS_STYLES } from "@/lib/procurement/po-status";
+import {
+  PAYMENT_STATUS_LABELS,
+  PAYMENT_STATUS_STYLES,
+} from "@/lib/procurement/po-payment-status";
+import { STATUS_FLOW, STATUS_LABELS, STATUS_STYLES } from "@/lib/procurement/po-status";
 import type { PurchaseOrder } from "@/types/database";
 import { formatDate, formatNumber } from "@/lib/utils";
 
@@ -34,7 +47,40 @@ const TYPE_STYLES: Record<PoLineProductType, string> = {
   mixing_filling: "bg-sky-100 text-sky-800",
 };
 
-const TH = "whitespace-nowrap py-2 pr-3 text-left text-xs font-medium text-stone-500";
+const FIELD =
+  "h-9 rounded-lg border border-stone-300 bg-white px-2 text-sm text-stone-800";
+
+const COLUMNS: Array<{
+  key: PoSearchSortKey;
+  label: string;
+  align: "left" | "right";
+  title?: string;
+}> = [
+  { key: "poNumber", label: "PO", align: "left" },
+  { key: "orderDate", label: "Order date", align: "left" },
+  { key: "type", label: "Type", align: "left" },
+  { key: "supplier", label: "Supplier", align: "left" },
+  { key: "skus", label: "SKUs", align: "left" },
+  { key: "qty", label: "Qty", align: "right", title: "Quantity ordered" },
+  { key: "unitPrice", label: "Unit price", align: "right" },
+  { key: "otherCosts", label: "Other costs", align: "right" },
+  { key: "vat", label: "VAT", align: "right" },
+  { key: "total", label: "Total", align: "right" },
+  {
+    key: "paymentTerms",
+    label: "Payment terms",
+    align: "left",
+    title: "Down payment and balance payment. Sorts by down payment percent.",
+  },
+  {
+    key: "lastInbound",
+    label: "Last inbound",
+    align: "left",
+    title: "Latest inbound receive or PO receipt date",
+  },
+  { key: "paid", label: "Paid", align: "left" },
+  { key: "status", label: "Status", align: "left" },
+];
 
 function formatQty(qty: number): string {
   return Number.isInteger(qty) ? formatNumber(qty) : formatNumber(qty, 4);
@@ -86,6 +132,68 @@ function moneyOrDash(value: number, currency: string): string {
   return value > 0 ? formatPoMoney(value, currency) : "—";
 }
 
+function SortableHeader({
+  label,
+  columnKey,
+  activeKey,
+  sortDir,
+  onSort,
+  align,
+  title,
+}: {
+  label: string;
+  columnKey: PoSearchSortKey;
+  activeKey: PoSearchSortKey;
+  sortDir: PoSearchSortDir;
+  onSort: (key: PoSearchSortKey) => void;
+  align: "left" | "right";
+  title?: string;
+}) {
+  const active = activeKey === columnKey;
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      className={`py-2 ${align === "right" ? "pl-3" : "pr-3"}`}
+      title={title}
+    >
+      <button
+        type="button"
+        className={`flex items-center gap-1 whitespace-nowrap text-xs font-medium text-stone-500 hover:text-stone-800 ${
+          align === "right" ? "ml-auto" : ""
+        }`}
+        onClick={() => onSort(columnKey)}
+      >
+        {label}
+        {active ? (
+          sortDir === "asc" ? (
+            <ArrowUp className="h-3 w-3 shrink-0" aria-hidden />
+          ) : (
+            <ArrowDown className="h-3 w-3 shrink-0" aria-hidden />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" aria-hidden />
+        )}
+      </button>
+    </th>
+  );
+}
+
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="flex min-w-[9rem] flex-col gap-1 text-xs font-medium text-stone-500">
+      {label}
+      {children}
+    </label>
+  );
+}
+
 export function PoSearchResultsTable({
   purchaseOrders,
   skus,
@@ -100,7 +208,35 @@ export function PoSearchResultsTable({
     () => buildPoSearchRows(purchaseOrders, skus, trimmed),
     [purchaseOrders, skus, trimmed],
   );
+  const [filters, setFilters] = useState<PoSearchFilters>(EMPTY_PO_SEARCH_FILTERS);
+  const [sortKey, setSortKey] = useState<PoSearchSortKey>("orderDate");
+  const [sortDir, setSortDir] = useState<PoSearchSortDir>("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const filtersActive = poSearchFiltersActive(filters);
+  const visibleRows = useMemo(
+    () => sortPoSearchRows(filterPoSearchRows(rows, filters), sortKey, sortDir),
+    [rows, filters, sortKey, sortDir],
+  );
+  const suppliers = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of rows) {
+      if (row.supplierName) names.add(row.supplierName);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  function updateFilter<K extends keyof PoSearchFilters>(key: K, value: PoSearchFilters[K]) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function onSort(key: PoSearchSortKey) {
+    if (key === sortKey) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(defaultPoSearchSortDir(key));
+  }
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -116,47 +252,147 @@ export function PoSearchResultsTable({
       <CardHeader>
         <CardTitle>All matching purchase orders</CardTitle>
         <CardDescription>
-          {rows.length} order{rows.length === 1 ? "" : "s"} match “{trimmed}”,
-          including received and cancelled.
+          {filtersActive
+            ? `${visibleRows.length} of ${rows.length} orders match “${trimmed}” after filters.`
+            : `${rows.length} order${rows.length === 1 ? "" : "s"} match “${trimmed}”, including received and cancelled.`}
           {" "}
           {PO_PRODUCT_TYPE_HINT}
         </CardDescription>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <FilterField label="Month">
+            <input
+              type="month"
+              className={FIELD}
+              value={filters.month}
+              aria-label="Filter by order month"
+              onChange={(event) => updateFilter("month", event.target.value)}
+            />
+          </FilterField>
+          <FilterField label="From">
+            <input
+              type="date"
+              className={FIELD}
+              value={filters.from}
+              aria-label="Order date from"
+              onChange={(event) => updateFilter("from", event.target.value)}
+            />
+          </FilterField>
+          <FilterField label="To">
+            <input
+              type="date"
+              className={FIELD}
+              value={filters.to}
+              aria-label="Order date to"
+              onChange={(event) => updateFilter("to", event.target.value)}
+            />
+          </FilterField>
+          <FilterField label="Supplier">
+            <select
+              className={FIELD}
+              value={filters.supplier}
+              aria-label="Filter by supplier"
+              onChange={(event) => updateFilter("supplier", event.target.value)}
+            >
+              <option value="">All suppliers</option>
+              {suppliers.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label="Type">
+            <select
+              className={FIELD}
+              value={filters.productType}
+              aria-label="Filter by product type"
+              onChange={(event) =>
+                updateFilter("productType", event.target.value as PoSearchFilters["productType"])
+              }
+            >
+              <option value="">All types</option>
+              {(Object.keys(PO_LINE_PRODUCT_TYPE_LABELS) as PoLineProductType[]).map(
+                (value) => (
+                  <option key={value} value={value}>
+                    {PO_LINE_PRODUCT_TYPE_LABELS[value]}
+                  </option>
+                ),
+              )}
+            </select>
+          </FilterField>
+          <FilterField label="Order status">
+            <select
+              className={FIELD}
+              value={filters.status}
+              aria-label="Filter by order status"
+              onChange={(event) =>
+                updateFilter("status", event.target.value as PoSearchFilters["status"])
+              }
+            >
+              <option value="">All statuses</option>
+              {STATUS_FLOW.concat("cancelled").map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label="Payment">
+            <select
+              className={FIELD}
+              value={filters.paid}
+              aria-label="Filter by payment"
+              onChange={(event) =>
+                updateFilter("paid", event.target.value as PoSearchFilters["paid"])
+              }
+            >
+              <option value="">Paid or unpaid</option>
+              <option value="paid">Fully paid</option>
+              <option value="unpaid">Not fully paid</option>
+            </select>
+          </FilterField>
+          {filtersActive && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setFilters(EMPTY_PO_SEARCH_FILTERS)}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="overflow-x-auto">
         {rows.length === 0 ? (
           <p className="text-sm text-stone-500">
             No purchase orders match “{trimmed}”.
           </p>
+        ) : visibleRows.length === 0 ? (
+          <p className="text-sm text-stone-500">
+            No purchase orders match these filters.
+          </p>
         ) : (
-          <table className="w-full min-w-[92rem] border-collapse text-left text-sm">
+          <table className="w-full min-w-[100rem] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-stone-200">
                 <th className="w-8 py-2" />
-                <th className={TH}>PO</th>
-                <th className={TH}>Order date</th>
-                <th className={TH}>Type</th>
-                <th className={TH}>Supplier</th>
-                <th className={TH}>SKUs</th>
-                <th className={`${TH} text-right`} title="Quantity ordered">
-                  Qty
-                </th>
-                <th className={`${TH} text-right`}>Unit price</th>
-                <th className={`${TH} text-right`}>Other costs</th>
-                <th className={`${TH} text-right`}>VAT</th>
-                <th className={`${TH} text-right`}>Total</th>
-                <th className={TH} title="Down payment and balance payment">
-                  Payment terms
-                </th>
-                <th className={TH} title="Latest inbound receive or PO receipt date">
-                  Last inbound
-                </th>
-                <th className="whitespace-nowrap py-2 text-left text-xs font-medium text-stone-500">
-                  Status
-                </th>
+                {COLUMNS.map((column) => (
+                  <SortableHeader
+                    key={column.key}
+                    label={column.label}
+                    columnKey={column.key}
+                    activeKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                    align={column.align}
+                    title={column.title}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <SearchResultRows
                   key={row.id}
                   row={row}
@@ -255,6 +491,15 @@ function SearchResultRows({
         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
           {formatDate(row.lastInboundDate)}
         </td>
+        <td className="py-2 pr-3">
+          {row.paymentStatus ? (
+            <Badge className={PAYMENT_STATUS_STYLES[row.paymentStatus]}>
+              {PAYMENT_STATUS_LABELS[row.paymentStatus]}
+            </Badge>
+          ) : (
+            <span className="text-stone-400">—</span>
+          )}
+        </td>
         <td className="py-2">
           <Badge className={STATUS_STYLES[row.status]}>
             {STATUS_LABELS[row.status]}
@@ -264,7 +509,7 @@ function SearchResultRows({
       {open && (
         <tr className="border-b border-stone-100 bg-stone-50/70">
           <td />
-          <td colSpan={13} className="py-3 pr-3">
+          <td colSpan={14} className="py-3 pr-3">
             {row.lines.length === 0 ? (
               <p className="text-xs text-stone-500">No line items on this purchase order.</p>
             ) : (
