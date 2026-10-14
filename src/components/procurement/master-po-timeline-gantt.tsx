@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,7 @@ export function MasterPoTimelineGantt({
   currentUserId = null,
   currentUserRole = null,
 }: MasterPoTimelineGanttProps) {
+  const pathname = usePathname() ?? "/dashboard/po-timeline";
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -271,7 +273,10 @@ export function MasterPoTimelineGantt({
                         dateWidth="11rem"
                         shipmentHref={
                           bar.phase === "shipping"
-                            ? shipmentDetailHref(bar.id, poDetailHref(group.po_id))
+                            ? shipmentDetailHref(
+                                bar.id,
+                                poDetailHref(group.po_id, pathname),
+                              )
                             : undefined
                         }
                       />

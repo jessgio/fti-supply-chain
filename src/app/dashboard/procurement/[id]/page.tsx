@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
@@ -56,6 +56,10 @@ import {
   downloadPoPdf,
 } from "@/lib/procurement/po-status";
 import {
+  parsePoReturnTo,
+  poReturnLabel,
+} from "@/lib/procurement/po-navigation";
+import {
   formatLarkApprovalStatus,
   larkApprovalStatusBadgeClass,
 } from "@/lib/lark/ap-form";
@@ -69,9 +73,27 @@ import type {
 } from "@/types/database";
 
 export default function PurchaseOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageShell wide>
+          <p className="text-sm text-stone-500">Loading purchase order…</p>
+        </PageShell>
+      }
+    >
+      <PurchaseOrderPageInner />
+    </Suspense>
+  );
+}
+
+function PurchaseOrderPageInner() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const poId = params.id as string;
+  const returnTo = parsePoReturnTo(searchParams.get("returnTo"), poId);
+  const backHref = returnTo ?? "/dashboard/procurement";
+  const backLabel = returnTo ? poReturnLabel(returnTo) : "All purchase orders";
 
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [timeline, setTimeline] = useState<PoTimelineEntry | null>(null);
@@ -190,7 +212,7 @@ export default function PurchaseOrderPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to delete PO");
-      router.push("/dashboard/procurement");
+      router.push(backHref);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete PO");
     } finally {
@@ -227,6 +249,13 @@ export default function PurchaseOrderPage() {
   if (loading) {
     return (
       <PageShell wide>
+        <Link
+          href={backHref}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-stone-600 hover:text-stone-900"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {backLabel}
+        </Link>
         <p className="text-sm text-stone-500">Loading purchase order…</p>
       </PageShell>
     );
@@ -236,8 +265,9 @@ export default function PurchaseOrderPage() {
     return (
       <PageShell wide>
         <p className="text-sm text-red-600">{error ?? "Purchase order not found."}</p>
-        <Link href="/dashboard/procurement" className="mt-4 text-sm text-emerald-700">
-          Back to procurement
+        <Link href={backHref} className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-700">
+          <ArrowLeft className="h-4 w-4" />
+          {backLabel}
         </Link>
       </PageShell>
     );
@@ -251,11 +281,11 @@ export default function PurchaseOrderPage() {
     <PageShell wide>
       <div className="mb-6 space-y-4">
         <Link
-          href="/dashboard/procurement"
+          href={backHref}
           className="inline-flex items-center gap-1 text-sm text-stone-600 hover:text-stone-900"
         >
           <ArrowLeft className="h-4 w-4" />
-          All purchase orders
+          {backLabel}
         </Link>
 
         <div className="flex flex-wrap items-start justify-between gap-4">

@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ShipmentHoverLink } from "@/components/procurement/shipment-hover-link";
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
-import { poDetailHref } from "@/lib/shipments/shipment-navigation";
+import { useDashboardReturnPath } from "@/lib/procurement/use-dashboard-return-path";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
   DEFAULT_TRANSIT_DAYS,
@@ -45,6 +45,7 @@ export function PoShipmentsSection({
   po: PurchaseOrder;
   onChanged: () => void;
 }) {
+  const returnPath = useDashboardReturnPath();
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [allocations, setAllocations] = useState<ShipmentLineAllocation[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -216,7 +217,7 @@ export function PoShipmentsSection({
                   <ShipmentHoverLink
                     shipmentId={shipment.id}
                     shipmentNumber={shipment.shipment_number}
-                    returnTo={poDetailHref(po.id)}
+                    returnTo={returnPath}
                   />
                   <StatusUpdateNotesLink
                     entityType="shipment"

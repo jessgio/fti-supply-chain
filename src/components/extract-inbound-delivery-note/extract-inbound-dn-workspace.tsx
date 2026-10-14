@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PoSelectInput } from "@/components/extract-inbound-delivery-note/po-select-input";
+import { PoDetailLink } from "@/components/procurement/po-detail-link";
 import {
   ExtractSearchInput,
   type ExtractSearchOption,
@@ -595,12 +596,12 @@ export function ExtractInboundDnWorkspace({
                             <td className="py-3 pr-4 font-mono text-xs">{note.dn_number}</td>
                             <td className="py-3 pr-4">
                               {note.po_id ? (
-                                <Link
-                                  href={`/dashboard/procurement/${note.po_id}`}
+                                <PoDetailLink
+                                  poId={note.po_id}
                                   className="text-emerald-700 hover:underline"
                                 >
                                   {note.po_number}
-                                </Link>
+                                </PoDetailLink>
                               ) : (
                                 note.po_number
                               )}
