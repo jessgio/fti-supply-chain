@@ -10,6 +10,7 @@ import {
   getApprovalInstanceDetails,
   resolveApprovalInstance,
 } from "@/lib/lark/client";
+import { toClientLarkComments } from "@/lib/lark/comment-files";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder } from "@/lib/db/procurement";
 import { errorMessage } from "@/lib/errors";
@@ -223,7 +224,7 @@ export async function POST(
       paymentScope,
       submission: inserted,
       purchaseOrder: updated,
-      comments: details.comments,
+      comments: toClientLarkComments(details.comments),
     });
   } catch (err) {
     return NextResponse.json(

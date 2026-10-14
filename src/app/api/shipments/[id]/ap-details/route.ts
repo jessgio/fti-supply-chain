@@ -5,6 +5,7 @@ import {
   getApprovalInstanceDetails,
   type ApprovalInstanceComment,
 } from "@/lib/lark/client";
+import { toClientLarkComments } from "@/lib/lark/comment-files";
 import {
   listShipmentLarkSubmissions,
   updateShipmentLarkSubmission,
@@ -154,7 +155,7 @@ export async function GET(
       serialNumber: focusSerial,
       status: focusStatus,
       syncedAt: focusSyncedAt,
-      comments: focusComments,
+      comments: toClientLarkComments(focusComments),
       submissions: allSubmissions,
     });
   } catch (err) {

@@ -3,6 +3,11 @@
 import { format } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  LarkCommentThread,
+  larkCommentFileHref,
+  type LarkCommentView,
+} from "@/components/lark/lark-comment-thread";
+import {
   AP_EXTRA_FILE_MAX_BYTES,
   AP_EXTRA_FILES_MAX_COUNT,
   AP_EXTRA_FILES_MAX_TOTAL_BYTES,
@@ -40,15 +45,6 @@ type Colleague = {
   full_name: string | null;
   lark_open_id: string | null;
   is_default_approver?: boolean;
-};
-
-type LarkComment = {
-  id: string;
-  openId: string | null;
-  comment: string;
-  createTime: string | null;
-  authorName: string | null;
-  authorEmail: string | null;
 };
 
 const fieldClass =
@@ -154,7 +150,7 @@ export function ShipmentApRequestForm({
   const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(
     submissions[0]?.id ?? null,
   );
-  const [comments, setComments] = useState<LarkComment[]>([]);
+  const [comments, setComments] = useState<LarkCommentView[]>([]);
   const [syncingStatus, setSyncingStatus] = useState(false);
   const fileInputId = `shipment-ap-files-${shipmentId}-${invoiceKind}`;
 
@@ -243,7 +239,7 @@ export function ShipmentApRequestForm({
       const res = await fetch(`/api/shipments/${shipmentId}/ap-details${qs}`);
       const data = (await res.json()) as {
         error?: string;
-        comments?: LarkComment[];
+        comments?: LarkCommentView[];
       };
       if (!res.ok && !data.comments) {
         setError(data.error ?? "Failed to refresh Lark status");
@@ -548,35 +544,29 @@ export function ShipmentApRequestForm({
 
           <div className="mt-4 border-t border-emerald-200/80 pt-4">
             <h4 className="text-sm font-semibold text-stone-900">Comments</h4>
+            <p className="mt-0.5 text-xs text-stone-500">
+              Includes attachments from the Lark comment thread.
+            </p>
             {comments.length === 0 ? (
               <p className="mt-2 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-3 text-sm text-stone-500">
                 {syncingStatus ? "Refreshing…" : "No comments yet."}
               </p>
             ) : (
-              <ul className="mt-2 max-h-56 space-y-2 overflow-y-auto">
-                {comments.map((comment) => (
-                  <li
-                    key={comment.id}
-                    className="rounded-lg border border-stone-200 bg-white px-3 py-2.5"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="text-sm font-medium text-stone-900">
-                        {comment.authorName?.trim() ||
-                          comment.authorEmail?.trim() ||
-                          "Unknown"}
-                      </p>
-                      <p className="text-[11px] text-stone-500">
-                        {comment.createTime
-                          ? format(new Date(comment.createTime), "dd/MM/yyyy HH:mm")
-                          : "—"}
-                      </p>
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-stone-800/90">
-                      {comment.comment || "(empty comment)"}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              <LarkCommentThread
+                comments={comments}
+                busy={syncingStatus}
+                listClassName="mt-2 max-h-56"
+                fileHref={(commentId, index, file, download) =>
+                  larkCommentFileHref(
+                    `/api/shipments/${shipmentId}/lark-comment-files`,
+                    activeSubmission?.lark_instance_code || "",
+                    commentId,
+                    index,
+                    file,
+                    download,
+                  )
+                }
+              />
             )}
           </div>
 

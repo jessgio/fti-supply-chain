@@ -1,3 +1,10 @@
+import {
+  mergeLarkComments,
+  normalizeLarkComments,
+  parseLarkCommentText,
+  type LarkNormalizedComment,
+} from "@/lib/lark/comment-files";
+
 type LarkApiResponse<T> = {
   code: number;
   msg: string;
@@ -367,13 +374,7 @@ export async function createApprovalInstance(
   );
 }
 
-export type ApprovalInstanceComment = {
-  id: string;
-  openId: string | null;
-  userId: string | null;
-  comment: string;
-  createTime: string | null;
-};
+export type ApprovalInstanceComment = LarkNormalizedComment;
 
 export type ApprovalInstanceDetails = {
   serial_number?: string;
@@ -388,6 +389,12 @@ export type ApprovalInstanceDetails = {
     open_id?: string;
     comment?: string;
     create_time?: string;
+    files?: {
+      url?: string;
+      file_size?: number;
+      title?: string;
+      type?: string;
+    }[];
   }[];
 };
 
@@ -588,116 +595,62 @@ export async function resolveApprovalInstance(input: {
   );
 }
 
-/**
- * Parse Lark comment payloads. Some tenants return plain text; others return
- * JSON like {"text":"..."} or richer rich-text structures.
- */
-export function parseLarkCommentText(raw: string | null | undefined): string {
-  const trimmed = raw?.trim() ?? "";
-  if (!trimmed) return "";
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
+export { parseLarkCommentText };
+
+type CommentThreadPage = {
+  comments?: unknown[];
+  page_token?: string;
+  has_more?: boolean;
+};
+
+async function fetchCommentThreadPages(
+  instanceCode: string,
+  token: string,
+  userOpenId?: string,
+): Promise<unknown[] | null> {
+  const collected: unknown[] = [];
+  let pageToken: string | undefined;
   try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (typeof parsed === "string") return parsed.trim();
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      if (typeof obj.text === "string") return obj.text.trim();
-      if (typeof obj.content === "string") return obj.content.trim();
-      if (typeof obj.comment === "string") return obj.comment.trim();
-      if (Array.isArray(obj.elements)) {
-        const parts: string[] = [];
-        for (const el of obj.elements) {
-          if (!el || typeof el !== "object") continue;
-          const text = (el as { text?: unknown }).text;
-          if (typeof text === "string" && text.trim()) parts.push(text.trim());
-        }
-        if (parts.length) return parts.join("");
-      }
+    for (let page = 0; page < 20; page++) {
+      const params = new URLSearchParams({
+        user_id_type: "open_id",
+        page_size: "200",
+      });
+      if (userOpenId) params.set("user_id", userOpenId);
+      if (pageToken) params.set("page_token", pageToken);
+      const data = await larkFetch<CommentThreadPage>(
+        `/open-apis/approval/v4/instances/${encodeURIComponent(instanceCode)}/comments?${params}`,
+        { method: "GET", token },
+      );
+      collected.push(...(data.comments ?? []));
+      const next = data.page_token?.trim();
+      if (!next || next === pageToken || data.has_more === false) break;
+      pageToken = next;
     }
+    return collected;
   } catch {
-    // keep raw
+    return null;
   }
-  return trimmed;
 }
 
-function normalizeCommentList(
-  list: ApprovalInstanceDetails["comment_list"] | undefined,
-): ApprovalInstanceComment[] {
-  if (!Array.isArray(list)) return [];
-  return list
-    .map((item) => {
-      const id = item.id?.trim() || "";
-      const comment = parseLarkCommentText(item.comment);
-      if (!id && !comment) return null;
-      const createMs = item.create_time?.trim();
-      const createTime =
-        createMs && /^\d+$/.test(createMs)
-          ? new Date(Number(createMs)).toISOString()
-          : createMs || null;
-      return {
-        id:
-          id ||
-          `${item.open_id ?? item.user_id ?? "anon"}-${createMs ?? comment}`,
-        openId: item.open_id?.trim() || null,
-        userId: item.user_id?.trim() || null,
-        comment,
-        createTime,
-      } satisfies ApprovalInstanceComment;
-    })
-    .filter((c): c is ApprovalInstanceComment => !!c)
-    .sort((a, b) => {
-      const ta = a.createTime ? new Date(a.createTime).getTime() : 0;
-      const tb = b.createTime ? new Date(b.createTime).getTime() : 0;
-      return ta - tb;
-    });
-}
-
-/** Dedicated comments endpoint (thread replies); best-effort fallback. */
+/** Dedicated comments endpoint (thread replies and attachments). */
 export async function listApprovalInstanceComments(
   instanceCode: string,
+  userOpenId?: string | null,
 ): Promise<ApprovalInstanceComment[]> {
-  const token = await getTenantAccessToken();
   try {
-    const data = await larkFetch<{
-      comments?: {
-        id?: string;
-        content?: string;
-        create_time?: string;
-        is_delete?: number;
-        commentator?: string;
-        commentator_list?: { open_id?: string; user_id?: string }[];
-      }[];
-    }>(
-      `/open-apis/approval/v4/instances/${encodeURIComponent(instanceCode)}/comments?user_id_type=open_id`,
-      { method: "GET", token },
-    );
-
-    return (data.comments ?? [])
-      .filter((c) => c.is_delete !== 1)
-      .map((item) => {
-        const openId =
-          item.commentator_list?.[0]?.open_id?.trim() ||
-          item.commentator?.trim() ||
-          null;
-        const createMs = item.create_time?.trim();
-        const createTime =
-          createMs && /^\d+$/.test(createMs)
-            ? new Date(Number(createMs)).toISOString()
-            : createMs || null;
-        return {
-          id: item.id?.trim() || `${openId ?? "anon"}-${createMs ?? ""}`,
-          openId,
-          userId: item.commentator_list?.[0]?.user_id?.trim() || null,
-          comment: parseLarkCommentText(item.content),
-          createTime,
-        } satisfies ApprovalInstanceComment;
-      })
-      .filter((c) => !!c.comment)
-      .sort((a, b) => {
-        const ta = a.createTime ? new Date(a.createTime).getTime() : 0;
-        const tb = b.createTime ? new Date(b.createTime).getTime() : 0;
-        return ta - tb;
-      });
+    const token = await getTenantAccessToken();
+    const viewer = userOpenId?.trim() || "";
+    const withUser = viewer
+      ? await fetchCommentThreadPages(instanceCode, token, viewer)
+      : null;
+    if (withUser && withUser.length > 0) return normalizeLarkComments(withUser);
+    const withoutUser = await fetchCommentThreadPages(instanceCode, token);
+    if (withoutUser && withoutUser.length > 0) {
+      return normalizeLarkComments(withoutUser);
+    }
+    if (withUser) return normalizeLarkComments(withUser);
+    return [];
   } catch {
     return [];
   }
@@ -730,10 +683,12 @@ export async function getApprovalInstanceDetails(
     }
     try {
       const details = await getApprovalInstance(instanceCode);
-      let comments = normalizeCommentList(details.comment_list);
-      if (comments.length === 0) {
-        comments = await listApprovalInstanceComments(instanceCode);
-      }
+      const fromInstance = normalizeLarkComments(details.comment_list);
+      const fromThread = await listApprovalInstanceComments(
+        instanceCode,
+        details.open_id,
+      );
+      const comments = mergeLarkComments(fromInstance, fromThread);
       last = {
         serialNumber: details.serial_number?.trim() || null,
         status: details.status?.trim().toUpperCase() || null,
