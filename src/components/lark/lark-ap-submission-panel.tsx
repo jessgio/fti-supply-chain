@@ -3,6 +3,11 @@
 import { format } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  LarkCommentThread,
+  larkCommentFileHref,
+  type LarkCommentView,
+} from "@/components/lark/lark-comment-thread";
+import {
   AP_EXTRA_FILE_MAX_BYTES,
   AP_EXTRA_FILES_MAX_COUNT,
   AP_EXTRA_FILES_MAX_TOTAL_BYTES,
@@ -44,15 +49,6 @@ type Colleague = {
   full_name: string | null;
   lark_open_id: string | null;
   is_default_approver?: boolean;
-};
-
-type LarkComment = {
-  id: string;
-  openId: string | null;
-  comment: string;
-  createTime: string | null;
-  authorName: string | null;
-  authorEmail: string | null;
 };
 
 function paymentScopeLabel(scope: string | null | undefined): string {
@@ -160,7 +156,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const [statusSyncedAt, setStatusSyncedAt] = useState(
     po.lark_status_synced_at,
   );
-  const [comments, setComments] = useState<LarkComment[]>([]);
+  const [comments, setComments] = useState<LarkCommentView[]>([]);
   const [submissions, setSubmissions] = useState<PurchaseOrderLarkSubmission[]>(
     [],
   );
@@ -255,7 +251,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         serialNumber?: string | null;
         status?: string | null;
         syncedAt?: string | null;
-        comments?: LarkComment[];
+        comments?: LarkCommentView[];
         submissions?: PurchaseOrderLarkSubmission[];
       };
       if (!res.ok && !data.status && !data.serialNumber && !data.submissions?.length) {
@@ -360,7 +356,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         syncedAt?: string | null;
         purchaseOrder?: PurchaseOrder;
         submission?: PurchaseOrderLarkSubmission;
-        comments?: LarkComment[];
+        comments?: LarkCommentView[];
       };
       if (!res.ok) {
         setError(data.error ?? `Link failed (${res.status})`);
@@ -930,45 +926,30 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             </span>
           </div>
           <p className="mt-0.5 text-xs text-stone-500">
-            Pulled from the Lark AP Form comment thread. Refresh to update.
+            Pulled from the Lark AP Form comment thread, including attachments.
+            Refresh to update.
           </p>
           {comments.length === 0 ? (
             <p className="mt-3 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-4 text-sm text-stone-500">
               No comments yet.
             </p>
           ) : (
-            <ul className="mt-3 max-h-72 space-y-2 overflow-y-auto">
-              {comments.map((comment) => {
-                const author =
-                  comment.authorName?.trim() ||
-                  comment.authorEmail?.trim() ||
-                  comment.openId ||
-                  "Unknown";
-                return (
-                  <li
-                    key={comment.id}
-                    className="rounded-lg border border-stone-200 bg-white px-3 py-2.5"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="text-sm font-medium text-stone-900">
-                        {author}
-                      </p>
-                      <p className="text-[11px] text-stone-500">
-                        {comment.createTime
-                          ? format(
-                              new Date(comment.createTime),
-                              "dd/MM/yyyy HH:mm",
-                            )
-                          : "—"}
-                      </p>
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-stone-800/90">
-                      {comment.comment || "(empty comment)"}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
+            <LarkCommentThread
+              comments={comments}
+              busy={syncingStatus}
+              fileHref={(commentId, index, file, download) =>
+                larkCommentFileHref(
+                  `/api/procurement/pos/${po.id}/lark-comment-files`,
+                  activeSubmission?.lark_instance_code ||
+                    po.lark_instance_code ||
+                    "",
+                  commentId,
+                  index,
+                  file,
+                  download,
+                )
+              }
+            />
           )}
         </div>
 

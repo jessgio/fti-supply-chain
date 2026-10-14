@@ -5,6 +5,7 @@ import {
   getApprovalInstanceDetails,
   type ApprovalInstanceComment,
 } from "@/lib/lark/client";
+import { toClientLarkComments } from "@/lib/lark/comment-files";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import type { PurchaseOrderLarkSubmission } from "@/types/database";
@@ -233,7 +234,7 @@ export async function GET(
       serialNumber: focusSerial,
       status: focusStatus,
       syncedAt: focusSyncedAt,
-      comments: focusComments,
+      comments: toClientLarkComments(focusComments),
       submissions: allSubmissions,
     });
   } catch (err) {
