@@ -434,9 +434,10 @@ const PO_DETAIL_SELECT =
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
-const PO_PAYABLE_SELECT =
-  PO_SELECT +
-  ", po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
+const PO_PAYMENTS_EMBED =
+  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
+
+const PO_PAYABLE_SELECT = PO_SELECT + ", " + PO_PAYMENTS_EMBED;
 
 /** Non-cancelled POs including logged payments, for the unpaid payables tab. */
 export async function listPayablePurchaseOrders(
@@ -456,10 +457,13 @@ export async function listPayablePurchaseOrders(
 export async function listPurchaseOrders(
   supabase: SupabaseClient,
   status?: PoStatus | PoStatus[],
+  options?: { includePayments?: boolean },
 ): Promise<PurchaseOrder[]> {
   let query = supabase
     .from("purchase_orders")
-    .select(PO_SELECT)
+    .select(
+      options?.includePayments ? `${PO_SELECT}, ${PO_PAYMENTS_EMBED}` : PO_SELECT,
+    )
     .order("order_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (Array.isArray(status)) {

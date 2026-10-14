@@ -652,8 +652,8 @@ function ProcurementInner() {
   return (
     <div
       className={cn(
-        "mx-auto space-y-6 p-8",
-        listTab === "unpaid" || skuQ ? "max-w-[96rem]" : "max-w-6xl",
+        "mx-auto w-full space-y-6",
+        skuQ ? "max-w-none px-4 py-6 sm:px-6 lg:px-8" : "max-w-[96rem] p-8",
       )}
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
