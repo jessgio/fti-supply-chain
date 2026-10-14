@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
@@ -65,6 +66,18 @@ import {
   type PoPrimaryRole,
 } from "@/lib/procurement/po-primary-groups";
 import type { ProductPackagingLink } from "@/types/database";
+
+const UnpaidPosTable = dynamic(
+  () =>
+    import("@/components/procurement/unpaid-pos-table").then(
+      (mod) => mod.UnpaidPosTable,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-stone-500">Loading unpaid purchase orders…</p>
+    ),
+  },
+);
 
 type SkuOption = PoSkuOption;
 
@@ -147,6 +160,7 @@ function ProcurementInner() {
   const [skus, setSkus] = useState<SkuOption[]>([]);
   const [packagingLinks, setPackagingLinks] = useState<ProductPackagingLink[]>([]);
   const [statusFilter, setStatusFilter] = useState<PoStatus | "">("");
+  const [listTab, setListTab] = useState<"orders" | "unpaid">("orders");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -630,7 +644,12 @@ function ProcurementInner() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-8">
+    <div
+      className={cn(
+        "mx-auto space-y-6 p-8",
+        listTab === "unpaid" ? "max-w-[96rem]" : "max-w-6xl",
+      )}
+    >
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-stone-900">
@@ -697,8 +716,11 @@ function ProcurementInner() {
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
-          variant={statusFilter === "" ? "default" : "outline"}
-          onClick={() => setStatusFilter("")}
+          variant={listTab === "orders" && statusFilter === "" ? "default" : "outline"}
+          onClick={() => {
+            setListTab("orders");
+            setStatusFilter("");
+          }}
         >
           Active
         </Button>
@@ -706,14 +728,28 @@ function ProcurementInner() {
           <Button
             key={s}
             size="sm"
-            variant={statusFilter === s ? "default" : "outline"}
-            onClick={() => setStatusFilter(s)}
+            variant={listTab === "orders" && statusFilter === s ? "default" : "outline"}
+            onClick={() => {
+              setListTab("orders");
+              setStatusFilter(s);
+            }}
           >
             {STATUS_LABELS[s]}
           </Button>
         ))}
+        <span className="mx-1 hidden w-px self-stretch bg-stone-200 sm:block" aria-hidden />
+        <Button
+          size="sm"
+          variant={listTab === "unpaid" ? "default" : "outline"}
+          onClick={() => setListTab("unpaid")}
+        >
+          Unpaid
+        </Button>
       </div>
 
+      {listTab === "unpaid" ? (
+        <UnpaidPosTable refreshKey={refreshKey} />
+      ) : (
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -832,6 +868,7 @@ function ProcurementInner() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {createOpen && (
         <CreatePoDialog

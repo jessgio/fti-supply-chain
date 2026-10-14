@@ -434,6 +434,25 @@ const PO_DETAIL_SELECT =
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
 
+const PO_PAYABLE_SELECT =
+  PO_SELECT +
+  ", po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
+
+/** Non-cancelled POs including logged payments, for the unpaid payables tab. */
+export async function listPayablePurchaseOrders(
+  supabase: SupabaseClient,
+): Promise<PurchaseOrder[]> {
+  const rows = await fetchAllRows<PoRow>(
+    () =>
+      supabase
+        .from("purchase_orders")
+        .select(PO_PAYABLE_SELECT)
+        .neq("status", "cancelled")
+        .order("id", { ascending: true }) as never,
+  );
+  return rows.map(mapPoRow);
+}
+
 export async function listPurchaseOrders(
   supabase: SupabaseClient,
   status?: PoStatus | PoStatus[],
