@@ -17,6 +17,13 @@ export type LarkCommentView = {
   files?: LarkCommentAttachment[];
 };
 
+function previewMime(blobType: string, fallback: string | null): string | null {
+  const type = blobType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (type.startsWith("image/") && type !== "image/svg+xml") return type;
+  if (type === "application/pdf") return type;
+  return fallback;
+}
+
 function canPreview(file: LarkCommentAttachment): boolean {
   if (file.mimeType === "image/svg+xml") return false;
   if (file.title.toLowerCase().endsWith(".svg")) return false;
@@ -127,7 +134,7 @@ export function LarkCommentThread({
       if (previewRequest.current !== requestId) return;
       setPreview({
         fileName: file.title,
-        mimeType: blob.type || file.mimeType,
+        mimeType: previewMime(blob.type, file.mimeType),
         url: URL.createObjectURL(blob),
         loading: false,
         error: null,
