@@ -1,7 +1,11 @@
 "use client";
 
+import { Suspense } from "react";
+import { usePathname } from "next/navigation";
 import { HoverSnapshotLink } from "@/components/ui/hover-snapshot-link";
 import type { PoTimelineLineItem } from "@/components/procurement/po-timeline-po-link";
+import { poDetailHref } from "@/lib/procurement/po-navigation";
+import { useDashboardReturnPath } from "@/lib/procurement/use-dashboard-return-path";
 
 interface PoHoverLinkProps {
   poId: string;
@@ -10,16 +14,33 @@ interface PoHoverLinkProps {
   className?: string;
 }
 
-export function PoHoverLink({
+export function PoHoverLink(props: PoHoverLinkProps) {
+  const pathname = usePathname() ?? "";
+  return (
+    <Suspense fallback={<PoHoverLinkView {...props} returnPath={pathname} />}>
+      <PoHoverLinkResolved {...props} />
+    </Suspense>
+  );
+}
+
+function PoHoverLinkResolved(props: PoHoverLinkProps) {
+  const returnPath = useDashboardReturnPath();
+  return <PoHoverLinkView {...props} returnPath={returnPath} />;
+}
+
+function PoHoverLinkView({
   poId,
   poNumber,
   lineItems,
   className = "shrink-0 font-semibold text-rose-700 hover:underline",
-}: PoHoverLinkProps) {
+  returnPath,
+}: PoHoverLinkProps & { returnPath: string }) {
+  const href = poDetailHref(poId, returnPath);
+
   if (lineItems && lineItems.length > 0) {
     return (
       <HoverSnapshotLink
-        href={`/dashboard/procurement/${poId}`}
+        href={href}
         label={poNumber}
         title={poNumber}
         subtitle="Line items"
@@ -44,7 +65,7 @@ export function PoHoverLink({
 
   return (
     <HoverSnapshotLink
-      href={`/dashboard/procurement/${poId}`}
+      href={href}
       label={poNumber}
       snapshotUrl={`/api/procurement/pos/${poId}/snapshot`}
       className={className}

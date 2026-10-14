@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useDashboardReturnPath } from "@/lib/procurement/use-dashboard-return-path";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,10 +19,7 @@ import {
   getPoGanttPosition,
 } from "@/lib/procurement/po-timeline-gantt";
 import { GanttAxis, GanttLegend, GanttRow } from "@/components/procurement/gantt-chart-parts";
-import {
-  poDetailHref,
-  shipmentDetailHref,
-} from "@/lib/shipments/shipment-navigation";
+import { shipmentDetailHref } from "@/lib/shipments/shipment-navigation";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -153,6 +151,7 @@ function PoLinePricingDetails({ po }: { po: PoPricingSource }) {
 }
 
 export function SinglePoGantt({ entry, po }: SinglePoGanttProps) {
+  const returnPath = useDashboardReturnPath();
   const chart = useMemo(() => {
     const bars = buildPoGanttBars(
       {
@@ -265,7 +264,7 @@ export function SinglePoGantt({ entry, po }: SinglePoGanttProps) {
                 dateWidth="11rem"
                 shipmentHref={
                   bar.phase === "shipping"
-                    ? shipmentDetailHref(bar.id, poDetailHref(entry.id))
+                    ? shipmentDetailHref(bar.id, returnPath)
                     : undefined
                 }
               />

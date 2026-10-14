@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { poDetailHref } from "@/lib/procurement/po-navigation";
 import {
   resolveProductLineLabel,
   showSkuCodeSubline,
@@ -51,6 +52,7 @@ export function extractMentionIds(body: string): string[] {
 export function renderMentionBody(
   body: string,
   profileNames: Map<string, string>,
+  returnTo?: string | null,
 ): React.ReactNode[] {
   const parts = body.split(/(@\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, index) => {
@@ -63,7 +65,7 @@ export function renderMentionBody(
     const target = parseMentionTarget(match[2]);
 
     if (target.kind === "record" && target.entityType) {
-      const href = entityHref(target.entityType, target.id, label);
+      const href = entityHref(target.entityType, target.id, label, returnTo);
       const display = label.startsWith("@") ? label : `@${label}`;
       if (href) {
         return (
@@ -130,10 +132,11 @@ export function entityHref(
   entityType: string,
   entityId: string,
   entityLabel?: string | null,
+  returnTo?: string | null,
 ): string | null {
   switch (entityType) {
     case "po":
-      return `/dashboard/procurement/${entityId}`;
+      return poDetailHref(entityId, returnTo);
     case "payment": {
       const term = (entityLabel ?? "")
         .replace(/^Payment\s+/i, "")

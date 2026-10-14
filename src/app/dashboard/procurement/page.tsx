@@ -28,6 +28,8 @@ import type { PoSkuOption } from "@/components/procurement/edit-po-dialog";
 import { CompanySettingsDialog } from "@/components/procurement/company-settings-dialog";
 import { CreatePoDialog } from "@/components/procurement/create-po-dialog";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
+import { poDetailHref } from "@/lib/procurement/po-navigation";
+import { useDashboardReturnPath } from "@/lib/procurement/use-dashboard-return-path";
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
 import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { SuppliersDialog } from "@/components/procurement/suppliers-dialog";
@@ -153,6 +155,7 @@ function PoRoleBadge({ role }: { role?: PoPrimaryRole }) {
 function ProcurementInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const returnPath = useDashboardReturnPath();
   const initialSku = searchParams.get("sku");
   const initialPoId = searchParams.get("po");
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
@@ -567,7 +570,7 @@ function ProcurementInner() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => router.push(`/dashboard/procurement/${po.id}`)}
+                onClick={() => router.push(poDetailHref(po.id, returnPath))}
               >
                 Manage
               </Button>
@@ -880,7 +883,7 @@ function ProcurementInner() {
           onCreated={(created) => {
             setCreateOpen(false);
             setRefreshKey((k) => k + 1);
-            router.push(`/dashboard/procurement/${created.id}`);
+            router.push(poDetailHref(created.id, returnPath));
           }}
         />
       )}

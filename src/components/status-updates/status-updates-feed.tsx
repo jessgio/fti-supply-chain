@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FileText, Search } from "lucide-react";
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { PoDetailLink } from "@/components/procurement/po-detail-link";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { PoProductsList } from "@/components/status-updates/po-products-list";
 import { StatusUpdateCard } from "@/components/status-updates/status-update-card";
@@ -225,12 +225,12 @@ export function StatusUpdatesFeed({
                         poNumber={group.po_number}
                         className="text-base font-semibold text-rose-700 hover:underline"
                       />
-                      <Link
-                        href={`/dashboard/procurement/${group.po_id}`}
+                      <PoDetailLink
+                        poId={group.po_id}
                         className="text-xs text-stone-500 hover:text-stone-800"
                       >
                         View PO
-                      </Link>
+                      </PoDetailLink>
                     </div>
                     <p className="text-sm text-stone-500">
                       {group.supplier_name ?? "No supplier"}

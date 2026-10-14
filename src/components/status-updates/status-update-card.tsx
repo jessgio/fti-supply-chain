@@ -5,7 +5,9 @@ import Link from "next/link";
 import { ChevronDown, ChevronRight, MessageSquareReply, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PoDetailLink } from "@/components/procurement/po-detail-link";
 import { MentionInput } from "@/components/status-updates/mention-input";
+import { MentionBody } from "@/components/status-updates/mention-body";
 import { StatusUpdateEditDialog } from "@/components/status-updates/status-update-edit-dialog";
 import { SkuProductLabel } from "@/components/status-updates/sku-product-label";
 import {
@@ -14,7 +16,6 @@ import {
   entityHref,
   extractMentionIds,
   formatStatusUpdateTime,
-  renderMentionBody,
 } from "@/lib/status-updates/utils";
 import type {
   Profile,
@@ -38,11 +39,15 @@ interface StatusUpdateCardProps {
 }
 
 function EntityTag({ ref: entityRef }: { ref: StatusUpdateEntityRef }) {
-  const href = entityHref(
-    entityRef.entity_type,
-    entityRef.entity_id,
-    entityRef.entity_label,
-  );
+  const label = entityRef.entity_label ?? entityRef.entity_id;
+  const href =
+    entityRef.entity_type === "po"
+      ? null
+      : entityHref(
+          entityRef.entity_type,
+          entityRef.entity_id,
+          entityRef.entity_label,
+        );
   return (
     <span className="inline-flex items-center gap-1.5">
       <Badge
@@ -52,17 +57,22 @@ function EntityTag({ ref: entityRef }: { ref: StatusUpdateEntityRef }) {
       >
         {ENTITY_TYPE_LABELS[entityRef.entity_type] ?? entityRef.entity_type}
       </Badge>
-      {href ? (
+      {entityRef.entity_type === "po" ? (
+        <PoDetailLink
+          poId={entityRef.entity_id}
+          className="text-sm font-medium text-emerald-700 hover:underline"
+        >
+          {label}
+        </PoDetailLink>
+      ) : href ? (
         <Link
           href={href}
           className="text-sm font-medium text-emerald-700 hover:underline"
         >
-          {entityRef.entity_label ?? entityRef.entity_id}
+          {label}
         </Link>
       ) : (
-        <span className="text-sm font-medium text-stone-800">
-          {entityRef.entity_label ?? entityRef.entity_id}
-        </span>
+        <span className="text-sm font-medium text-stone-800">{label}</span>
       )}
     </span>
   );
@@ -334,7 +344,7 @@ export function StatusUpdateCard({
       })()}
 
       <div className="mt-2 whitespace-pre-wrap text-sm text-stone-900">
-        {renderMentionBody(update.body, profileNames)}
+        <MentionBody body={update.body} profileNames={profileNames} />
       </div>
 
       <button
@@ -372,7 +382,7 @@ export function StatusUpdateCard({
                 {formatStatusUpdateTime(reply.created_at)}
               </p>
               <div className="mt-1 whitespace-pre-wrap">
-                {renderMentionBody(reply.body, profileNames)}
+                <MentionBody body={reply.body} profileNames={profileNames} />
               </div>
             </div>
           ))}

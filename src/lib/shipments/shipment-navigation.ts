@@ -1,6 +1,4 @@
-export function poDetailHref(poId: string): string {
-  return `/dashboard/procurement/${poId}`;
-}
+export { poDetailHref } from "@/lib/procurement/po-navigation";
 
 export function shipmentDetailHref(
   shipmentId: string,
