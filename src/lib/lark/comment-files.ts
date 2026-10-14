@@ -56,13 +56,47 @@ function fileExtension(title: string): string {
   return base.slice(dot + 1).toLowerCase();
 }
 
-export function mimeTypeForLarkFile(title: string, type: string): string | null {
-  const ext = fileExtension(title);
-  if (ext === "svg") return null;
-  if (ext && IMAGE_MIME[ext]) return IMAGE_MIME[ext];
-  if (ext && OTHER_MIME[ext]) return OTHER_MIME[ext];
+function mimeFromExtension(ext: string): string | null {
+  if (!ext || ext === "svg") return null;
+  if (IMAGE_MIME[ext]) return IMAGE_MIME[ext];
+  if (OTHER_MIME[ext]) return OTHER_MIME[ext];
+  return null;
+}
+
+function extensionFromUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const hashExt = url.hash.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? "";
+    let path = decodeURIComponent(url.pathname);
+    path = path.replace(/~tplv-[^/]+$/i, "");
+    return fileExtension(path) || hashExt;
+  } catch {
+    return "";
+  }
+}
+
+export function mimeTypeForLarkFile(
+  title: string,
+  type: string,
+  url?: string,
+): string | null {
+  const titleExt = fileExtension(title);
+  if (titleExt === "svg") return null;
+  const fromTitle = mimeFromExtension(titleExt);
+  if (fromTitle) return fromTitle;
+  if (url) {
+    const urlExt = extensionFromUrl(url);
+    if (urlExt === "svg") return null;
+    const fromUrl = mimeFromExtension(urlExt);
+    if (fromUrl) return fromUrl;
+  }
   if (type === "image") return "image/jpeg";
   return null;
+}
+
+function isPreviewableMime(mime: string | null | undefined): boolean {
+  if (!mime || mime === "image/svg+xml") return false;
+  return mime.startsWith("image/") || mime === "application/pdf";
 }
 
 export function parseLarkCommentPayload(raw: string | null | undefined): {
@@ -112,11 +146,19 @@ function payloadFromObject(obj: Record<string, unknown>): {
       if (!el || typeof el !== "object") continue;
       const rec = el as Record<string, unknown>;
       if (typeof rec.text === "string" && rec.text.trim()) parts.push(rec.text.trim());
-      if (typeof rec.url === "string") files.push(rec);
+      if (typeof rec.url === "string" && isFileElement(rec)) files.push(rec);
     }
     if (!text && parts.length) text = parts.join("");
   }
   return { text, files };
+}
+
+function isFileElement(rec: Record<string, unknown>): boolean {
+  const tag = typeof rec.tag === "string" ? rec.tag.toLowerCase() : "";
+  if (["img", "image", "attachment", "file", "media"].includes(tag)) return true;
+  if (rec.file_size != null || rec.fileSize != null) return true;
+  const type = typeof rec.type === "string" ? rec.type.toLowerCase() : "";
+  return type === "image" || type === "attachment";
 }
 
 /** Visible comment text. Attachment-only JSON does not leak the raw payload. */
@@ -207,6 +249,22 @@ function parseFileSize(value: unknown): number | null {
   return Math.round(n);
 }
 
+function fileTitle(rec: Record<string, unknown>, type: string, fallbackIndex: number): string {
+  for (const key of ["title", "name", "file_name", "fileName"]) {
+    const value = rec[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return type === "image" ? `image-${fallbackIndex + 1}` : `attachment-${fallbackIndex + 1}`;
+}
+
+function fileType(rec: Record<string, unknown>): string {
+  const type = typeof rec.type === "string" ? rec.type.trim().toLowerCase() : "";
+  if (type === "image" || type === "attachment") return type;
+  const tag = typeof rec.tag === "string" ? rec.tag.toLowerCase() : "";
+  if (tag === "img" || tag === "image") return "image";
+  return "attachment";
+}
+
 function normalizeFile(raw: unknown, fallbackIndex: number): LarkCommentFile | null {
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
@@ -217,31 +275,208 @@ function normalizeFile(raw: unknown, fallbackIndex: number): LarkCommentFile | n
   } catch {
     return null;
   }
-  const type =
-    (typeof rec.type === "string" ? rec.type.trim().toLowerCase() : "") ||
-    "attachment";
-  const titleRaw = typeof rec.title === "string" ? rec.title.trim() : "";
-  const title =
-    titleRaw ||
-    (type === "image" ? `image-${fallbackIndex + 1}` : `attachment-${fallbackIndex + 1}`);
+  const href = url.toString();
+  const type = fileType(rec);
+  const title = fileTitle(rec, type, fallbackIndex);
   return {
     title,
     fileSize: parseFileSize(rec.file_size ?? rec.fileSize),
     type,
-    mimeType: mimeTypeForLarkFile(title, type),
-    url: url.toString(),
+    mimeType: mimeTypeForLarkFile(title, type, href),
+    url: href,
   };
 }
 
-function dedupeFiles(files: LarkCommentFile[]): LarkCommentFile[] {
-  const seen = new Set<string>();
-  const out: LarkCommentFile[] = [];
-  for (const file of files) {
-    if (seen.has(file.url)) continue;
-    seen.add(file.url);
-    out.push(file);
+function isGeneratedTitle(title: string): boolean {
+  return /^(image|attachment)-\d+$/i.test(title.trim());
+}
+
+function normalizedTitle(title: string): string {
+  return title.trim().toLowerCase();
+}
+
+function extractFileUuid(raw: string): string | null {
+  const match = raw.match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  );
+  return match?.[0]?.toLowerCase() ?? null;
+}
+
+function canonicalFilePath(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    const path = decodeURIComponent(url.pathname).replace(/~tplv-[^/]+$/i, "");
+    if (path.length < 2 || path === "/") return null;
+    return `${url.hostname.toLowerCase()}${path.toLowerCase()}`;
+  } catch {
+    return null;
   }
-  return out;
+}
+
+function urlPreviewScore(raw: string): number {
+  const ext = extensionFromUrl(raw);
+  let score = 0;
+  if (ext && (IMAGE_MIME[ext] || ext === "pdf")) score += 40;
+  if (/lark-approval-attachment\/image/i.test(raw)) score += 25;
+  if (/~tplv-[^/]*-image/i.test(raw)) score += 10;
+  if (/\/file\/download|box\/stream|\/space\/api|docs\.feishu|docs\.lark/i.test(raw)) {
+    score -= 30;
+  }
+  if (/thumbnail|\/thumb\//i.test(raw)) score -= 15;
+  return score;
+}
+
+function fileScore(file: LarkCommentFile): number {
+  let score = urlPreviewScore(file.url);
+  if (file.mimeType === "application/pdf") score += 160;
+  else if (isPreviewableMime(file.mimeType)) score += 100;
+  if (file.type === "image") score += 10;
+  if (!isGeneratedTitle(file.title)) score += 5;
+  if (file.fileSize != null) score += Math.min(file.fileSize, 5_000_000) / 5_000_000;
+  return score;
+}
+
+function betterTitle(a: string, b: string): string {
+  const score = (title: string) => {
+    if (isGeneratedTitle(title)) return 0;
+    const ext = fileExtension(title);
+    const base = ext ? title.slice(0, -(ext.length + 1)) : title;
+    const hashLike = /^[0-9a-f]{16,}$/i.test(base);
+    let value = 10;
+    if (ext && mimeFromExtension(ext)) value += 6;
+    else if (ext) value += 2;
+    if (hashLike) value -= 5;
+    if (!hashLike && title.length >= 3 && title.length <= 80) value += 3;
+    return value;
+  };
+  return score(a) >= score(b) ? a : b;
+}
+
+function preferFile(a: LarkCommentFile, b: LarkCommentFile): LarkCommentFile {
+  const primary = fileScore(a) >= fileScore(b) ? a : b;
+  const secondary = primary === a ? b : a;
+  const title = betterTitle(primary.title, secondary.title);
+  const sizes = [primary.fileSize, secondary.fileSize].filter(
+    (size): size is number => size != null,
+  );
+  const url = primary.url;
+  const mimeType =
+    [primary.mimeType, secondary.mimeType].find((mime) => isPreviewableMime(mime)) ??
+    mimeTypeForLarkFile(title, primary.type, url);
+  return {
+    title,
+    fileSize: sizes.length ? Math.max(...sizes) : null,
+    type: mimeType?.startsWith("image/") ? "image" : primary.type,
+    mimeType,
+    url,
+  };
+}
+
+function identityKeys(file: LarkCommentFile): string[] {
+  const keys: string[] = [];
+  const uuid = extractFileUuid(file.url);
+  if (uuid) keys.push(`uuid:${uuid}`);
+  const path = canonicalFilePath(file.url);
+  if (path) keys.push(`path:${path}`);
+  const title = normalizedTitle(file.title);
+  if (!isGeneratedTitle(title) && file.fileSize != null) {
+    keys.push(`name:${title}:${file.fileSize}`);
+  }
+  return keys;
+}
+
+function dedupeFiles(files: LarkCommentFile[]): LarkCommentFile[] {
+  if (files.length < 2) return files;
+  const parent = files.map((_, index) => index);
+  const find = (index: number): number => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root]!;
+    let cursor = index;
+    while (parent[cursor] !== root) {
+      const next = parent[cursor]!;
+      parent[cursor] = root;
+      cursor = next;
+    }
+    return root;
+  };
+  const union = (left: number, right: number) => {
+    const a = find(left);
+    const b = find(right);
+    if (a !== b) parent[b] = a;
+  };
+
+  const keyOwner = new Map<string, number>();
+  files.forEach((file, index) => {
+    for (const key of identityKeys(file)) {
+      const owner = keyOwner.get(key);
+      if (owner == null) keyOwner.set(key, index);
+      else union(owner, index);
+    }
+  });
+
+  const byTitle = new Map<string, number[]>();
+  files.forEach((file, index) => {
+    const title = normalizedTitle(file.title);
+    if (!title || isGeneratedTitle(title)) return;
+    const group = byTitle.get(title) ?? [];
+    group.push(index);
+    byTitle.set(title, group);
+  });
+  for (const indexes of byTitle.values()) {
+    const previewable = indexes.filter((index) =>
+      isPreviewableMime(files[index]?.mimeType),
+    );
+    if (previewable.length !== 1) continue;
+    const keeper = previewable[0]!;
+    const keeperFile = files[keeper]!;
+    for (const index of indexes) {
+      if (index === keeper) continue;
+      const other = files[index]!;
+      const otherMime = other.mimeType;
+      if (
+        otherMime &&
+        !isPreviewableMime(otherMime) &&
+        otherMime !== keeperFile.mimeType
+      ) {
+        continue;
+      }
+      const sizesMatch =
+        other.fileSize == null ||
+        keeperFile.fileSize == null ||
+        other.fileSize === keeperFile.fileSize;
+      if (!sizesMatch && fileExtension(other.title)) continue;
+      union(keeper, index);
+    }
+  }
+
+  const bySize = new Map<number, number[]>();
+  files.forEach((file, index) => {
+    if (file.fileSize == null) return;
+    const group = bySize.get(file.fileSize) ?? [];
+    group.push(index);
+    bySize.set(file.fileSize, group);
+  });
+  for (const indexes of bySize.values()) {
+    const named = indexes.filter((index) => !isGeneratedTitle(files[index]!.title));
+    if (named.length !== 1) continue;
+    for (const index of indexes) {
+      if (isGeneratedTitle(files[index]!.title)) union(named[0]!, index);
+    }
+  }
+
+  const groups = new Map<number, { file: LarkCommentFile; order: number }>();
+  files.forEach((file, index) => {
+    const root = find(index);
+    const existing = groups.get(root);
+    if (!existing) {
+      groups.set(root, { file, order: index });
+      return;
+    }
+    groups.set(root, { file: preferFile(existing.file, file), order: existing.order });
+  });
+  return [...groups.values()]
+    .sort((a, b) => a.order - b.order)
+    .map((group) => group.file);
 }
 
 type RawComment = {
