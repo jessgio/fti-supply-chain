@@ -6,6 +6,8 @@ import type {
   PoTimelineEntry,
 } from "@/types/database";
 import { receivePoLine } from "@/lib/db/procurement";
+import { latestInboundReceiveDate } from "@/lib/procurement/unpaid-pos";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { resolvePoShortfallAfterShortClose } from "@/lib/procurement/po-shortfall";
 import {
   computePoDisplayStatus,
@@ -254,6 +256,37 @@ export async function listInboundReceives(
   }
 
   return rows;
+}
+
+/** Latest inbound receive date for each purchase order that has one. */
+export async function listLatestInboundReceiveDateByPo(
+  supabase: SupabaseClient,
+): Promise<Map<string, string>> {
+  const rows = await fetchAllRows<{
+    po_id: string | null;
+    receive_date: string | null;
+  }>(() =>
+    supabase
+      .from("inbound_receives")
+      .select("po_id, receive_date")
+      .not("po_id", "is", null)
+      .order("id", { ascending: true }) as never,
+  );
+
+  const byPo = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!row.po_id) continue;
+    const dates = byPo.get(row.po_id) ?? [];
+    dates.push(row.receive_date ?? "");
+    byPo.set(row.po_id, dates);
+  }
+
+  const latest = new Map<string, string>();
+  for (const [poId, dates] of byPo) {
+    const date = latestInboundReceiveDate(dates);
+    if (date) latest.set(poId, date);
+  }
+  return latest;
 }
 
 export async function getInboundReceive(
