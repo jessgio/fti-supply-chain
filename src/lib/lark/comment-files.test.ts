@@ -156,6 +156,83 @@ test("instance files and thread files merge without dropping either source", () 
   );
 });
 
+test("the same Lark file is kept once, using the previewable copy", () => {
+  const uuid = "332f3596-0845-4746-a4bc-818d54ad435b";
+  const imageUrl = `https://cdn.example.com/lark-approval-attachment/image/20220401/1/${uuid}.png~tplv-ottatrvjsm-image.image?x-expires=1&x-signature=aaa`;
+  const downloadUrl = `https://files.example.com/approval/openapi/v2/file/download/${uuid}?x-expires=2&x-signature=bbb`;
+  const fromInstance = normalizeLarkComments([
+    {
+      id: "c1",
+      open_id: "ou_alex",
+      comment: "ok",
+      create_time: "5000",
+      files: [
+        {
+          url: imageUrl,
+          file_size: 186823,
+          title: "e018906140ed9388234bd03b0.png",
+          type: "image",
+        },
+      ],
+    },
+  ]);
+  const fromThread = normalizeLarkComments([
+    {
+      id: "c1",
+      commentator: "ou_alex",
+      create_time: "5000",
+      content: JSON.stringify({
+        text: "ok",
+        files: [
+          {
+            url: downloadUrl,
+            fileSize: 186823,
+            title: "scan",
+            type: "attachment",
+          },
+        ],
+        elements: [
+          { tag: "img", url: imageUrl, fileSize: 12000 },
+          { tag: "a", url: "https://cdn.example.com/not-a-file", text: "link" },
+        ],
+      }),
+    },
+  ]);
+  const [comment] = mergeLarkComments(fromInstance, fromThread);
+  assert.equal(comment?.files.length, 1);
+  assert.equal(comment?.files[0]?.mimeType, "image/png");
+  assert.match(comment?.files[0]?.url ?? "", /lark-approval-attachment/);
+  assert.equal(comment?.files[0]?.title, "scan");
+});
+
+test("distinct attachments on one comment stay separate", () => {
+  const [comment] = normalizeLarkComments([
+    {
+      id: "c9",
+      comment: "two files",
+      create_time: "1000",
+      files: [
+        {
+          url: "https://cdn.example.com/lark-approval-attachment/image/1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.png",
+          title: "a.png",
+          type: "image",
+          file_size: 10,
+        },
+        {
+          url: "https://cdn.example.com/lark-approval-attachment/image/1/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.pdf",
+          title: "b.pdf",
+          type: "attachment",
+          file_size: 20,
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    comment?.files.map((file) => file.title),
+    ["a.png", "b.pdf"],
+  );
+});
+
 test("unsafe attachment urls are dropped", () => {
   const [comment] = normalizeLarkComments([
     {
