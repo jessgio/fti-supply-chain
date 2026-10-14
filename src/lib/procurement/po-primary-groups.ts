@@ -1,4 +1,4 @@
-import type { ProductPackagingLink, PurchaseOrder } from "@/types/database";
+import type { PoStatus, ProductPackagingLink, PurchaseOrder } from "@/types/database";
 import { poLineOpenQty } from "@/lib/procurement/po-totals";
 
 export interface PrimaryGoodSkuMeta {
@@ -243,7 +243,7 @@ export function groupPurchaseOrdersByPrimaryGood(
 
       const poWithRole = role ? { ...po, primaryRole: role } : po;
       // Skip product sections where this PO no longer has open qty for that SKU.
-      // Received/cancelled (and search across statuses) keep completed POs visible.
+      // Received and cancelled tabs keep completed POs visible.
       if (
         !includeCompleted &&
         poOpenQtyForPrimaryGroup(poWithRole, primarySkuId, packagingToProducts) <=
@@ -273,7 +273,7 @@ export const ACTIVE_PO_STATUSES = new Set([
   "in_transit",
 ]);
 
-export function isActivePurchaseOrder(po: PurchaseOrder): boolean {
+export function isActivePurchaseOrder(po: { status: PoStatus }): boolean {
   return ACTIVE_PO_STATUSES.has(po.status);
 }
 

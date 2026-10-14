@@ -9,6 +9,7 @@ import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { computeOpenPoValueIdr } from "@/lib/procurement/open-po-value";
+import { listLastKnownInboundDateByPo } from "@/lib/db/inbound";
 import { errorMessage } from "@/lib/errors";
 import { requireReadRole, requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -22,10 +23,19 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") as PoStatus | null;
     const includeOpenValue = searchParams.get("include") === "open_value";
     const supabase = createAdminClient();
-    const purchaseOrders = await listPurchaseOrders(
-      supabase,
-      status ?? undefined,
-    );
+    const [ordersResult, inboundResult] = await Promise.allSettled([
+      listPurchaseOrders(supabase, status ?? undefined),
+      listLastKnownInboundDateByPo(supabase),
+    ]);
+    if (ordersResult.status === "rejected") throw ordersResult.reason;
+    const lastInboundByPo =
+      inboundResult.status === "fulfilled"
+        ? inboundResult.value
+        : new Map<string, string>();
+    const purchaseOrders = ordersResult.value.map((po) => ({
+      ...po,
+      last_inbound_date: lastInboundByPo.get(po.id) ?? null,
+    }));
 
     if (!includeOpenValue) {
       return NextResponse.json({ purchaseOrders });

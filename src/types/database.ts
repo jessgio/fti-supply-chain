@@ -673,6 +673,8 @@ export interface PurchaseOrder {
   lark_status_synced_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  /** Latest inbound receive or PO receipt date, when the list loaded it. */
+  last_inbound_date?: string | null;
   lines?: PurchaseOrderLine[];
   payments?: PoPayment[];
 }

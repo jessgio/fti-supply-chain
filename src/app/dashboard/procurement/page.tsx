@@ -62,11 +62,12 @@ import type {
 } from "@/types/database";
 import {
   groupPurchaseOrdersByPrimaryGood,
-  isActivePurchaseOrder,
   packagingSkuToProductIds,
   poOpenQtyForPrimaryGroup,
   type PoPrimaryRole,
 } from "@/lib/procurement/po-primary-groups";
+import { purchaseOrdersForStatusTab } from "@/lib/procurement/po-search-results";
+import { PoSearchResultsTable } from "@/components/procurement/po-search-results-table";
 import type { ProductPackagingLink } from "@/types/database";
 
 const UnpaidPosTable = dynamic(
@@ -416,28 +417,30 @@ function ProcurementInner() {
     return (po.lines ?? []).some((line) => linkedPackagingIds.has(line.sku_id));
   };
 
+  const statusScopedPos = useMemo(
+    () => purchaseOrdersForStatusTab(pos, statusFilter),
+    [pos, statusFilter],
+  );
+
   const filteredPos = useMemo(() => {
-    const byStatus = statusFilter
-      ? pos.filter((po) => po.status === statusFilter)
-      : pos;
-    if (!skuQ) return byStatus;
-    return byStatus.filter(poMatchesQuery);
+    if (!skuQ) return statusScopedPos;
+    return statusScopedPos.filter(poMatchesQuery);
+    // poMatchesQuery closes over the latest SKU catalog and packaging links.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pos, skuQ, statusFilter]);
+  }, [statusScopedPos, skuQ, skus, packagingLinks]);
 
-  // Active list hides received/cancelled; Received/Cancelled tabs and search
-  // must still show completed POs (zero open qty).
+  const allStatusMatches = useMemo(() => {
+    if (!skuQ) return [];
+    return pos.filter(poMatchesQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos, skuQ, skus, packagingLinks]);
+
+  // Active and in-progress tabs hide fully received lines. Received and
+  // cancelled tabs still show completed POs.
   const includeCompleted =
-    statusFilter === "received" ||
-    statusFilter === "cancelled" ||
-    Boolean(skuQ);
+    statusFilter === "received" || statusFilter === "cancelled";
 
-  const posForGrouping = useMemo(() => {
-    if (statusFilter) return filteredPos;
-    // Searching from Active: include received/cancelled matches.
-    if (skuQ) return filteredPos;
-    return filteredPos.filter(isActivePurchaseOrder);
-  }, [filteredPos, statusFilter, skuQ]);
+  const posForGrouping = filteredPos;
 
   const packagingToProducts = useMemo(
     () => packagingSkuToProductIds(packagingLinks),
@@ -650,7 +653,7 @@ function ProcurementInner() {
     <div
       className={cn(
         "mx-auto space-y-6 p-8",
-        listTab === "unpaid" ? "max-w-[96rem]" : "max-w-6xl",
+        listTab === "unpaid" || skuQ ? "max-w-[96rem]" : "max-w-6xl",
       )}
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -753,18 +756,46 @@ function ProcurementInner() {
       {listTab === "unpaid" ? (
         <UnpaidPosTable refreshKey={refreshKey} />
       ) : (
+      <>
+      <div className="relative w-full sm:max-w-md">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+        <Input
+          className="pl-8 pr-8"
+          placeholder="Find POs by number, supplier, SKU, or name…"
+          aria-label="Find purchase orders by number, supplier, SKU, or name"
+          value={skuQuery}
+          onChange={(e) => setSkuQuery(e.target.value)}
+        />
+        {skuQuery && (
+          <button
+            type="button"
+            onClick={() => setSkuQuery("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+            aria-label="Clear search"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      {skuQ && !loading && !error && (
+        <PoSearchResultsTable
+          purchaseOrders={allStatusMatches}
+          skus={skus}
+          query={skuQuery}
+        />
+      )}
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
               <CardTitle>Purchase orders by product</CardTitle>
               <CardDescription>
                 {skuQ
-                  ? `${posForGrouping.length} order${
-                      posForGrouping.length === 1 ? "" : "s"
-                    } match “${skuQuery.trim()}”`
+                  ? `${posForGrouping.length} ${
+                      statusFilter
+                        ? STATUS_LABELS[statusFilter].toLowerCase()
+                        : "active"
+                    } order${posForGrouping.length === 1 ? "" : "s"} match “${skuQuery.trim()}”. This list follows the selected status. Every status is in the table above.`
                   : statusFilter
-                    ? `${posForGrouping.length} order${
+                    ? `${posForGrouping.length} ${STATUS_LABELS[statusFilter].toLowerCase()} order${
                         posForGrouping.length === 1 ? "" : "s"
                       }`
                     : `${posForGrouping.length} active order${
@@ -772,30 +803,7 @@ function ProcurementInner() {
                       } across ${primaryGroups.length} product${
                         primaryGroups.length === 1 ? "" : "s"
                       }`}
-                {statusFilter ? ` · ${STATUS_LABELS[statusFilter]}` : ""}
-                {skuQ && !statusFilter ? " · including received/cancelled" : ""}
               </CardDescription>
-            </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-              <Input
-                className="pl-8 pr-8"
-                placeholder="Find POs by number, supplier, SKU, or name…"
-                value={skuQuery}
-                onChange={(e) => setSkuQuery(e.target.value)}
-              />
-              {skuQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSkuQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
-                  aria-label="Clear search"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {loading ? (
@@ -807,17 +815,19 @@ function ProcurementInner() {
               No purchase orders yet. Create one from a forecast recommendation
               or with the button above.
             </p>
-          ) : filteredPos.length === 0 ? (
-            <p className="text-sm text-stone-500">
-              No purchase orders match “{skuQuery.trim()}”.
-            </p>
           ) : primaryGroups.length === 0 ? (
             <p className="text-sm text-stone-500">
-              {statusFilter === "received" || statusFilter === "cancelled"
-                ? `No ${STATUS_LABELS[statusFilter].toLowerCase()} purchase orders to show.`
+              {skuQ && allStatusMatches.length > 0
+                ? `No ${
+                    statusFilter
+                      ? STATUS_LABELS[statusFilter].toLowerCase()
+                      : "active"
+                  } purchase orders match “${skuQuery.trim()}”. Every status is listed in the table above.`
                 : skuQ
                   ? `No purchase orders match “${skuQuery.trim()}”.`
-                  : "No active purchase orders to show. Use the status filters above to view received or cancelled POs."}
+                  : statusFilter
+                    ? `No ${STATUS_LABELS[statusFilter].toLowerCase()} purchase orders to show.`
+                    : "No active purchase orders to show. Use the status filters above to view received or cancelled POs."}
             </p>
           ) : (
             <div className="space-y-8">
@@ -871,6 +881,7 @@ function ProcurementInner() {
           )}
         </CardContent>
       </Card>
+      </>
       )}
 
       {createOpen && (

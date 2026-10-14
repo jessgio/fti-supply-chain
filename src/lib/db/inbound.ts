@@ -289,6 +289,54 @@ export async function listLatestInboundReceiveDateByPo(
   return latest;
 }
 
+function poIdFromReceiptLine(
+  value: { po_id: string } | { po_id: string }[] | null,
+): string | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0]?.po_id ?? null;
+  return value.po_id ?? null;
+}
+
+/**
+ * Latest day goods were known to arrive for each PO.
+ * Uses inbound receive dates and direct PO receipt dates, and keeps the later day.
+ */
+export async function listLastKnownInboundDateByPo(
+  supabase: SupabaseClient,
+): Promise<Map<string, string>> {
+  const [inboundByPo, receiptRows] = await Promise.all([
+    listLatestInboundReceiveDateByPo(supabase),
+    fetchAllRows<{
+      received_date: string | null;
+      purchase_order_lines: { po_id: string } | { po_id: string }[] | null;
+    }>(() =>
+      supabase
+        .from("po_receipts")
+        .select("received_date, purchase_order_lines!inner(po_id)")
+        .order("id", { ascending: true }) as never,
+    ),
+  ]);
+
+  const datesByPo = new Map<string, string[]>();
+  for (const [poId, date] of inboundByPo) {
+    datesByPo.set(poId, [date]);
+  }
+  for (const row of receiptRows) {
+    const poId = poIdFromReceiptLine(row.purchase_order_lines);
+    if (!poId) continue;
+    const dates = datesByPo.get(poId) ?? [];
+    dates.push(row.received_date ?? "");
+    datesByPo.set(poId, dates);
+  }
+
+  const latest = new Map<string, string>();
+  for (const [poId, dates] of datesByPo) {
+    const date = latestInboundReceiveDate(dates);
+    if (date) latest.set(poId, date);
+  }
+  return latest;
+}
+
 export async function getInboundReceive(
   supabase: SupabaseClient,
   id: string,
