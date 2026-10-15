@@ -46,6 +46,15 @@ export const DEFAULT_TARGET_STOCK_MONTHS = 4.5;
 export const NPD_LAUNCH_MONTHS = 3;
 /** Coefficient of variation above this on completed monthly sales → volatile. */
 export const VOLATILE_CV_THRESHOLD = 0.45;
+/**
+ * A completed month under this share of the other months' median, after an
+ * earlier month sold more, is treated as a stockout rather than demand.
+ */
+export const STOCKOUT_MONTH_SALES_RATIO = 0.3;
+/** On-hand above this many days of in-stock demand keeps a weak sales month. */
+export const HEALTHY_STOCK_COVER_DAYS = 7;
+/** Leave the forecast on the unadjusted rate when fewer months than this would remain. */
+export const MIN_IN_STOCK_MONTHS = 2;
 
 interface ForecastOptions {
   leadTimeDays?: number;
@@ -79,32 +88,202 @@ export function getCompletedMonthBounds(
   };
 }
 
+interface MonthDemand {
+  month: string;
+  qty: number;
+  dayCount: number;
+}
+
+function monthKeysBetween(start: string, end: string): string[] {
+  const months: string[] = [];
+  let cursor = startOfMonth(parseISO(start));
+  const last = startOfMonth(parseISO(end));
+  while (cursor <= last) {
+    months.push(format(cursor, "yyyy-MM"));
+    cursor = addMonths(cursor, 1);
+  }
+  return months;
+}
+
+function daysInMonthSlice(
+  month: string,
+  rangeStart: string,
+  rangeEnd: string,
+): number {
+  const monthStart = `${month}-01`;
+  const monthEnd = format(
+    subDays(addMonths(parseISO(monthStart), 1), 1),
+    "yyyy-MM-dd",
+  );
+  const start = monthStart > rangeStart ? monthStart : rangeStart;
+  const end = monthEnd < rangeEnd ? monthEnd : rangeEnd;
+  if (start > end) return 0;
+  return differenceInCalendarDays(parseISO(end), parseISO(start)) + 1;
+}
+
+function includedDayCount(
+  start: string,
+  end: string,
+  excludedMonths: ReadonlySet<string>,
+): number {
+  if (start > end) return 0;
+  return monthKeysBetween(start, end)
+    .filter((month) => !excludedMonths.has(month))
+    .reduce(
+      (sum, month) => sum + daysInMonthSlice(month, start, end),
+      0,
+    );
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function firstPositiveSaleDate(
+  points: DemandPoint[],
+  through: string,
+): string | null {
+  let earliest: string | null = null;
+  for (const point of points) {
+    if (point.qty <= 0 || point.date > through) continue;
+    if (!earliest || point.date < earliest) earliest = point.date;
+  }
+  return earliest;
+}
+
+/** Completed months from the first sale through the end of the window. */
+function monthDemandInWindow(
+  points: DemandPoint[],
+  windowStart: string,
+  windowEnd: string,
+): MonthDemand[] {
+  const firstSale = firstPositiveSaleDate(points, windowEnd);
+  if (!firstSale) return [];
+  const rangeStart = firstSale > windowStart ? firstSale : windowStart;
+  if (rangeStart > windowEnd) return [];
+
+  const totals = new Map<string, number>();
+  for (const point of points) {
+    if (point.date < rangeStart || point.date > windowEnd) continue;
+    const month = point.date.slice(0, 7);
+    totals.set(month, (totals.get(month) ?? 0) + point.qty);
+  }
+
+  return monthKeysBetween(rangeStart, windowEnd)
+    .map((month) => ({
+      month,
+      qty: totals.get(month) ?? 0,
+      dayCount: daysInMonthSlice(month, rangeStart, windowEnd),
+    }))
+    .filter((month) => month.dayCount > 0);
+}
+
+function isSalesCollapse(month: MonthDemand, months: MonthDemand[]): boolean {
+  const others = months
+    .filter((other) => other.month !== month.month)
+    .map((other) => other.qty);
+  const otherMedian = median(others);
+  if (!(otherMedian > 0)) return false;
+  const earlierSoldMore = months.some(
+    (other) => other.month < month.month && other.qty > month.qty,
+  );
+  return (
+    month.qty < otherMedian * STOCKOUT_MONTH_SALES_RATIO && earlierSoldMore
+  );
+}
+
+function dailyRate(months: MonthDemand[]): number {
+  const days = months.reduce((sum, month) => sum + month.dayCount, 0);
+  const qty = months.reduce((sum, month) => sum + month.qty, 0);
+  return days > 0 ? qty / days : 0;
+}
+
+/**
+ * Completed months to leave out of Fcst/day. A sales collapse after real
+ * selling is a stockout, unless that month's warehouse snapshot still covers
+ * about a week of in-stock demand. A near-zero snapshot drops the month even
+ * when the sales dip is only moderate. Months with no snapshot use the sales
+ * test alone.
+ */
+export function selectExcludedStockoutMonths(
+  points: DemandPoint[],
+  referenceDate = new Date(),
+  minOnHandByMonth: ReadonlyMap<string, number> = new Map(),
+): string[] {
+  const { l6mStart, l6mEnd } = getCompletedMonthBounds(referenceDate);
+  const months = monthDemandInWindow(points, l6mStart, l6mEnd);
+  if (months.length < MIN_IN_STOCK_MONTHS) return [];
+
+  const collapsed = new Set(
+    months.filter((month) => isSalesCollapse(month, months)).map((month) => month.month),
+  );
+  const inStockMonths = months.filter((month) => !collapsed.has(month.month));
+  const rate = dailyRate(
+    inStockMonths.length >= MIN_IN_STOCK_MONTHS ? inStockMonths : months,
+  );
+
+  const excluded = new Set(collapsed);
+  for (const month of months) {
+    if (!minOnHandByMonth.has(month.month)) continue;
+    const onHand = minOnHandByMonth.get(month.month) ?? 0;
+    const healthy = rate > 0 && onHand > rate * HEALTHY_STOCK_COVER_DAYS;
+    const nearZero = rate > 0 ? onHand < rate : onHand <= 0;
+    if (healthy) excluded.delete(month.month);
+    else if (nearZero) excluded.add(month.month);
+  }
+
+  if (months.length - excluded.size < MIN_IN_STOCK_MONTHS) {
+    const restore = months
+      .filter((month) => excluded.has(month.month))
+      .sort((a, b) => b.qty - a.qty || a.month.localeCompare(b.month));
+    for (const month of restore) {
+      if (months.length - excluded.size >= MIN_IN_STOCK_MONTHS) break;
+      excluded.delete(month.month);
+    }
+  }
+
+  return [...excluded].sort();
+}
+
+/** "Sep out of stock", or "Apr, Sep out of stock" when more than one month drops. */
+export function formatExcludedStockoutMonths(
+  months: readonly string[] | null | undefined,
+): string | null {
+  if (!months || months.length === 0) return null;
+  const labels = [...months]
+    .sort()
+    .map((month) => format(parseISO(`${month}-01`), "MMM"));
+  return `${labels.join(", ")} out of stock`;
+}
+
 /**
  * Average daily demand for a completed month window. New products that began
  * selling mid-window are averaged from their first sale date, not the full span.
+ * Days in `excludedMonths` (yyyy-MM) contribute neither sales nor calendar days.
  */
 export function periodAvgDaily(
   points: DemandPoint[],
   periodStart: string,
   periodEnd: string,
+  excludedMonths: ReadonlySet<string> = new Set(),
 ): number {
-  const salesInPeriod = points.filter(
-    (p) => p.date >= periodStart && p.date <= periodEnd,
-  );
-  if (salesInPeriod.length === 0) return 0;
-
-  const firstSaleDate = [...points]
-    .filter((p) => p.qty > 0 && p.date <= periodEnd)
-    .sort((a, b) => a.date.localeCompare(b.date))[0]?.date;
+  const firstSaleDate = firstPositiveSaleDate(points, periodEnd);
   if (!firstSaleDate) return 0;
 
   const effectiveStart =
     firstSaleDate > periodStart ? firstSaleDate : periodStart;
-  const totalQty = salesInPeriod
-    .filter((p) => p.date >= effectiveStart)
-    .reduce((sum, p) => sum + p.qty, 0);
-  const dayCount =
-    differenceInCalendarDays(parseISO(periodEnd), parseISO(effectiveStart)) + 1;
+  const totalQty = points.reduce((sum, point) => {
+    if (point.date < effectiveStart || point.date > periodEnd) return sum;
+    if (excludedMonths.has(point.date.slice(0, 7))) return sum;
+    return sum + point.qty;
+  }, 0);
+  const dayCount = includedDayCount(effectiveStart, periodEnd, excludedMonths);
   return dayCount > 0 ? totalQty / dayCount : 0;
 }
 
@@ -112,10 +291,11 @@ export function periodAvgDaily(
 export function computeForecastDaily(
   points: DemandPoint[],
   referenceDate = new Date(),
+  excludedStockoutMonths: ReadonlySet<string> = new Set(),
 ): { forecast: number; l3m: number; l6m: number } {
   const { l3mStart, l6mStart, l6mEnd } = getCompletedMonthBounds(referenceDate);
-  const l3m = periodAvgDaily(points, l3mStart, l6mEnd);
-  const l6m = periodAvgDaily(points, l6mStart, l6mEnd);
+  const l3m = periodAvgDaily(points, l3mStart, l6mEnd, excludedStockoutMonths);
+  const l6m = periodAvgDaily(points, l6mStart, l6mEnd, excludedStockoutMonths);
 
   let forecast = 0;
   if (l3m > 0 && l6m > 0) forecast = (l3m + l6m) / 2;
@@ -190,23 +370,30 @@ function completedMonthlyTotals(
   l6mStart: string,
   l6mEnd: string,
   launchDate: string,
+  excludedMonths: ReadonlySet<string>,
 ): number[] {
   const launchMonth = launchDate.slice(0, 7);
+  const windowStartMonth = l6mStart.slice(0, 7);
+  const startMonth =
+    launchMonth > windowStartMonth ? launchMonth : windowStartMonth;
   const lastMonth = l6mEnd.slice(0, 7);
   const totals = new Map<string, number>();
 
   for (const point of points) {
     if (point.date < l6mStart || point.date > l6mEnd) continue;
     const month = point.date.slice(0, 7);
-    if (month < launchMonth) continue;
+    if (month < startMonth || excludedMonths.has(month)) continue;
     totals.set(month, (totals.get(month) ?? 0) + point.qty);
   }
 
   const months: number[] = [];
-  let cursor = parseISO(`${launchMonth}-01`);
+  let cursor = parseISO(`${startMonth}-01`);
   const end = parseISO(`${lastMonth}-01`);
   while (cursor <= end) {
-    months.push(totals.get(format(cursor, "yyyy-MM")) ?? 0);
+    const month = format(cursor, "yyyy-MM");
+    if (!excludedMonths.has(month)) {
+      months.push(totals.get(month) ?? 0);
+    }
     cursor = addMonths(cursor, 1);
   }
   return months;
@@ -226,6 +413,7 @@ export function classifyDemandPattern(
   points: DemandPoint[],
   firstSaleDate: string | null,
   referenceDate = new Date(),
+  excludedStockoutMonths: ReadonlySet<string> = new Set(),
 ): DemandPattern {
   if (!firstSaleDate) return "steady";
 
@@ -241,6 +429,7 @@ export function classifyDemandPattern(
     l6mStart,
     l6mEnd,
     firstSaleDate,
+    excludedStockoutMonths,
   );
   if (monthly.length < 2) return "steady";
 
@@ -257,6 +446,11 @@ export interface SkuForecastInput {
   demand_start_date: string | null;
   first_sale_date: string | null;
   demand_qtys: number[];
+  /**
+   * Minimum combined warehouse on-hand by yyyy-MM. Months absent from the map
+   * have no stock snapshot in that month.
+   */
+  min_on_hand_by_month?: Record<string, number>;
 }
 
 export function buildRestockPlanFromSeries(
@@ -284,6 +478,11 @@ export function buildRestockPlanFromSeries(
   const firstSaleBySku = new Map(
     inputs.map((row) => [row.sku_code, row.first_sale_date]),
   );
+  const minOnHandBySku = new Map<string, Map<string, number>>();
+  for (const row of inputs) {
+    if (!row.min_on_hand_by_month) continue;
+    minOnHandBySku.set(row.sku_code, new Map(Object.entries(row.min_on_hand_by_month)));
+  }
 
   const plan = buildRestockPlan(
     demandBySku,
@@ -291,6 +490,7 @@ export function buildRestockPlanFromSeries(
     options,
     onOrderBySku,
     firstSaleBySku,
+    minOnHandBySku,
   );
   return plan;
 }
@@ -309,6 +509,7 @@ export function buildRestockPlan(
   options: ForecastOptions = {},
   onOrderBySku: Map<string, number> = new Map(),
   firstSaleBySku: Map<string, string | null> = new Map(),
+  minOnHandBySku: Map<string, ReadonlyMap<string, number>> = new Map(),
 ): RestockRecommendation[] {
   const leadTimeDays =
     options.leadTimeDays ?? monthsToDays(DEFAULT_LEAD_TIME_MONTHS);
@@ -323,8 +524,18 @@ export function buildRestockPlan(
 
   for (const [skuCode, demand] of demandBySku) {
     const sorted = [...demand].sort((a, b) => a.date.localeCompare(b.date));
-    const { forecast: baseForecastDaily, l3m, l6m } =
-      computeForecastDaily(sorted);
+    const referenceDate = new Date();
+    const excludedStockoutMonths = selectExcludedStockoutMonths(
+      sorted,
+      referenceDate,
+      minOnHandBySku.get(skuCode),
+    );
+    const excludedStockoutMonthSet = new Set(excludedStockoutMonths);
+    const { forecast: baseForecastDaily, l3m, l6m } = computeForecastDaily(
+      sorted,
+      referenceDate,
+      excludedStockoutMonthSet,
+    );
     const stock = stockBySku.get(skuCode);
     const currentStock = stock?.qty_on_hand ?? 0;
     const onOrderQty = onOrderBySku.get(skuCode) ?? 0;
@@ -359,9 +570,14 @@ export function buildRestockPlan(
       dailyBurn > 0 ? Math.ceil(batchQty) : 0;
     const coveredByPo = onOrderQty > 0 && !needsReorder;
 
-    const { l3mStart, l6mStart } = getCompletedMonthBounds();
+    const { l3mStart, l6mStart } = getCompletedMonthBounds(referenceDate);
     const firstSaleDate = firstSaleBySku.get(skuCode) ?? null;
-    const demandPattern = classifyDemandPattern(sorted, firstSaleDate);
+    const demandPattern = classifyDemandPattern(
+      sorted,
+      firstSaleDate,
+      referenceDate,
+      excludedStockoutMonthSet,
+    );
     let confidence: RestockRecommendation["confidence"] = "low";
     if (firstSaleDate && firstSaleDate <= l3mStart && l3m > 0 && l6m > 0) {
       confidence = "high";
@@ -384,6 +600,7 @@ export function buildRestockPlan(
       forecast_daily_demand: Number(forecastDaily.toFixed(2)),
       seasonal_uplift_multiplier: Number(seasonalMultiplier.toFixed(3)),
       seasonal_uplift_reasons: seasonalUpliftReasons,
+      excluded_stockout_months: excludedStockoutMonths,
       days_until_stockout: daysUntilStockout,
       projected_stockout_date: projectedStockoutDate,
       earliest_incoming_batch_date: null,

@@ -37,6 +37,7 @@ import {
   DEFAULT_LEAD_TIME_MONTHS,
   DEFAULT_SAFETY_STOCK_MONTHS,
   DEFAULT_TARGET_STOCK_MONTHS,
+  formatExcludedStockoutMonths,
 } from "@/lib/forecast/demand";
 import {
   OVERSTOCK_MONTHS,
@@ -1001,6 +1002,9 @@ export default function InventoryPage() {
                             86_400_000,
                         )
                       : null;
+                  const stockoutNote = formatExcludedStockoutMonths(
+                    row.excluded_stockout_months,
+                  );
                   return (
                     <Fragment key={row.sku_code}>
                     <tr className="border-b border-stone-100">
@@ -1092,6 +1096,14 @@ export default function InventoryPage() {
                                 (row.seasonal_uplift_multiplier - 1) * 100,
                               )}
                               % seasonal (off)
+                            </span>
+                          )}
+                          {stockoutNote && (
+                            <span
+                              className="text-xs text-stone-500"
+                              title="Left out of Fcst/day and Fcst/mo because the SKU was largely out of stock"
+                            >
+                              {stockoutNote}
                             </span>
                           )}
                         </div>
