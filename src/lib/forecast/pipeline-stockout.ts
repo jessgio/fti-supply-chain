@@ -36,13 +36,17 @@ export async function enrichWithIncomingBatchStockout(
 
   const batchesBySkuCode = new Map<
     string,
-    { line_id: string; open_qty: number; expected_date: string }[]
+    {
+      batch_key: string;
+      open_qty: number;
+      expected_date: string;
+    }[]
   >();
   for (const batch of batches) {
     if (!batch.expected_date) continue;
     const list = batchesBySkuCode.get(batch.sku_code) ?? [];
     list.push({
-      line_id: batch.line_id,
+      batch_key: batch.batch_key,
       open_qty: batch.open_qty,
       expected_date: batch.expected_date,
     });
@@ -52,8 +56,9 @@ export async function enrichWithIncomingBatchStockout(
   return recommendations.map((rec) => {
     const skuBatches = batchesBySkuCode.get(rec.sku_code);
 
-    // Earliest scheduled arrival is independent of demand; show it whenever
-    // an open PO batch with an expected date exists.
+    // Earliest scheduled arrival is independent of demand. Open shipment
+    // quantity uses the shipment expected delivery date; unshipped quantity
+    // still uses the purchase order expected date.
     const earliestIncomingBatchDate = skuBatches?.length
       ? skuBatches.reduce(
           (min, b) => (b.expected_date < min ? b.expected_date : min),
@@ -80,7 +85,7 @@ export async function enrichWithIncomingBatchStockout(
     const incoming: IncomingBatch[] = skuBatches.map((b) => ({
       arrivalDate: b.expected_date,
       qty: b.open_qty,
-      lineId: b.line_id,
+      lineId: b.batch_key,
     }));
 
     const pipeline = projectSkuPipelineCoverage(
@@ -92,7 +97,7 @@ export async function enrichWithIncomingBatchStockout(
 
     const latestLineId = pipeline.latest_line_id;
     const latestBatch = latestLineId
-      ? skuBatches.find((b) => b.line_id === latestLineId)
+      ? skuBatches.find((b) => b.batch_key === latestLineId)
       : null;
 
     return {

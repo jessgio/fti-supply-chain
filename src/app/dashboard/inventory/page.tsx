@@ -1140,7 +1140,7 @@ export default function InventoryPage() {
                           row.incoming_batch_arrival_date
                             ? `Latest batch arrives ${row.incoming_batch_arrival_date}; depletes after current stock is consumed`
                             : row.on_order_qty > 0
-                              ? "Set PO expected date to project batch stockout"
+                              ? "Set a shipment delivery date or PO expected date to project batch stockout"
                               : undefined
                         }
                       >

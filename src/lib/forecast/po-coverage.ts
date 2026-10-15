@@ -22,8 +22,6 @@ export async function computePoCoverage(
   supabase: SupabaseClient,
   po: PurchaseOrder,
 ): Promise<PoLineCoverage[]> {
-  if (!po.expected_date) return [];
-
   const openLines = (po.lines ?? []).filter(
     (l) => l.qty_ordered - l.qty_received > 0,
   );
@@ -42,11 +40,13 @@ export async function computePoCoverage(
     string,
     ReturnType<typeof projectSkuPipelineCoverage>
   >();
+  const batchesBySku = new Map<string, typeof batches>();
 
   for (const skuId of skuIds) {
     const skuBatches = batches.filter(
       (b) => b.sku_id === skuId && b.expected_date,
     );
+    batchesBySku.set(skuId, skuBatches);
     if (skuBatches.length === 0) continue;
 
     const skuCode = skuBatches[0]?.sku_code ?? "";
@@ -57,7 +57,7 @@ export async function computePoCoverage(
     const incoming: IncomingBatch[] = skuBatches.map((b) => ({
       arrivalDate: b.expected_date!,
       qty: b.open_qty,
-      lineId: b.line_id,
+      lineId: b.batch_key,
     }));
 
     coverageBySku.set(
@@ -76,14 +76,26 @@ export async function computePoCoverage(
     const rec = recBySku.get(skuCode);
     const pipeline = coverageBySku.get(line.sku_id);
     const dailyBurn = rec?.forecast_daily_demand ?? 0;
+    const lineBatches = (batchesBySku.get(line.sku_id) ?? []).filter(
+      (batch) => batch.line_id === line.id,
+    );
+    const batchDepletionDate = lineBatches.reduce<string | null>(
+      (latest, batch) => {
+        const date = pipeline?.batch_depletion_by_line.get(batch.batch_key);
+        if (!date) return latest;
+        return latest == null || date > latest ? date : latest;
+      },
+      null,
+    );
 
     return {
       line_id: line.id,
       sku_code: skuCode,
-      batch_depletion_date:
-        pipeline?.batch_depletion_by_line.get(line.id) ?? null,
+      batch_depletion_date: batchDepletionDate,
       next_reorder_date: pipeline?.next_reorder_date ?? null,
-      is_latest_batch: pipeline?.latest_line_id === line.id,
+      is_latest_batch: lineBatches.some(
+        (batch) => batch.batch_key === pipeline?.latest_line_id,
+      ),
       daily_burn: dailyBurn > 0 ? dailyBurn : null,
     };
   });

@@ -13,6 +13,7 @@ import {
   CLEARED_COMMITTED_PAYMENT_AMOUNTS,
 } from "@/lib/procurement/committed-payment-amounts";
 import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
+import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 
@@ -832,6 +833,11 @@ export async function deletePurchaseOrder(
 
 export interface OpenPoBatch {
   line_id: string;
+  /**
+   * Pipeline simulation key. Equals line_id unless open quantity is split
+   * between a shipment delivery date and unshipped purchase-order quantity.
+   */
+  batch_key: string;
   po_id: string;
   sku_id: string;
   sku_code: string;
@@ -877,7 +883,7 @@ export async function listOpenPoBatchesBySkus(
     ),
   );
 
-  const batches: OpenPoBatch[] = [];
+  const batches: Array<Omit<OpenPoBatch, "batch_key">> = [];
   for (const line of lines) {
     const po = line.purchase_orders;
     if (!po) continue;
@@ -894,7 +900,9 @@ export async function listOpenPoBatchesBySkus(
     });
   }
 
-  return batches;
+  // A set shipment that is not yet inbounded arrives on its expected delivery
+  // date. The purchase order expected date only covers quantity still unshipped.
+  return withShipmentArrivalDates(supabase, batches);
 }
 
 export async function receivePoLine(

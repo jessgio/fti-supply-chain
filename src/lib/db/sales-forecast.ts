@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { format } from "date-fns";
 import { getCompletedMonthBounds } from "@/lib/forecast/demand";
+import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
 import {
   MONTHS,
   OFFLINE_SALES_LAG_MONTHS,
@@ -186,6 +187,7 @@ async function loadStockBySkuId(
 type OnOrderInfo = { qty: number; date: string | null };
 
 type OpenPoLineRow = {
+  id: string;
   sku_id: string;
   qty_ordered: number;
   qty_received: number;
@@ -203,7 +205,7 @@ async function loadOnOrderBySkuId(
     supabase
       .from("purchase_order_lines")
       .select(
-        "sku_id, qty_ordered, qty_received, is_closed, purchase_orders!inner(expected_date, status)",
+        "id, sku_id, qty_ordered, qty_received, is_closed, purchase_orders!inner(expected_date, status)",
       )
       .eq("is_closed", false)
       .in("purchase_orders.status", [
@@ -213,18 +215,34 @@ async function loadOnOrderBySkuId(
         "in_transit",
       ]),
   );
-  const map = new Map<string, OnOrderInfo>();
+  const openLines: Array<{
+    sku_id: string;
+    line_id: string;
+    open_qty: number;
+    expected_date: string | null;
+  }> = [];
   for (const row of rows) {
     const open = Number(row.qty_ordered) - Number(row.qty_received);
     if (!(open > 0)) continue;
     const po = Array.isArray(row.purchase_orders)
       ? row.purchase_orders[0]
       : row.purchase_orders;
-    const prev = map.get(row.sku_id) ?? { qty: 0, date: null };
-    prev.qty += open;
-    const date = po?.expected_date ?? null;
+    openLines.push({
+      sku_id: row.sku_id,
+      line_id: row.id,
+      open_qty: open,
+      expected_date: po?.expected_date ?? null,
+    });
+  }
+
+  const arrivals = await withShipmentArrivalDates(supabase, openLines);
+  const map = new Map<string, OnOrderInfo>();
+  for (const arrival of arrivals) {
+    const prev = map.get(arrival.sku_id) ?? { qty: 0, date: null };
+    prev.qty += arrival.open_qty;
+    const date = arrival.expected_date;
     if (date && (!prev.date || date < prev.date)) prev.date = date;
-    map.set(row.sku_id, prev);
+    map.set(arrival.sku_id, prev);
   }
   return map;
 }
