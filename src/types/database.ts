@@ -442,6 +442,8 @@ export interface RestockRecommendation {
   /** 1 = no uplift; >1 when reorder window overlaps Ramadan or Q4. */
   seasonal_uplift_multiplier: number;
   seasonal_uplift_reasons: string[];
+  /** Completed months (yyyy-MM) left out of Fcst/day because the SKU was largely out of stock. */
+  excluded_stockout_months: string[];
   days_until_stockout: number | null;
   projected_stockout_date: string | null;
   /** Expected arrival of the earliest open PO batch (when POs exist). */

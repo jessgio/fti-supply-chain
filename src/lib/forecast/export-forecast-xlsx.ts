@@ -3,7 +3,7 @@ import type {
   ProductLinkedPackagingRow,
   RestockRecommendation,
 } from "@/types/database";
-import { DAYS_PER_MONTH } from "@/lib/forecast/demand";
+import { DAYS_PER_MONTH, formatExcludedStockoutMonths } from "@/lib/forecast/demand";
 import {
   STOCK_STATUS_BADGE,
   monthsOfCover,
@@ -20,6 +20,7 @@ export interface ForecastExportRow {
   "On order": number;
   "Fcst/day": number;
   "Fcst/mo": number;
+  "Out of stock months": string;
   "DOI (days)": number | "";
   "DOI (months)": number | "";
   "On-hand stockout": string;
@@ -86,6 +87,8 @@ export function buildForecastExportRows(
       "On order": round(row.on_order_qty, 2),
       "Fcst/day": round(row.forecast_daily_demand, 4),
       "Fcst/mo": round(row.forecast_daily_demand * DAYS_PER_MONTH, 2),
+      "Out of stock months":
+        formatExcludedStockoutMonths(row.excluded_stockout_months) ?? "",
       "DOI (days)":
         row.days_until_stockout === null
           ? ""
