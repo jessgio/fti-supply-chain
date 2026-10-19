@@ -1,4 +1,5 @@
 import type { PoPayment } from "@/types/database";
+import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 import { getRateToIdr } from "@/lib/procurement/fx-rates";
 
 type PaymentFxInput = Pick<
@@ -38,7 +39,7 @@ export function paymentAmountIdrWithRates(
   rates: Map<string, number>,
 ): number {
   if (payment.currency === "IDR") {
-    return Math.round(payment.amount);
+    return preserveFractionalMoney(payment.amount);
   }
   if (payment.exchange_rate != null && payment.exchange_rate > 0) {
     return Math.round(payment.amount * payment.exchange_rate);
@@ -68,7 +69,7 @@ export function paymentAmountIdrSync(
   payment: Pick<PoPayment, "amount" | "currency" | "exchange_rate">,
 ): number | null {
   if (payment.currency === "IDR") {
-    return Math.round(payment.amount);
+    return preserveFractionalMoney(payment.amount);
   }
   if (payment.exchange_rate != null && payment.exchange_rate > 0) {
     return Math.round(payment.amount * payment.exchange_rate);

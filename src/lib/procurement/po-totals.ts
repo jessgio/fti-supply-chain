@@ -1,4 +1,5 @@
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
+import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 
 export const DEFAULT_PO_TAX_PCT = 11;
 export const DEFAULT_PO_PPH_PCT = 2;
@@ -101,7 +102,11 @@ export function computePoInvoiceTotals(
   );
   const invoiceTotal = netBeforeTax + tax + otherCharges - pph;
   const downPaymentPct = po.down_payment_pct ?? 30;
-  const downPayment = Math.round(invoiceTotal * (downPaymentPct / 100));
+  // Keep the fractional split. A whole-unit round turns 50% of an odd
+  // invoice into the next unit, which no longer matches the supplier invoice.
+  const downPayment = preserveFractionalMoney(
+    (invoiceTotal * downPaymentPct) / 100,
+  );
   const finalPayment = invoiceTotal - downPayment;
   const isShortReceived =
     usesBilledQuantities(po) &&

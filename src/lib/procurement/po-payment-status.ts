@@ -1,5 +1,8 @@
 import type { PoPayment, PurchaseOrder } from "@/types/database";
-import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
+import {
+  DEFAULT_PO_CURRENCY,
+  preserveFractionalMoney,
+} from "@/lib/procurement/currencies";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { paymentAmountIdrSync } from "@/lib/procurement/payment-idr";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
@@ -121,7 +124,7 @@ export function previewPaymentIdr(
   exchangeRate: string,
 ): number | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  if (currency === "IDR") return Math.round(amount);
+  if (currency === "IDR") return preserveFractionalMoney(amount);
   const rate = Number(exchangeRate);
   if (!Number.isFinite(rate) || rate <= 0) return null;
   return Math.round(amount * rate);

@@ -1,5 +1,8 @@
 import type { PurchaseOrder } from "@/types/database";
-import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
+import {
+  DEFAULT_PO_CURRENCY,
+  preserveFractionalMoney,
+} from "@/lib/procurement/currencies";
 import { getRateToIdr, preloadRatesToIdr } from "@/lib/procurement/fx-rates";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
@@ -47,7 +50,10 @@ export async function computeOpenPoValueIdr(
     const amount = computePoInvoiceTotals(po).invoiceTotal;
     try {
       const rate = await getRateToIdr(currency, poFxDate(po));
-      totalIdr += Math.round(amount * rate);
+      totalIdr +=
+        currency === "IDR"
+          ? preserveFractionalMoney(amount)
+          : Math.round(amount * rate);
     } catch {
       // Skip POs whose FX rate cannot be resolved rather than failing the page.
     }
