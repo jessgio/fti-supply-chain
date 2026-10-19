@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getSupplier, updateSupplier } from "@/lib/db/procurement";
+import { deleteSupplier, getSupplier, updateSupplier } from "@/lib/db/procurement";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
@@ -71,6 +71,27 @@ export async function PATCH(
       notes: nullableString(body?.notes),
     });
     return NextResponse.json({ supplier });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const denied = await requireWriteRole();
+    if (denied) return denied;
+
+    const { id } = await params;
+    const supabase = createAdminClient();
+    const existing = await getSupplier(supabase, id);
+    if (!existing) {
+      return NextResponse.json({ error: "Supplier not found." }, { status: 404 });
+    }
+    await deleteSupplier(supabase, id);
+    return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

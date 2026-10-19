@@ -13,6 +13,7 @@ import {
   CLEARED_COMMITTED_PAYMENT_AMOUNTS,
 } from "@/lib/procurement/committed-payment-amounts";
 import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
+import { sortSuppliersByName } from "@/lib/procurement/supplier-list";
 import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
@@ -153,7 +154,7 @@ export async function listSuppliers(
     .select(SUPPLIER_SELECT)
     .order("name");
   if (error) throw error;
-  return (data ?? []) as unknown as Supplier[];
+  return sortSuppliersByName((data ?? []) as unknown as Supplier[]);
 }
 
 export async function getSupplier(
@@ -248,6 +249,14 @@ export async function updateSupplier(
     .single();
   if (error) throw error;
   return data as unknown as Supplier;
+}
+
+export async function deleteSupplier(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase.from("suppliers").delete().eq("id", id);
+  if (error) throw error;
 }
 
 type PoRow = {

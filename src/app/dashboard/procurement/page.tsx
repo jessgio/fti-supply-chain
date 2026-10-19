@@ -917,6 +917,9 @@ function ProcurementInner() {
           onCreated={(created) =>
             setSuppliers((prev) => [...prev, created])
           }
+          onDeleted={(id) =>
+            setSuppliers((prev) => prev.filter((supplier) => supplier.id !== id))
+          }
         />
       )}
 

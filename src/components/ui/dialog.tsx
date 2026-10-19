@@ -31,7 +31,7 @@ export function Dialog({
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       onClose();
     }
     document.addEventListener("keydown", onKey);
