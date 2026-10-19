@@ -117,7 +117,7 @@ export function ShipmentApRequestForm({
 }: Props) {
   const isShipping = invoiceKind === "shipping";
   const alreadySubmitted = submissions.length > 0;
-  const [showSubmitForm, setShowSubmitForm] = useState(!alreadySubmitted);
+  const [showSubmitForm, setShowSubmitForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadingPeople, setLoadingPeople] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +153,9 @@ export function ShipmentApRequestForm({
   );
   const [comments, setComments] = useState<LarkCommentView[]>([]);
   const [syncingStatus, setSyncingStatus] = useState(false);
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkReference, setLinkReference] = useState("");
+  const [linking, setLinking] = useState(false);
   const fileInputId = `shipment-ap-files-${shipmentId}-${invoiceKind}`;
 
   const activeSubmission =
@@ -391,6 +394,52 @@ export function ShipmentApRequestForm({
     }
   }
 
+  function openLinkForm() {
+    setShowSubmitForm(false);
+    setShowLinkForm(true);
+    setError(null);
+  }
+
+  async function handleLink() {
+    const reference = linkReference.trim();
+    if (!reference) {
+      setError("Enter the AP Form reference number from Lark");
+      return;
+    }
+
+    setLinking(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/shipments/${shipmentId}/link-lark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          referenceNumber: reference,
+          invoiceKind,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        submission?: ShipmentLarkSubmission;
+        comments?: LarkCommentView[];
+      };
+      if (!res.ok) {
+        setError(data.error ?? `Link failed (${res.status})`);
+        return;
+      }
+      if (data.submission?.id) setActiveSubmissionId(data.submission.id);
+      if (Array.isArray(data.comments)) setComments(data.comments);
+      setLinkReference("");
+      setShowLinkForm(false);
+      setShowSubmitForm(false);
+      onSubmitted?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Link failed");
+    } finally {
+      setLinking(false);
+    }
+  }
+
   const statusLabel = formatLarkApprovalStatus(
     activeSubmission?.lark_approval_status,
   );
@@ -431,17 +480,27 @@ export function ShipmentApRequestForm({
               >
                 {syncingStatus ? "Refreshing…" : "Refresh status"}
               </button>
-              {!showSubmitForm ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowSubmitForm(true);
-                    setError(null);
-                  }}
-                  className="rounded-md border border-stone-900 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-50"
-                >
-                  Submit another
-                </button>
+              {!showSubmitForm && !showLinkForm ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLinkForm(false);
+                      setShowSubmitForm(true);
+                      setError(null);
+                    }}
+                    className="rounded-md border border-stone-900 bg-white px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-50"
+                  >
+                    Submit another
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openLinkForm}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                  >
+                    Link existing AP Form
+                  </button>
+                </>
               ) : null}
               {larkUrl ? (
                 <a
@@ -563,7 +622,7 @@ export function ShipmentApRequestForm({
             )}
           </div>
 
-          {error && !showSubmitForm ? (
+          {error && !showSubmitForm && !showLinkForm ? (
             <p className="mt-2 text-sm text-red-700" role="alert">
               {error}
             </p>
@@ -571,7 +630,85 @@ export function ShipmentApRequestForm({
         </section>
       ) : null}
 
-      {!alreadySubmitted && !showSubmitForm ? (
+      {showLinkForm ? (
+        <section className="rounded-xl border border-stone-200 bg-white p-5">
+          <div className="border-b border-stone-100 pb-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+              Lark AP Form
+            </p>
+            <h3 className="mt-1 text-base font-semibold text-stone-900">
+              {alreadySubmitted
+                ? `Link another ${SHIPMENT_AP_INVOICE_LABELS[invoiceKind].toLowerCase()}`
+                : `Link existing ${SHIPMENT_AP_INVOICE_LABELS[invoiceKind].toLowerCase()}`}
+            </h3>
+            <p className="mt-1 text-sm text-stone-500">
+              Attach an AP Form already submitted in Lark. Paste the reference
+              number (审批单编号) — status and comments will sync to this
+              shipment.
+            </p>
+            {alreadySubmitted ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkForm(false);
+                  setError(null);
+                }}
+                className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkForm(false);
+                  setShowSubmitForm(true);
+                  setError(null);
+                }}
+                className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+              >
+                Submit a new AP Form instead
+              </button>
+            )}
+          </div>
+
+          <label className="mt-4 block text-xs font-medium text-stone-600">
+            Reference number <span className="text-red-600">*</span>
+            <input
+              type="text"
+              value={linkReference}
+              onChange={(e) => setLinkReference(e.target.value)}
+              placeholder="e.g. 202407110001"
+              autoComplete="off"
+              disabled={linking}
+              className={`${fieldClass} font-mono`}
+            />
+            <span className="mt-0.5 block text-[11px] font-normal text-stone-500">
+              Visible on the Lark approval. A Lark approval URL also works if
+              you have one.
+            </span>
+          </label>
+
+          {error ? (
+            <p className="mt-4 text-sm text-red-700" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 pt-4">
+            <button
+              type="button"
+              onClick={() => void handleLink()}
+              disabled={linking || !linkReference.trim()}
+              className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {linking ? "Looking up in Lark…" : "Link to this shipment"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!alreadySubmitted && !showSubmitForm && !showLinkForm ? (
         <section className="rounded-xl border border-stone-200 bg-white p-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">
             {SHIPMENT_AP_INVOICE_LABELS[invoiceKind]}
@@ -580,18 +717,29 @@ export function ShipmentApRequestForm({
             Payment request
           </h3>
           <p className="mt-1 text-sm text-stone-500">
-            Submit a Lark AP Form for this {SHIPMENT_AP_INVOICE_LABELS[invoiceKind].toLowerCase()}.
+            Submit a new AP Form to Lark, or link one that was already filed
+            outside this app.
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setShowSubmitForm(true);
-              setError(null);
-            }}
-            className="mt-4 rounded-md bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-          >
-            Submit new AP Form
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowLinkForm(false);
+                setShowSubmitForm(true);
+                setError(null);
+              }}
+              className="rounded-md bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+            >
+              Submit new AP Form
+            </button>
+            <button
+              type="button"
+              onClick={openLinkForm}
+              className="rounded-md border border-stone-900 bg-white px-4 py-2.5 text-sm font-medium text-stone-900 hover:bg-stone-50"
+            >
+              Link existing AP Form
+            </button>
+          </div>
         </section>
       ) : null}
 
@@ -614,12 +762,23 @@ export function ShipmentApRequestForm({
             {alreadySubmitted ? (
               <button
                 type="button"
-                onClick={() => setShowSubmitForm(false)}
+                onClick={() => {
+                  setShowSubmitForm(false);
+                  setError(null);
+                }}
                 className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
               >
                 Cancel
               </button>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                onClick={openLinkForm}
+                className="mt-2 text-xs font-medium text-stone-600 underline hover:text-stone-900"
+              >
+                Link existing AP Form instead
+              </button>
+            )}
           </div>
 
           <div className="mt-4 grid gap-5 lg:grid-cols-2">

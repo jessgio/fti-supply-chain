@@ -112,6 +112,32 @@ export async function POST(
       );
     }
 
+    const { data: shipmentSubmission } = await supabase
+      .from("shipment_lark_submissions")
+      .select("shipment_id, shipments(shipment_number)")
+      .eq("lark_instance_code", resolved.instanceCode)
+      .maybeSingle();
+    if (shipmentSubmission) {
+      const related = shipmentSubmission.shipments as
+        | { shipment_number: string }
+        | { shipment_number: string }[]
+        | null;
+      const shipmentNumber = Array.isArray(related)
+        ? related[0]?.shipment_number
+        : related?.shipment_number;
+      return NextResponse.json(
+        {
+          error: shipmentNumber
+            ? `This AP Form is already linked to shipment ${shipmentNumber}`
+            : "This AP Form is already linked to a shipment",
+          code: "LINKED_TO_SHIPMENT",
+          instanceCode: resolved.instanceCode,
+          serialNumber,
+        },
+        { status: 409 },
+      );
+    }
+
     // Serial unique on PO badge column — warn if another PO already shows it.
     if (serialNumber) {
       const { data: serialOwner } = await supabase

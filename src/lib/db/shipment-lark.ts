@@ -96,27 +96,32 @@ export async function insertShipmentLarkSubmission(
     lark_approval_status: LarkApprovalStatus | null;
     lark_status_synced_at: string;
     lark_expense_category: string | null;
-    submitted_amount: number;
-    submitted_currency: string;
+    submitted_amount: number | null;
+    submitted_currency: string | null;
     plan_rows: ShipmentLarkSubmission["plan_rows"];
     submitted_at: string;
   },
-): Promise<void> {
-  const { error } = await supabase.from("shipment_lark_submissions").insert({
-    shipment_id: input.shipment_id,
-    invoice_kind: input.invoice_kind,
-    supplier_id: input.supplier_id,
-    lark_instance_code: input.lark_instance_code,
-    lark_serial_number: input.lark_serial_number,
-    lark_approval_status: input.lark_approval_status,
-    lark_status_synced_at: input.lark_status_synced_at,
-    lark_expense_category: input.lark_expense_category,
-    submitted_amount: input.submitted_amount,
-    submitted_currency: input.submitted_currency,
-    plan_rows: input.plan_rows,
-    submitted_at: input.submitted_at,
-  });
+): Promise<ShipmentLarkSubmission> {
+  const { data, error } = await supabase
+    .from("shipment_lark_submissions")
+    .insert({
+      shipment_id: input.shipment_id,
+      invoice_kind: input.invoice_kind,
+      supplier_id: input.supplier_id,
+      lark_instance_code: input.lark_instance_code,
+      lark_serial_number: input.lark_serial_number,
+      lark_approval_status: input.lark_approval_status,
+      lark_status_synced_at: input.lark_status_synced_at,
+      lark_expense_category: input.lark_expense_category,
+      submitted_amount: input.submitted_amount,
+      submitted_currency: input.submitted_currency,
+      plan_rows: input.plan_rows,
+      submitted_at: input.submitted_at,
+    })
+    .select(SUBMISSION_SELECT)
+    .single();
   if (error) throw error;
+  return mapSubmission(data as SubmissionRow);
 }
 
 export async function updateShipmentLarkSubmission(
