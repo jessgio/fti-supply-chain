@@ -1,3 +1,4 @@
+import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 import type { PurchaseOrder } from "@/types/database";
 
@@ -17,8 +18,8 @@ export type CommittedPaymentSchedule = {
   isCommitted: boolean;
 };
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+function statedMoney(n: number): number {
+  return preserveFractionalMoney(n);
 }
 
 function percentsFromAmounts(
@@ -104,7 +105,7 @@ function hasLoggedPayment(payments: SchedulePaymentRef[]): boolean {
 }
 
 export function sumPlanRowAmounts(rows: PlanAmountRow[]): number {
-  return round2(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  return statedMoney(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
 }
 
 /**
@@ -141,7 +142,7 @@ export function resolvePaymentSchedule(
       ? Number(po.committed_down_payment)
       : live.downPayment;
   const invoiceTotal = live.invoiceTotal;
-  const balance = round2(invoiceTotal - downPayment);
+  const balance = statedMoney(invoiceTotal - downPayment);
   const { downPaymentPct, finalPaymentPct } = percentsFromAmounts(
     downPayment,
     invoiceTotal,
@@ -188,15 +189,15 @@ export function buildCommittedPatchFromPayment(
   let down = live.downPayment;
   let balance = live.finalPayment;
   if (normalized === "down payment") {
-    down = round2(amount);
+    down = statedMoney(amount);
   } else if (normalized === "balance payment") {
-    balance = round2(amount);
+    balance = statedMoney(amount);
   }
 
   return {
-    committed_down_payment: round2(down),
-    committed_balance: round2(balance),
-    committed_invoice_total: round2(down + balance),
+    committed_down_payment: statedMoney(down),
+    committed_balance: statedMoney(balance),
+    committed_invoice_total: statedMoney(down + balance),
     payment_amounts_committed_at: committedAt,
   };
 }

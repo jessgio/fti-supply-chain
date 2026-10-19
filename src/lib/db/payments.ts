@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrder } from "@/types/database";
-import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
+import {
+  DEFAULT_PO_CURRENCY,
+  preserveFractionalMoney,
+} from "@/lib/procurement/currencies";
 import {
   paymentAmountIdrWithRates,
   preloadPaymentFxRates,
@@ -291,7 +294,7 @@ function purposeIssue(
 
   const varianceIdr =
     poCurrency === "IDR"
-      ? Math.round(variance)
+      ? preserveFractionalMoney(variance)
       : Math.round(variance * idrRate);
 
   return {
@@ -415,7 +418,10 @@ export async function computePaymentDashboardSummary(
       payments: poPayments,
     });
     const rate = await poRate(po);
-    const invoiceIdr = Math.round(schedule.invoiceTotal * rate);
+    const invoiceIdr =
+      poCurrency === "IDR"
+        ? preserveFractionalMoney(schedule.invoiceTotal)
+        : Math.round(schedule.invoiceTotal * rate);
 
     let paidTotalIdr = 0;
     for (const payment of poPayments) {

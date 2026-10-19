@@ -1,4 +1,5 @@
 import { formatPaymentPct, resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 import { formatSupplierPaymentDetails } from "@/lib/procurement/supplier-po-notes";
 import type { PurchaseOrder, Supplier } from "@/types/database";
 
@@ -177,9 +178,8 @@ function toRfc3339Date(ymd: string, timeZoneOffset = "+07:00"): string {
   return `${ymd}T00:00:00${timeZoneOffset}`;
 }
 
-function roundMoney(amount: number, currency: string): number {
-  if (currency === "IDR") return Math.round(amount);
-  return Math.round(amount * 100) / 100;
+function roundMoney(amount: number): number {
+  return preserveFractionalMoney(amount);
 }
 
 export function isApFormCurrency(
@@ -342,9 +342,9 @@ export function buildPaymentPlanRows(
   const dpDate = dueDateYmd(po.order_date) ?? today;
   const balanceDate = dueDateYmd(po.expected_date) ?? today;
 
-  const downAmount = roundMoney(schedule.downPayment, currency);
-  const balanceAmount = roundMoney(schedule.balance, currency);
-  const invoiceAmount = roundMoney(schedule.invoiceTotal, currency);
+  const downAmount = roundMoney(schedule.downPayment);
+  const balanceAmount = roundMoney(schedule.balance);
+  const invoiceAmount = roundMoney(schedule.invoiceTotal);
 
   const isSplit = downAmount > 0 && balanceAmount > 0;
 
@@ -508,7 +508,7 @@ export function paymentPlanFromLarkForm(
     const apCurrency = asApFormCurrency(currency, fallbackCurrency);
     rows.push({
       dateYmd,
-      amount: roundMoney(amount, apCurrency),
+      amount: roundMoney(amount),
       currency: apCurrency,
       remarks,
     });
@@ -562,7 +562,7 @@ export function submittedAmountFromLarkForm(
   if (!saw) return null;
   const apCurrency = asApFormCurrency(currency, fallbackCurrency);
   return {
-    amount: roundMoney(total, apCurrency),
+    amount: roundMoney(total),
     currency: apCurrency,
     planRows: [],
   };

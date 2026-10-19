@@ -74,8 +74,9 @@ test("unpaid PO follows the down payment percentage, not a stale freeze", () => 
     ...cosmaxPo({ down_payment_pct: 50 }),
     payments: [],
   });
-  assert.equal(atFifty.downPayment, 153292388);
-  assert.equal(atFifty.balance, 306584775 - 153292388);
+  assert.equal(atFifty.downPayment, 153292387.5);
+  assert.equal(atFifty.balance, 153292387.5);
+  assert.equal(atFifty.downPayment + atFifty.balance, atFifty.invoiceTotal);
   assert.equal(downPaymentLabel(atFifty.downPaymentPct), "Down payment (50%)");
   assert.equal(formatPaymentPct(atFifty.finalPaymentPct), "50");
 });
