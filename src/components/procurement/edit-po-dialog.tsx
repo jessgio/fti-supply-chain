@@ -6,6 +6,7 @@ import { SkuSearchInput } from "@/components/packaging/sku-search-input";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { SupplierSelect } from "@/components/procurement/supplier-select";
 import { Button } from "@/components/ui/button";
 import {
   formatUnitCostInput,
@@ -250,17 +251,13 @@ export function EditPoDialog({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-sm font-medium text-stone-700">Supplier</span>
-                <Select
+                <SupplierSelect
+                  suppliers={suppliers}
                   value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                >
-                  <option value="">No supplier</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={setSupplierId}
+                  placeholder="Type a supplier name"
+                  emptyLabel="No supplier"
+                />
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-stone-700">Status</span>

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { ExternalLink, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { SupplierSelect } from "@/components/procurement/supplier-select";
 import { PdMasterFileField } from "@/components/product-development/pd-master-file-field";
 import {
   PRICING_LINE_DEFS,
@@ -203,24 +203,21 @@ export function PdPricingCard({
     }
 
     return (
-      <Select
+      <SupplierSelect
+        suppliers={suppliers}
         value={line.supplier_id ?? ""}
         disabled={savingLineId === lineId}
-        onChange={(e) => {
-          const next = e.target.value || null;
-          if (next !== (line.supplier_id ?? null)) {
-            void onUpdateLine(lineId, { supplier_id: next });
+        size="sm"
+        className="min-w-[10rem]"
+        placeholder="Type a supplier name"
+        emptyLabel="Select supplier"
+        onChange={(next) => {
+          const supplierId = next || null;
+          if (supplierId !== (line.supplier_id ?? null)) {
+            void onUpdateLine(lineId, { supplier_id: supplierId });
           }
         }}
-        className="h-8 w-full min-w-[10rem] text-sm"
-      >
-        <option value="">Select supplier</option>
-        {suppliers.map((supplier) => (
-          <option key={supplier.id} value={supplier.id}>
-            {supplier.name}
-          </option>
-        ))}
-      </Select>
+      />
     );
   }
 

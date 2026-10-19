@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import {
   useSupplierUsualTerms,
 } from "@/components/procurement/supplier-usual-terms-hint";
 import { formatSupplierPoNotes } from "@/lib/procurement/supplier-po-notes";
+import { suppliersMatchingName } from "@/lib/procurement/supplier-list";
 import type { Supplier } from "@/types/database";
 
 const TEXTAREA_CLASS =
@@ -104,17 +106,24 @@ export function SuppliersDialog({
   onClose,
   onUpdated,
   onCreated,
+  onDeleted,
 }: {
   suppliers: Supplier[];
   onClose: () => void;
   onUpdated: (s: Supplier) => void;
   onCreated: (s: Supplier) => void;
+  onDeleted: (id: string) => void;
 }) {
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [form, setForm] = useState<SupplierFormState | null>(null);
   const [newName, setNewName] = useState("");
+  const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const visibleSuppliers = useMemo(
+    () => suppliersMatchingName(suppliers, query),
+    [suppliers, query],
+  );
 
   const notesPreview = useMemo(
     () => (form ? formToNotesPreview(form) : null),
@@ -149,6 +158,31 @@ export function SuppliersDialog({
       startEdit(data.supplier);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(supplier: Supplier) {
+    const confirmed = window.confirm(
+      `Delete ${supplier.name}? Purchase orders that use this supplier will stay, but they will no longer be linked to this name.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/procurement/suppliers/${supplier.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete supplier");
+      if (editing?.id === supplier.id) {
+        setEditing(null);
+        setForm(null);
+      }
+      onDeleted(supplier.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete supplier");
     } finally {
       setSaving(false);
     }
@@ -201,24 +235,46 @@ export function SuppliersDialog({
           </Button>
         </div>
 
-        <div className="max-h-48 overflow-y-auto rounded-lg border border-stone-200">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search suppliers"
+          aria-label="Search suppliers"
+        />
+
+        <div className="max-h-64 overflow-y-auto rounded-lg border border-stone-200">
           {suppliers.length === 0 ? (
             <p className="p-4 text-sm text-stone-500">No suppliers yet.</p>
+          ) : visibleSuppliers.length === 0 ? (
+            <p className="p-4 text-sm text-stone-500">
+              No suppliers match “{query.trim()}”.
+            </p>
           ) : (
             <ul className="divide-y divide-stone-100">
-              {suppliers.map((s) => (
-                <li key={s.id}>
+              {visibleSuppliers.map((s) => (
+                <li key={s.id} className="flex items-center">
                   <button
                     type="button"
-                    className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50 ${
+                    className={`flex min-w-0 flex-1 items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50 ${
                       editing?.id === s.id ? "bg-emerald-50" : ""
                     }`}
                     onClick={() => startEdit(s)}
                   >
-                    <span className="font-medium text-stone-900">{s.name}</span>
-                    <span className="text-xs text-stone-500">
+                    <span className="truncate font-medium text-stone-900">
+                      {s.name}
+                    </span>
+                    <span className="ml-3 shrink-0 text-xs text-stone-500">
                       {s.address ? "Address set" : "No address"}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="mr-2 rounded-md p-2 text-stone-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                    aria-label={`Delete ${s.name}`}
+                    disabled={saving}
+                    onClick={() => void handleDelete(s)}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </li>
               ))}

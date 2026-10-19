@@ -34,6 +34,7 @@ import {
   type ShipmentApInvoiceKind,
 } from "@/lib/lark/shipment-ap";
 import { orderApproversForForm } from "@/lib/lark/approver-list";
+import { SupplierSelect } from "@/components/procurement/supplier-select";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { readApiJson } from "@/lib/http";
 import { uploadToSignedDataUploads } from "@/lib/storage/browser-upload";
@@ -162,14 +163,6 @@ export function ShipmentApRequestForm({
   const larkUrl = activeSubmission?.lark_instance_code
     ? buildLarkApprovalDetailUrl(activeSubmission.lark_instance_code)
     : null;
-  const supplierOptions = useMemo(
-    () =>
-      [...suppliers].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-      ),
-    [suppliers],
-  );
-
   const selectableApprovers = useMemo(
     () => colleagues.filter((c) => !!c.lark_open_id),
     [colleagues],
@@ -632,21 +625,17 @@ export function ShipmentApRequestForm({
           <div className="mt-4 grid gap-5 lg:grid-cols-2">
             <div className="space-y-4">
               {isShipping ? (
-                supplierOptions.length > 0 ? (
+                suppliers.length > 0 ? (
                   <label className="block text-xs font-medium text-stone-600">
                     Supplier <span className="text-red-600">*</span>
-                    <select
+                    <SupplierSelect
+                      suppliers={suppliers}
                       value={selectedSupplierId}
-                      onChange={(e) => applySupplier(e.target.value)}
-                      className={fieldClass}
-                    >
-                      <option value="">Select supplier…</option>
-                      {supplierOptions.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={applySupplier}
+                      className="mt-1"
+                      placeholder="Type a supplier name"
+                      emptyLabel="Select supplier…"
+                    />
                   </label>
                 ) : (
                   <p className="text-sm text-amber-800">
