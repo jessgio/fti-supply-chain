@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PoApFormStatusList } from "@/components/procurement/po-ap-form-status";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import {
@@ -79,6 +80,13 @@ const COLUMNS: Array<{
     title: "Latest inbound receive or PO receipt date",
   },
   { key: "paid", label: "Paid", align: "left" },
+  {
+    key: "apForm",
+    label: "AP Form",
+    align: "left",
+    title:
+      "Each Lark AP Form and its approval status. Multiple submissions are listed separately.",
+  },
   { key: "status", label: "Status", align: "left" },
 ];
 
@@ -373,7 +381,7 @@ export function PoSearchResultsTable({
             No purchase orders match these filters.
           </p>
         ) : (
-          <table className="w-full min-w-[100rem] border-collapse text-left text-sm">
+          <table className="w-full min-w-[108rem] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-stone-200">
                 <th className="w-8 py-2" />
@@ -500,6 +508,9 @@ function SearchResultRows({
             <span className="text-stone-400">—</span>
           )}
         </td>
+        <td className="py-2 pr-3">
+          <PoApFormStatusList forms={row.apForms} />
+        </td>
         <td className="py-2">
           <Badge className={STATUS_STYLES[row.status]}>
             {STATUS_LABELS[row.status]}
@@ -509,7 +520,7 @@ function SearchResultRows({
       {open && (
         <tr className="border-b border-stone-100 bg-stone-50/70">
           <td />
-          <td colSpan={14} className="py-3 pr-3">
+          <td colSpan={15} className="py-3 pr-3">
             {row.lines.length === 0 ? (
               <p className="text-xs text-stone-500">No line items on this purchase order.</p>
             ) : (

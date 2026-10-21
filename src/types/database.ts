@@ -576,6 +576,16 @@ export interface LarkUserDirectoryEntry {
 
 export type LarkPaymentPlanScope = "both" | "down_payment" | "balance";
 
+/** Fields needed to show AP Form status in procurement lists. */
+export interface PurchaseOrderLarkSubmissionSummary {
+  id: string;
+  lark_instance_code: string;
+  lark_serial_number: string | null;
+  lark_approval_status: LarkApprovalStatus | null;
+  payment_scope: LarkPaymentPlanScope;
+  submitted_at: string;
+}
+
 export interface PurchaseOrderLarkSubmission {
   id: string;
   purchase_order_id: string;
@@ -673,6 +683,11 @@ export interface PurchaseOrder {
   lark_expense_category?: string | null;
   lark_approval_status?: LarkApprovalStatus | null;
   lark_status_synced_at?: string | null;
+  /**
+   * Every linked AP Form, newest first. Absent when the query did not load
+   * submission history. An empty list means none are linked.
+   */
+  lark_submissions?: PurchaseOrderLarkSubmissionSummary[];
   created_at?: string;
   updated_at?: string;
   /** Latest inbound receive or PO receipt date, when the list loaded it. */
