@@ -1,4 +1,10 @@
-import type { PoStatus, PurchaseOrder, PurchaseOrderLine } from "@/types/database";
+import type {
+  LarkApprovalStatus,
+  LarkPaymentPlanScope,
+  PoStatus,
+  PurchaseOrder,
+  PurchaseOrderLine,
+} from "@/types/database";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 import {
   computePoPaymentSummary,
@@ -55,6 +61,41 @@ export interface PoSearchRowView {
   fullyPaid: boolean | null;
   currency: string;
   lines: PoSearchLineView[];
+  /** Linked Lark AP forms, newest first. Empty when none were submitted. */
+  apForms: PoApFormView[];
+}
+
+export interface PoApFormView {
+  id: string;
+  serialNumber: string | null;
+  status: LarkApprovalStatus | null;
+  paymentScope: LarkPaymentPlanScope | null;
+  submittedAt: string | null;
+}
+
+/** AP forms to show for a purchase order, including a legacy single-form badge. */
+export function apFormsFromPurchaseOrder(po: PurchaseOrder): PoApFormView[] {
+  if (po.lark_submissions) {
+    return [...po.lark_submissions]
+      .sort((a, b) => (b.submitted_at || "").localeCompare(a.submitted_at || ""))
+      .map((sub) => ({
+        id: sub.id,
+        serialNumber: sub.lark_serial_number,
+        status: sub.lark_approval_status,
+        paymentScope: sub.payment_scope,
+        submittedAt: sub.submitted_at || null,
+      }));
+  }
+  if (!po.lark_instance_code) return [];
+  return [
+    {
+      id: po.lark_instance_code,
+      serialNumber: po.lark_serial_number ?? null,
+      status: po.lark_approval_status ?? null,
+      paymentScope: null,
+      submittedAt: po.lark_submitted_at ?? null,
+    },
+  ];
 }
 
 /** Purchase orders that belong on the selected procurement status tab. */
@@ -137,6 +178,7 @@ export function buildPoSearchRow(
         : paymentStatus === "paid" || paymentStatus === "overpaid",
     currency: po.currency || "IDR",
     lines,
+    apForms: apFormsFromPurchaseOrder(po),
   };
 }
 
@@ -165,6 +207,7 @@ export type PoSearchSortKey =
   | "paymentTerms"
   | "lastInbound"
   | "paid"
+  | "apForm"
   | "status";
 
 export type PoSearchSortDir = "asc" | "desc";
@@ -212,7 +255,17 @@ const PAID_RANK: Record<PaymentFulfillmentStatus, number> = {
   overpaid: 2,
 };
 
+/** Lower rank is the form that still needs attention. */
+const AP_STATUS_RANK: Record<LarkApprovalStatus, number> = {
+  PENDING: 0,
+  REJECTED: 1,
+  CANCELED: 2,
+  DELETED: 3,
+  APPROVED: 4,
+};
+
 export function defaultPoSearchSortDir(key: PoSearchSortKey): PoSearchSortDir {
+  if (key === "apForm") return "asc";
   return TEXT_SORT_KEYS.has(key) ? "asc" : "desc";
 }
 
@@ -264,6 +317,16 @@ function weightedUnitPrice(row: PoSearchRowView): number | null {
   return row.unitPrice;
 }
 
+function apFormSortRank(row: PoSearchRowView): number | null {
+  if (row.apForms.length === 0) return null;
+  let rank = AP_STATUS_RANK.APPROVED + 1;
+  for (const form of row.apForms) {
+    const next = form.status == null ? rank : AP_STATUS_RANK[form.status];
+    if (next < rank) rank = next;
+  }
+  return rank;
+}
+
 function skuSortKey(row: PoSearchRowView): string | null {
   const codes = row.lines
     .map((line) => line.skuCode.trim())
@@ -301,6 +364,8 @@ function sortValue(row: PoSearchRowView, key: PoSearchSortKey): string | number 
       return orderDay(row.lastInboundDate);
     case "paid":
       return row.paymentStatus == null ? null : PAID_RANK[row.paymentStatus];
+    case "apForm":
+      return apFormSortRank(row);
     case "status":
       return STATUS_RANK.get(row.status) ?? null;
   }

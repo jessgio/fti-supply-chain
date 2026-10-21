@@ -1,8 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  LarkApprovalStatus,
+  LarkPaymentPlanScope,
   PoStatus,
   PoPayment,
   PurchaseOrder,
+  PurchaseOrderLarkSubmissionSummary,
   PurchaseOrderLine,
   Supplier,
 } from "@/types/database";
@@ -318,7 +321,64 @@ type PoRow = {
     created_at: string;
     updated_at: string;
   }[];
+  purchase_order_lark_submissions?: {
+    id: string;
+    lark_instance_code: string;
+    lark_serial_number: string | null;
+    lark_approval_status: string | null;
+    payment_scope: string;
+    submitted_at: string;
+  }[];
 };
+
+function asLarkApprovalStatus(
+  value: string | null | undefined,
+): LarkApprovalStatus | null {
+  if (
+    value === "PENDING" ||
+    value === "APPROVED" ||
+    value === "REJECTED" ||
+    value === "CANCELED" ||
+    value === "DELETED"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function asPaymentScope(value: string | null | undefined): LarkPaymentPlanScope {
+  if (value === "down_payment" || value === "balance" || value === "both") {
+    return value;
+  }
+  return "both";
+}
+
+function mapLarkSubmissions(
+  row: PoRow,
+): PurchaseOrderLarkSubmissionSummary[] | undefined {
+  if (row.purchase_order_lark_submissions === undefined) return undefined;
+  const submissions = row.purchase_order_lark_submissions
+    .map((sub) => ({
+      id: sub.id,
+      lark_instance_code: sub.lark_instance_code,
+      lark_serial_number: sub.lark_serial_number,
+      lark_approval_status: asLarkApprovalStatus(sub.lark_approval_status),
+      payment_scope: asPaymentScope(sub.payment_scope),
+      submitted_at: sub.submitted_at,
+    }))
+    .sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+  if (submissions.length > 0 || !row.lark_instance_code) return submissions;
+  return [
+    {
+      id: `legacy-${row.id}`,
+      lark_instance_code: row.lark_instance_code,
+      lark_serial_number: row.lark_serial_number ?? null,
+      lark_approval_status: asLarkApprovalStatus(row.lark_approval_status),
+      payment_scope: "both",
+      submitted_at: row.lark_submitted_at ?? row.lark_status_synced_at ?? "",
+    },
+  ];
+}
 
 function mapPoPayment(row: NonNullable<PoRow["po_payments"]>[number]): PoPayment {
   return {
@@ -411,6 +471,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     lark_expense_category: row.lark_expense_category ?? null,
     lark_approval_status: (row.lark_approval_status as PurchaseOrder["lark_approval_status"]) ?? null,
     lark_status_synced_at: row.lark_status_synced_at ?? null,
+    lark_submissions: mapLarkSubmissions(row),
     created_at: row.created_at,
     updated_at: row.updated_at,
     lines,
@@ -420,6 +481,9 @@ function mapPoRow(row: PoRow): PurchaseOrder {
 
 const PO_LARK_COLS =
   "lark_instance_code, lark_serial_number, lark_submitted_at, lark_expense_category, lark_approval_status, lark_status_synced_at";
+
+const PO_LARK_SUBMISSIONS_EMBED =
+  "purchase_order_lark_submissions(id, lark_instance_code, lark_serial_number, lark_approval_status, payment_scope, submitted_at)";
 
 const PO_COMMITTED_PAYMENT_COLS =
   "committed_invoice_total, committed_down_payment, committed_balance, payment_amounts_committed_at";
@@ -431,7 +495,8 @@ const PO_SELECT =
   PO_COMMITTED_PAYMENT_COLS +
   ", created_at, updated_at, " +
   "suppliers(name), pd_projects(product_name, name), " +
-  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus!sku_id(sku_code, name, is_packaging), original_sku:skus!original_sku_id(sku_code, name))";
+  "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus!sku_id(sku_code, name, is_packaging), original_sku:skus!original_sku_id(sku_code, name)), " +
+  PO_LARK_SUBMISSIONS_EMBED;
 
 const PO_DETAIL_SELECT =
   "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +

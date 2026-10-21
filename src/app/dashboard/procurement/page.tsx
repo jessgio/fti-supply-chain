@@ -27,6 +27,7 @@ import {
 import type { PoSkuOption } from "@/components/procurement/edit-po-dialog";
 import { CompanySettingsDialog } from "@/components/procurement/company-settings-dialog";
 import { CreatePoDialog } from "@/components/procurement/create-po-dialog";
+import { PoApFormStatusList } from "@/components/procurement/po-ap-form-status";
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import { poDetailHref } from "@/lib/procurement/po-navigation";
 import { useDashboardReturnPath } from "@/lib/procurement/use-dashboard-return-path";
@@ -50,10 +51,6 @@ import {
   STATUS_STYLES,
   STATUS_FLOW,
 } from "@/lib/procurement/po-status";
-import {
-  formatLarkApprovalStatus,
-  larkApprovalStatusBadgeClass,
-} from "@/lib/lark/ap-form";
 import type {
   PoStatus,
   PurchaseOrder,
@@ -66,7 +63,10 @@ import {
   poOpenQtyForPrimaryGroup,
   type PoPrimaryRole,
 } from "@/lib/procurement/po-primary-groups";
-import { purchaseOrdersForStatusTab } from "@/lib/procurement/po-search-results";
+import {
+  apFormsFromPurchaseOrder,
+  purchaseOrdersForStatusTab,
+} from "@/lib/procurement/po-search-results";
 import { PoSearchResultsTable } from "@/components/procurement/po-search-results-table";
 import type { ProductPackagingLink } from "@/types/database";
 
@@ -539,20 +539,7 @@ function ProcurementInner() {
               />
             </td>
             <td className="py-2 pr-4">
-              {po.lark_instance_code ? (
-                <Badge
-                  className={`border ${larkApprovalStatusBadgeClass(po.lark_approval_status)}`}
-                  title={
-                    po.lark_serial_number
-                      ? `AP ${po.lark_serial_number}`
-                      : undefined
-                  }
-                >
-                  {formatLarkApprovalStatus(po.lark_approval_status)}
-                </Badge>
-              ) : (
-                <span className="text-xs text-stone-400">—</span>
-              )}
+              <PoApFormStatusList forms={apFormsFromPurchaseOrder(po)} />
             </td>
             <td className="py-2 pr-4">{lines.length}</td>
             <td

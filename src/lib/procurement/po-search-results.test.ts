@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
 import {
+  apFormsFromPurchaseOrder,
   buildPoSearchRows,
   EMPTY_PO_SEARCH_FILTERS,
   filterPoSearchRows,
@@ -225,5 +226,67 @@ test("search rows sort by total and keep missing dates last", () => {
   assert.deepEqual(
     sortPoSearchRows(rows, "orderDate", "asc").map((row) => row.id),
     ["high", "low"],
+  );
+});
+
+test("search rows list every AP form and fall back to the PO badge", () => {
+  const rows = buildPoSearchRows(
+    [
+      po({
+        id: "split",
+        po_number: "PO-SPLIT",
+        lark_submissions: [
+          {
+            id: "older",
+            lark_instance_code: "inst-old",
+            lark_serial_number: "202401010001",
+            lark_approval_status: "APPROVED",
+            payment_scope: "down_payment",
+            submitted_at: "2026-01-02T00:00:00.000Z",
+          },
+          {
+            id: "newer",
+            lark_instance_code: "inst-new",
+            lark_serial_number: "202402020002",
+            lark_approval_status: "PENDING",
+            payment_scope: "balance",
+            submitted_at: "2026-02-02T00:00:00.000Z",
+          },
+        ],
+      }),
+      po({
+        id: "legacy",
+        po_number: "PO-LEGACY",
+        lark_instance_code: "inst-legacy",
+        lark_serial_number: "202403030003",
+        lark_approval_status: "APPROVED",
+      }),
+      po({ id: "none", po_number: "PO-NONE", lark_submissions: [] }),
+    ],
+    [],
+    "po",
+  );
+
+  const split = rows.find((row) => row.id === "split");
+  assert.deepEqual(
+    split?.apForms.map((form) => form.serialNumber),
+    ["202402020002", "202401010001"],
+  );
+  assert.equal(
+    apFormsFromPurchaseOrder(
+      po({
+        lark_instance_code: "inst-legacy",
+        lark_serial_number: "202403030003",
+        lark_approval_status: "APPROVED",
+      }),
+    )[0]?.serialNumber,
+    "202403030003",
+  );
+  assert.deepEqual(rows.find((row) => row.id === "none")?.apForms, []);
+  assert.equal(rows.find((row) => row.id === "legacy")?.apForms.length, 1);
+
+  assert.deepEqual(
+    sortPoSearchRows(rows, "apForm", "asc").map((row) => row.id),
+    ["split", "legacy", "none"],
   );
 });
