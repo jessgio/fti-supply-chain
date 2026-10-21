@@ -63,7 +63,14 @@ test("procurement search shows each AP form and marks orders with none", () => {
     />,
   );
 
-  assert.match(html, /AP Form/);
+  const theadStart = html.indexOf("<thead");
+  const tbodyStart = html.indexOf("<tbody");
+  const header = html.slice(theadStart, tbodyStart);
+  const poHeader = header.indexOf("PO");
+  const apHeader = header.indexOf("AP Form");
+  const dateHeader = header.indexOf("Order date");
+  assert.ok(poHeader >= 0 && apHeader > poHeader && apHeader < dateHeader);
+
   assert.match(html, /AP 202401010001/);
   assert.match(html, /Approved/);
   assert.match(html, /Down payment/);

@@ -58,6 +58,13 @@ const COLUMNS: Array<{
   title?: string;
 }> = [
   { key: "poNumber", label: "PO", align: "left" },
+  {
+    key: "apForm",
+    label: "AP Form",
+    align: "left",
+    title:
+      "Each Lark AP Form and its approval status. Multiple submissions are listed separately.",
+  },
   { key: "orderDate", label: "Order date", align: "left" },
   { key: "type", label: "Type", align: "left" },
   { key: "supplier", label: "Supplier", align: "left" },
@@ -80,13 +87,6 @@ const COLUMNS: Array<{
     title: "Latest inbound receive or PO receipt date",
   },
   { key: "paid", label: "Paid", align: "left" },
-  {
-    key: "apForm",
-    label: "AP Form",
-    align: "left",
-    title:
-      "Each Lark AP Form and its approval status. Multiple submissions are listed separately.",
-  },
   { key: "status", label: "Status", align: "left" },
 ];
 
@@ -454,6 +454,9 @@ function SearchResultRows({
             }))}
           />
         </td>
+        <td className="py-2 pr-3">
+          <PoApFormStatusList forms={row.apForms} />
+        </td>
         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
           {formatDate(row.orderDate)}
         </td>
@@ -507,9 +510,6 @@ function SearchResultRows({
           ) : (
             <span className="text-stone-400">—</span>
           )}
-        </td>
-        <td className="py-2 pr-3">
-          <PoApFormStatusList forms={row.apForms} />
         </td>
         <td className="py-2">
           <Badge className={STATUS_STYLES[row.status]}>
