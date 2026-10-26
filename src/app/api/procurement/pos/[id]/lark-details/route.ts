@@ -6,6 +6,10 @@ import {
   type ApprovalInstanceComment,
 } from "@/lib/lark/client";
 import { toClientLarkComments } from "@/lib/lark/comment-files";
+import {
+  formFilesFromLarkForm,
+  toClientLarkFormFiles,
+} from "@/lib/lark/form-files";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
 import type { PurchaseOrderLarkSubmission } from "@/types/database";
@@ -142,6 +146,7 @@ export async function GET(
 
   try {
     let focusComments: CommentWithAuthor[] = [];
+    let focusFormFiles = toClientLarkFormFiles([]);
     let focusSerial: string | null = null;
     let focusStatus: string | null = null;
     let focusSyncedAt: string | null = null;
@@ -160,6 +165,7 @@ export async function GET(
         : sub.lark_approval_status;
       const syncedAt = new Date().toISOString();
       const comments = await attachCommentAuthors(details.comments);
+      const formFiles = toClientLarkFormFiles(formFilesFromLarkForm(details.form));
       const fromLark = submittedAmountFromLarkForm(
         details.form,
         po.currency ?? "IDR",
@@ -208,6 +214,7 @@ export async function GET(
         focusStatus = status;
         focusSyncedAt = syncedAt;
         focusComments = comments;
+        focusFormFiles = formFiles;
       }
     }
 
@@ -235,6 +242,7 @@ export async function GET(
       status: focusStatus,
       syncedAt: focusSyncedAt,
       comments: toClientLarkComments(focusComments),
+      formFiles: focusFormFiles,
       submissions: allSubmissions,
     });
   } catch (err) {

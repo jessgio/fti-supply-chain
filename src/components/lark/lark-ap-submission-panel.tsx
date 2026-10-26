@@ -3,10 +3,13 @@
 import { format } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  LarkAttachmentList,
   LarkCommentThread,
   larkCommentFileHref,
+  larkFormFileHref,
   type LarkCommentView,
 } from "@/components/lark/lark-comment-thread";
+import type { LarkCommentAttachment } from "@/lib/lark/comment-files";
 import {
   AP_EXTRA_FILE_MAX_BYTES,
   AP_EXTRA_FILES_MAX_COUNT,
@@ -157,6 +160,10 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     po.lark_status_synced_at,
   );
   const [comments, setComments] = useState<LarkCommentView[]>([]);
+  const [formFiles, setFormFiles] = useState<{
+    instanceCode: string;
+    files: LarkCommentAttachment[];
+  } | null>(null);
   const [submissions, setSubmissions] = useState<PurchaseOrderLarkSubmission[]>(
     [],
   );
@@ -252,6 +259,8 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         status?: string | null;
         syncedAt?: string | null;
         comments?: LarkCommentView[];
+        formFiles?: LarkCommentAttachment[];
+        instanceCode?: string | null;
         submissions?: PurchaseOrderLarkSubmission[];
       };
       if (!res.ok && !data.status && !data.serialNumber && !data.submissions?.length) {
@@ -260,8 +269,14 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       }
       if (Array.isArray(data.submissions)) {
         setSubmissions(data.submissions);
-        if (!activeSubmissionId && data.submissions[0]) {
-          setActiveSubmissionId(data.submissions[0].id);
+        const focus = data.instanceCode
+          ? data.submissions.find(
+              (submission) =>
+                submission.lark_instance_code === data.instanceCode,
+            )
+          : data.submissions[0];
+        if (focus && (!activeSubmissionId || !submissionId)) {
+          setActiveSubmissionId(focus.id);
         }
       }
       if (data.serialNumber) setSerialNumber(data.serialNumber);
@@ -272,6 +287,16 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       }
       if (data.syncedAt) setStatusSyncedAt(data.syncedAt);
       if (Array.isArray(data.comments)) setComments(data.comments);
+      if (Array.isArray(data.formFiles)) {
+        const instanceCode =
+          data.instanceCode ||
+          activeSubmission?.lark_instance_code ||
+          po.lark_instance_code ||
+          "";
+        if (instanceCode) {
+          setFormFiles({ instanceCode, files: data.formFiles });
+        }
+      }
       setError(null);
       if (onUpdated && (data.status || data.serialNumber)) {
         onUpdated({
@@ -357,6 +382,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
         purchaseOrder?: PurchaseOrder;
         submission?: PurchaseOrderLarkSubmission;
         comments?: LarkCommentView[];
+        formFiles?: LarkCommentAttachment[];
       };
       if (!res.ok) {
         setError(data.error ?? `Link failed (${res.status})`);
@@ -370,6 +396,12 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       }
       if (data.syncedAt) setStatusSyncedAt(data.syncedAt);
       if (Array.isArray(data.comments)) setComments(data.comments);
+      if (Array.isArray(data.formFiles) && data.instanceCode) {
+        setFormFiles({
+          instanceCode: data.instanceCode,
+          files: data.formFiles,
+        });
+      }
       if (data.submission) {
         setSubmissions((prev) => {
           const without = prev.filter((s) => s.id !== data.submission!.id);
@@ -482,6 +514,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       setSubmissions(remaining);
       setActiveSubmissionId(remaining[0]?.id ?? null);
       setComments([]);
+      setFormFiles(null);
 
       if (remaining[0]) {
         setSerialNumber(remaining[0].lark_serial_number);
@@ -711,6 +744,14 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const statusClass = larkApprovalStatusBadgeClass(
     activeSubmission?.lark_approval_status ?? approvalStatus,
   );
+  const instanceCode =
+    activeSubmission?.lark_instance_code || po.lark_instance_code || "";
+  const visibleFormFiles =
+    formFiles?.instanceCode && formFiles.instanceCode === instanceCode
+      ? formFiles.files
+      : [];
+  const formFilesReady = formFiles?.instanceCode === instanceCode;
+
   const activePaymentAmount = useMemo(() => {
     if (activeSubmission) {
       return paymentAmountForApSubmission(po, activeSubmission);
@@ -918,6 +959,47 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
 
         <div className="mt-5 border-t border-emerald-200/80 pt-4">
           <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-stone-900">
+              Form attachments
+            </h3>
+            <span className="text-xs text-stone-500">
+              {syncingStatus
+                ? "Refreshing…"
+                : `${visibleFormFiles.length} on the form`}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-stone-500">
+            Original files attached when this AP Form was submitted. Preview
+            or download them here without opening Lark.
+          </p>
+          {visibleFormFiles.length === 0 ? (
+            <p className="mt-3 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-4 text-sm text-stone-500">
+              {syncingStatus
+                ? "Loading attachments…"
+                : formFilesReady
+                  ? "No files were attached to this form."
+                  : "Form attachments appear after the AP Form syncs."}
+            </p>
+          ) : (
+            <LarkAttachmentList
+              files={visibleFormFiles}
+              busy={syncingStatus}
+              className="mt-3 space-y-1.5"
+              fileHref={(index, file, download) =>
+                larkFormFileHref(
+                  `/api/procurement/pos/${po.id}/lark-form-files`,
+                  instanceCode,
+                  index,
+                  file,
+                  download,
+                )
+              }
+            />
+          )}
+        </div>
+
+        <div className="mt-5 border-t border-emerald-200/80 pt-4">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-stone-900">Comments</h3>
             <span className="text-xs text-stone-500">
               {syncingStatus
@@ -926,8 +1008,8 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             </span>
           </div>
           <p className="mt-0.5 text-xs text-stone-500">
-            Pulled from the Lark AP Form comment thread, including attachments.
-            Refresh to update.
+            Comments added on the Lark thread after submit, including files
+            attached there. Refresh to update.
           </p>
           {comments.length === 0 ? (
             <p className="mt-3 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-4 text-sm text-stone-500">
