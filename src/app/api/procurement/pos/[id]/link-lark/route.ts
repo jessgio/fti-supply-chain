@@ -11,6 +11,10 @@ import {
   resolveApprovalInstance,
 } from "@/lib/lark/client";
 import { toClientLarkComments } from "@/lib/lark/comment-files";
+import {
+  formFilesFromLarkForm,
+  toClientLarkFormFiles,
+} from "@/lib/lark/form-files";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder } from "@/lib/db/procurement";
 import { errorMessage } from "@/lib/errors";
@@ -251,6 +255,7 @@ export async function POST(
       submission: inserted,
       purchaseOrder: updated,
       comments: toClientLarkComments(details.comments),
+      formFiles: toClientLarkFormFiles(formFilesFromLarkForm(details.form)),
     });
   } catch (err) {
     return NextResponse.json(

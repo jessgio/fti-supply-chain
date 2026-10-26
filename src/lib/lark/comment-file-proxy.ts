@@ -5,7 +5,10 @@ import {
   isPrivateIpAddress,
   type LarkCommentFile,
 } from "@/lib/lark/comment-files";
-import { getApprovalInstanceDetails } from "@/lib/lark/client";
+import {
+  getApprovalInstanceDetails,
+  getTenantAccessToken,
+} from "@/lib/lark/client";
 
 export const LARK_COMMENT_FILE_MAX_BYTES = 52 * 1024 * 1024;
 
@@ -65,19 +68,59 @@ function capStream(
   });
 }
 
-async function fetchSafe(initial: string): Promise<Response> {
+const LARK_FILE_HOST_SUFFIXES = [
+  "larksuite.com",
+  "larkoffice.com",
+  "feishu.cn",
+  "feishucdn.com",
+  "larksuitecdn.com",
+  "byteimg.com",
+  "ibyteimg.com",
+];
+
+function isLarkFileHost(rawUrl: string): boolean {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase().replace(/\.+$/, "");
+    return LARK_FILE_HOST_SUFFIXES.some(
+      (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function requestHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+  if (!headers.has("Accept")) headers.set("Accept", "*/*");
+  return headers;
+}
+
+function withoutAuthorization(extra?: HeadersInit): HeadersInit | undefined {
+  if (!extra) return undefined;
+  const headers = new Headers(extra);
+  headers.delete("authorization");
+  return headers;
+}
+
+async function fetchSafe(
+  initial: string,
+  extraHeaders?: HeadersInit,
+): Promise<Response> {
   let current = assertSafeLarkFileUrl(initial);
   await assertPublicDns(current.hostname);
+  let headers = extraHeaders;
   for (let hop = 0; hop <= 3; hop++) {
     const res = await fetch(current, {
       redirect: "manual",
       signal: AbortSignal.timeout(25_000),
-      headers: { Accept: "*/*" },
+      headers: requestHeaders(headers),
     });
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
       if (!location) throw new Error("Attachment redirect was empty");
-      current = assertSafeLarkFileUrl(new URL(location, current).toString());
+      const next = assertSafeLarkFileUrl(new URL(location, current).toString());
+      if (next.hostname !== current.hostname) headers = withoutAuthorization(headers);
+      current = next;
       await assertPublicDns(current.hostname);
       continue;
     }
@@ -136,11 +179,11 @@ export async function resolveLarkCommentFile(input: {
   return file;
 }
 
-export async function fetchLarkCommentFile(
+function streamedFile(
   file: LarkCommentFile,
+  upstream: Response,
   download: boolean,
-): Promise<{ body: ReadableStream<Uint8Array>; headers: Headers }> {
-  const upstream = await fetchSafe(file.url);
+): { body: ReadableStream<Uint8Array>; headers: Headers } {
   const { mime, inline } = chooseMime(file, upstream.headers.get("content-type"));
   const headers = new Headers();
   headers.set("Content-Type", mime);
@@ -155,4 +198,36 @@ export async function fetchLarkCommentFile(
     ? capStream(upstream.body, LARK_COMMENT_FILE_MAX_BYTES)
     : new ReadableStream<Uint8Array>();
   return { body, headers };
+}
+
+function isAuthFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : "";
+  return /HTTP 40[13]/.test(message);
+}
+
+export async function fetchLarkHostedFile(
+  file: LarkCommentFile,
+  download: boolean,
+  options?: { authorize?: boolean },
+): Promise<{ body: ReadableStream<Uint8Array>; headers: Headers }> {
+  try {
+    return streamedFile(file, await fetchSafe(file.url), download);
+  } catch (err) {
+    if (!options?.authorize || !isAuthFailure(err) || !isLarkFileHost(file.url)) {
+      throw err;
+    }
+  }
+  const token = await getTenantAccessToken();
+  return streamedFile(
+    file,
+    await fetchSafe(file.url, { Authorization: `Bearer ${token}` }),
+    download,
+  );
+}
+
+export async function fetchLarkCommentFile(
+  file: LarkCommentFile,
+  download: boolean,
+): Promise<{ body: ReadableStream<Uint8Array>; headers: Headers }> {
+  return fetchLarkHostedFile(file, download);
 }

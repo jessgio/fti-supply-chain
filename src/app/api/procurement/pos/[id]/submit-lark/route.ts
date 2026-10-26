@@ -35,6 +35,7 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder, getSupplier } from "@/lib/db/procurement";
 import { generatePoPdf } from "@/lib/procurement/po-pdf";
+import { formatLarkAttachmentExt } from "@/lib/lark/form-files";
 import { errorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
@@ -334,6 +335,10 @@ export async function POST(
       planRows,
       planRemarks,
       attachmentCodes,
+      attachmentExt: formatLarkAttachmentExt([
+        poPdfName,
+        ...extraEntries.map((extra) => extra.filename),
+      ]),
     });
 
     const effectivePlanRows =

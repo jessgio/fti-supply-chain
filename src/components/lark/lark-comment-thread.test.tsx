@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LarkCommentThread } from "./lark-comment-thread";
+import { LarkCommentThread, larkFormFileHref } from "./lark-comment-thread";
 
 test("comment thread lists attachments with preview and download", () => {
   const html = renderToStaticMarkup(
@@ -71,4 +71,25 @@ test("attachment-only comments do not show an empty placeholder", () => {
   assert.equal(html.includes("(empty comment)"), false);
   assert.match(html, /photo\.jpg/);
   assert.match(html, /Preview/);
+});
+
+test("form attachment links identify the file without a comment id", () => {
+  const href = larkFormFileHref(
+    "/api/procurement/pos/po-1/lark-form-files",
+    "inst-1",
+    1,
+    {
+      title: "PO-1.pdf",
+      fileSize: 10,
+      type: "attachment",
+      mimeType: "application/pdf",
+    },
+    true,
+  );
+  assert.match(href, /^\/api\/procurement\/pos\/po-1\/lark-form-files\?/);
+  assert.match(href, /instanceCode=inst-1/);
+  assert.match(href, /index=1/);
+  assert.match(href, /title=PO-1\.pdf/);
+  assert.match(href, /download=1/);
+  assert.equal(href.includes("commentId"), false);
 });

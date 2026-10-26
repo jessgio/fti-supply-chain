@@ -63,6 +63,22 @@ export function larkCommentFileHref(
   return `${path}?${params.toString()}`;
 }
 
+export function larkFormFileHref(
+  path: string,
+  instanceCode: string,
+  index: number,
+  file: LarkCommentAttachment,
+  download: boolean,
+): string {
+  const params = new URLSearchParams({
+    instanceCode,
+    index: String(index),
+    title: file.title,
+  });
+  if (download) params.set("download", "1");
+  return `${path}?${params.toString()}`;
+}
+
 async function readAttachmentError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as { error?: string };
@@ -73,21 +89,20 @@ async function readAttachmentError(res: Response): Promise<string> {
   return `Could not load attachment (${res.status})`;
 }
 
-export function LarkCommentThread({
-  comments,
+export function LarkAttachmentList({
+  files,
   fileHref,
   busy = false,
-  listClassName = "mt-3 max-h-72",
+  className = "mt-2 space-y-1.5",
 }: {
-  comments: LarkCommentView[];
+  files: LarkCommentAttachment[];
   fileHref: (
-    commentId: string,
     index: number,
     file: LarkCommentAttachment,
     download: boolean,
   ) => string;
   busy?: boolean;
-  listClassName?: string;
+  className?: string;
 }) {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -113,13 +128,9 @@ export function LarkCommentThread({
     setPreview(null);
   }
 
-  async function previewFile(
-    commentId: string,
-    index: number,
-    file: LarkCommentAttachment,
-  ) {
+  async function previewFile(index: number, file: LarkCommentAttachment) {
     const requestId = ++previewRequest.current;
-    const key = `${commentId}:${index}:preview`;
+    const key = `${index}:preview`;
     setPendingKey(key);
     setFileError(null);
     setPreview({
@@ -130,7 +141,7 @@ export function LarkCommentThread({
       error: null,
     });
     try {
-      const blob = await loadBlob(fileHref(commentId, index, file, false));
+      const blob = await loadBlob(fileHref(index, file, false));
       if (previewRequest.current !== requestId) return;
       setPreview({
         fileName: file.title,
@@ -153,16 +164,12 @@ export function LarkCommentThread({
     }
   }
 
-  async function downloadFile(
-    commentId: string,
-    index: number,
-    file: LarkCommentAttachment,
-  ) {
-    const key = `${commentId}:${index}:download`;
+  async function downloadFile(index: number, file: LarkCommentAttachment) {
+    const key = `${index}:download`;
     setPendingKey(key);
     setFileError(null);
     try {
-      const blob = await loadBlob(fileHref(commentId, index, file, true));
+      const blob = await loadBlob(fileHref(index, file, true));
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -178,94 +185,54 @@ export function LarkCommentThread({
     }
   }
 
+  if (files.length === 0) return null;
+
   return (
     <>
-      <ul className={`${listClassName} space-y-2 overflow-y-auto`}>
-        {comments.map((comment) => {
-          const author =
-            comment.authorName?.trim() ||
-            comment.authorEmail?.trim() ||
-            comment.openId ||
-            "Unknown";
-          const files = comment.files ?? [];
+      <ul className={className}>
+        {files.map((file, index) => {
+          const size = formatBytes(file.fileSize);
+          const previewKey = `${index}:preview`;
+          const downloadKey = `${index}:download`;
           return (
             <li
-              key={comment.id}
-              className="rounded-lg border border-stone-200 bg-white px-3 py-2.5"
+              key={`${file.title}-${index}`}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1.5"
             >
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-sm font-medium text-stone-900">{author}</p>
-                <p className="text-[11px] text-stone-500">
-                  {comment.createTime
-                    ? format(new Date(comment.createTime), "dd/MM/yyyy HH:mm")
-                    : "—"}
-                </p>
+              <div className="flex min-w-0 items-center gap-2">
+                <Paperclip
+                  className="h-3.5 w-3.5 shrink-0 text-stone-500"
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-stone-800">{file.title}</p>
+                  {size ? (
+                    <p className="text-[11px] text-stone-500">{size}</p>
+                  ) : null}
+                </div>
               </div>
-              {comment.comment ? (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-stone-800/90">
-                  {comment.comment}
-                </p>
-              ) : files.length === 0 ? (
-                <p className="mt-1 text-sm text-stone-500">(empty comment)</p>
-              ) : null}
-              {files.length > 0 ? (
-                <ul className="mt-2 space-y-1.5">
-                  {files.map((file, index) => {
-                    const size = formatBytes(file.fileSize);
-                    const previewKey = `${comment.id}:${index}:preview`;
-                    const downloadKey = `${comment.id}:${index}:download`;
-                    return (
-                      <li
-                        key={`${file.title}-${index}`}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1.5"
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Paperclip
-                            className="h-3.5 w-3.5 shrink-0 text-stone-500"
-                            aria-hidden
-                          />
-                          <div className="min-w-0">
-                            <p className="truncate text-sm text-stone-800">
-                              {file.title}
-                            </p>
-                            {size ? (
-                              <p className="text-[11px] text-stone-500">{size}</p>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {canPreview(file) ? (
-                            <button
-                              type="button"
-                              disabled={busy || pendingKey !== null}
-                              onClick={() =>
-                                void previewFile(comment.id, index, file)
-                              }
-                              className="inline-flex items-center gap-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
-                            >
-                              <Eye className="h-3.5 w-3.5" aria-hidden />
-                              {pendingKey === previewKey ? "Opening…" : "Preview"}
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            disabled={busy || pendingKey !== null}
-                            onClick={() =>
-                              void downloadFile(comment.id, index, file)
-                            }
-                            className="inline-flex items-center gap-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
-                          >
-                            <Download className="h-3.5 w-3.5" aria-hidden />
-                            {pendingKey === downloadKey
-                              ? "Downloading…"
-                              : "Download"}
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
+              <div className="flex items-center gap-1.5">
+                {canPreview(file) ? (
+                  <button
+                    type="button"
+                    disabled={busy || pendingKey !== null}
+                    onClick={() => void previewFile(index, file)}
+                    className="inline-flex items-center gap-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+                  >
+                    <Eye className="h-3.5 w-3.5" aria-hidden />
+                    {pendingKey === previewKey ? "Opening…" : "Preview"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={busy || pendingKey !== null}
+                  onClick={() => void downloadFile(index, file)}
+                  className="inline-flex items-center gap-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden />
+                  {pendingKey === downloadKey ? "Downloading…" : "Download"}
+                </button>
+              </div>
             </li>
           );
         })}
@@ -285,5 +252,64 @@ export function LarkCommentThread({
         error={preview?.error ?? null}
       />
     </>
+  );
+}
+
+export function LarkCommentThread({
+  comments,
+  fileHref,
+  busy = false,
+  listClassName = "mt-3 max-h-72",
+}: {
+  comments: LarkCommentView[];
+  fileHref: (
+    commentId: string,
+    index: number,
+    file: LarkCommentAttachment,
+    download: boolean,
+  ) => string;
+  busy?: boolean;
+  listClassName?: string;
+}) {
+  return (
+    <ul className={`${listClassName} space-y-2 overflow-y-auto`}>
+      {comments.map((comment) => {
+        const author =
+          comment.authorName?.trim() ||
+          comment.authorEmail?.trim() ||
+          comment.openId ||
+          "Unknown";
+        const files = comment.files ?? [];
+        return (
+          <li
+            key={comment.id}
+            className="rounded-lg border border-stone-200 bg-white px-3 py-2.5"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm font-medium text-stone-900">{author}</p>
+              <p className="text-[11px] text-stone-500">
+                {comment.createTime
+                  ? format(new Date(comment.createTime), "dd/MM/yyyy HH:mm")
+                  : "—"}
+              </p>
+            </div>
+            {comment.comment ? (
+              <p className="mt-1 whitespace-pre-wrap text-sm text-stone-800/90">
+                {comment.comment}
+              </p>
+            ) : files.length === 0 ? (
+              <p className="mt-1 text-sm text-stone-500">(empty comment)</p>
+            ) : null}
+            <LarkAttachmentList
+              files={files}
+              busy={busy}
+              fileHref={(index, file, download) =>
+                fileHref(comment.id, index, file, download)
+              }
+            />
+          </li>
+        );
+      })}
+    </ul>
   );
 }

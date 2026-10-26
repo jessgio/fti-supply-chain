@@ -172,6 +172,8 @@ type LarkFormControl = {
   value: unknown;
   currency?: string;
   open_ids?: string[];
+  /** Original filenames for attachmentV2, comma-separated. */
+  ext?: string;
 };
 
 function toRfc3339Date(ymd: string, timeZoneOffset = "+07:00"): string {
@@ -239,6 +241,11 @@ export type BuildApFormInput = {
   planRemarks?: (string | null | undefined)[] | null;
   /** Lark attachment file codes from upload API. */
   attachmentCodes?: string[];
+  /**
+   * Original filenames for those codes, already formatted for Lark `ext`.
+   * Kept so people without Lark access can still see the file names.
+   */
+  attachmentExt?: string | null;
 };
 
 export type PaymentPlanRow = {
@@ -616,6 +623,7 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
     planRows: planRowsInput,
     planRemarks,
     attachmentCodes,
+    attachmentExt,
   } = input;
 
   const planRows = (
@@ -712,10 +720,12 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
   }
 
   if (attachmentCodes && attachmentCodes.length > 0) {
+    const ext = attachmentExt?.trim();
     controls.push({
       id: AP_FORM_WIDGETS.attachments,
       type: "attachmentV2",
       value: attachmentCodes,
+      ...(ext ? { ext } : {}),
     });
   }
 
