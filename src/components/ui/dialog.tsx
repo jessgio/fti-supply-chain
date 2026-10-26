@@ -56,38 +56,45 @@ export function Dialog({
   }
 
   return (
+    // The scroll container must not be the flex box that centers the panel.
+    // `align-items: center` on a fixed-height flex container clips overflow,
+    // so a purchase order with many lines cannot be scrolled to.
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-stone-900/40 p-4 sm:items-center"
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-stone-900/40"
       role="dialog"
       aria-modal="true"
-      onPointerDown={handleBackdropPointerDown}
-      onClick={handleBackdropClick}
     >
       <div
-        className={cn(
-          "w-full max-w-2xl rounded-xl border border-stone-200 bg-white shadow-xl",
-          className,
-        )}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
+        className="flex min-h-full items-start justify-center p-4 sm:items-center"
+        onPointerDown={handleBackdropPointerDown}
+        onClick={handleBackdropClick}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-stone-200 p-5">
-          <div>
-            <h2 className="text-base font-semibold text-stone-900">{title}</h2>
-            {description && (
-              <p className="mt-0.5 text-sm text-stone-500">{description}</p>
-            )}
+        <div
+          className={cn(
+            "w-full max-w-2xl rounded-xl border border-stone-200 bg-white shadow-xl",
+            className,
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-stone-200 p-5">
+            <div>
+              <h2 className="text-base font-semibold text-stone-900">{title}</h2>
+              {description && (
+                <p className="mt-0.5 text-sm text-stone-500">{description}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleCloseClick}
+              className="rounded-lg p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleCloseClick}
-            className="rounded-lg p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="p-5">{children}</div>
         </div>
-        <div className="p-5">{children}</div>
       </div>
     </div>
   );
