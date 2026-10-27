@@ -119,6 +119,28 @@ test("the first logged payment replaces a stale unpaid freeze", () => {
   assert.equal(patch.payment_amounts_committed_at, "2026-10-13T00:00:00.000Z");
 });
 
+test("a nominal down payment stays exact on an unpaid invoice", () => {
+  const schedule = resolvePaymentSchedule({
+    status: "ordered",
+    lines: [line(1, 14_250_000)],
+    discount_amount: 0,
+    tax_pct: 0,
+    pph_pct: 0,
+    other_charges: 0,
+    down_payment_pct: 0,
+    payment_terms: [
+      { label: "Down payment", basis: "amount", amount: 3_500_000, pct: 0 },
+      { label: "Final payment", basis: "pct", pct: 0 },
+    ],
+    payments: [],
+  });
+  assert.equal(schedule.invoiceTotal, 14_250_000);
+  assert.equal(schedule.terms[0]?.amount, 3_500_000);
+  assert.equal(schedule.terms[1]?.amount, 10_750_000);
+  assert.equal(schedule.terms[0]?.basis, "amount");
+  assert.equal(schedule.downPayment + schedule.balance, schedule.invoiceTotal);
+});
+
 test("three payment terms show on the invoice and freeze when one is logged", () => {
   const terms = [
     { label: "Down payment", pct: 30 },

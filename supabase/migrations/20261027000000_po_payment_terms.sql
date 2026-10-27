@@ -7,7 +7,7 @@ alter table public.purchase_orders
   add column if not exists committed_payment_terms jsonb;
 
 comment on column public.purchase_orders.payment_terms is
-  'Ordered installments [{label, pct}] totaling 100. Null uses down_payment_pct as the down payment and the remainder as the final payment.';
+  'Ordered installments. Percent terms are {label, pct, basis: pct} and total 100. A fixed term is {label, basis: amount, amount} and one other term is the rest of the invoice. Null uses down_payment_pct as the down payment and the remainder as the final payment.';
 
 comment on column public.purchase_orders.committed_payment_terms is
   'Installment amounts [{label, amount}] locked when a payment is logged. Ignored while the PO has no payments. The last installment is recomputed from the live invoice.';

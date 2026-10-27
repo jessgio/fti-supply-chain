@@ -24,6 +24,7 @@ import {
   parsePaymentTerms,
   type PaymentTermDraft,
 } from "@/lib/procurement/payment-terms";
+import { computePoInvoiceTotals, DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import { sortSuppliersByName } from "@/lib/procurement/supplier-list";
 import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
@@ -154,6 +155,7 @@ function isLegacyTwoPaymentSchedule(
 ): boolean {
   if (terms == null || terms.length === 0) return true;
   if (terms.length !== 2) return false;
+  if (terms.some((term) => term.basis === "amount")) return false;
   return (
     normalizePaymentLabel(terms[0]?.label ?? "") === "down payment" &&
     normalizePaymentLabel(terms[1]?.label ?? "") === "final payment"
@@ -162,13 +164,60 @@ function isLegacyTwoPaymentSchedule(
 
 function storedPaymentTerms(
   terms: PaymentTermDraft[] | null | undefined,
+  check?: { invoiceTotal?: number; currency?: string },
 ): PaymentTermDraft[] | null {
   if (terms == null) return null;
-  const parsed = normalizePaymentTermsInput(terms);
+  const parsed = normalizePaymentTermsInput(terms, check);
   if (parsed.error || !parsed.terms) {
     throw new Error(parsed.error ?? "Payment terms are invalid.");
   }
   return parsed.terms;
+}
+
+function invoiceForPaymentTerms(
+  existing: Pick<
+    PurchaseOrder,
+    | "status"
+    | "lines"
+    | "discount_amount"
+    | "tax_pct"
+    | "pph_pct"
+    | "other_charges"
+    | "currency"
+  > | null,
+  input: {
+    status?: PurchaseOrder["status"];
+    lines?: Array<{ id?: string; qty_ordered: number; unit_cost?: number | null }>;
+    discount_amount?: number;
+    tax_pct?: number;
+    pph_pct?: number;
+    other_charges?: number;
+    currency?: string;
+  },
+): { invoiceTotal: number; currency: string } {
+  const lines = input.lines
+    ? input.lines.map((line) => {
+        const prior = existing?.lines?.find((row) => line.id && row.id === line.id);
+        return {
+          qty_ordered: line.qty_ordered,
+          qty_received: prior?.qty_received ?? 0,
+          unit_cost: line.unit_cost ?? null,
+          is_closed: prior?.is_closed ?? false,
+        };
+      })
+    : (existing?.lines ?? []);
+  const totals = computePoInvoiceTotals({
+    status: input.status ?? existing?.status,
+    lines: lines as PurchaseOrder["lines"],
+    discount_amount: input.discount_amount ?? existing?.discount_amount ?? 0,
+    tax_pct: input.tax_pct ?? existing?.tax_pct ?? DEFAULT_PO_TAX_PCT,
+    pph_pct: input.pph_pct ?? existing?.pph_pct ?? 0,
+    other_charges: input.other_charges ?? existing?.other_charges ?? 0,
+  });
+  return {
+    invoiceTotal: totals.invoiceTotal,
+    currency: input.currency ?? existing?.currency ?? "IDR",
+  };
 }
 
 function generatePoNumber(): string {
@@ -614,6 +663,8 @@ export async function createPurchaseOrder(
     throw new Error("A purchase order needs at least one line item.");
   }
 
+  const paymentCheck = invoiceForPaymentTerms(null, input);
+  const paymentTerms = storedPaymentTerms(input.payment_terms, paymentCheck);
   const { data: po, error: poError } = await supabase
     .from("purchase_orders")
     .insert({
@@ -622,8 +673,8 @@ export async function createPurchaseOrder(
       status: input.status ?? "planned",
       order_date: input.order_date ?? null,
       expected_date: input.expected_date ?? null,
-      down_payment_pct: input.payment_terms?.[0]?.pct ?? input.down_payment_pct ?? 30,
-      payment_terms: storedPaymentTerms(input.payment_terms),
+      down_payment_pct: paymentTerms?.[0]?.pct ?? input.down_payment_pct ?? 30,
+      payment_terms: paymentTerms,
       discount_amount: input.discount_amount ?? 0,
       tax_pct: input.tax_pct ?? 11,
       pph_pct: input.pph_pct ?? 0,
@@ -719,7 +770,10 @@ export async function updatePurchaseOrder(
   if (input.down_payment_pct !== undefined)
     headerPatch.down_payment_pct = input.down_payment_pct;
   if (input.payment_terms !== undefined) {
-    const terms = storedPaymentTerms(input.payment_terms);
+    const terms = storedPaymentTerms(
+      input.payment_terms,
+      invoiceForPaymentTerms(existing, input),
+    );
     headerPatch.payment_terms = terms;
     if (terms && terms.length > 0) {
       headerPatch.down_payment_pct = terms[0]!.pct;

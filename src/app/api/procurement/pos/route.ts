@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizePaymentTermsInput } from "@/lib/procurement/payment-terms";
+import { computePoInvoiceTotals, DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   createPurchaseOrder,
@@ -89,10 +90,31 @@ export async function POST(request: Request) {
       );
     }
 
+    const invoiceTotal = computePoInvoiceTotals({
+      lines: lines.map((line) => ({
+        id: "",
+        po_id: "",
+        sku_id: line.sku_id,
+        qty_ordered: line.qty_ordered,
+        qty_received: 0,
+        is_closed: false,
+        unit_cost: line.unit_cost ?? null,
+      })),
+      discount_amount:
+        body.discount_amount != null ? Number(body.discount_amount) : 0,
+      tax_pct: body.tax_pct != null ? Number(body.tax_pct) : DEFAULT_PO_TAX_PCT,
+      pph_pct: body.pph_pct != null ? Number(body.pph_pct) : 0,
+      other_charges:
+        body.other_charges != null ? Number(body.other_charges) : 0,
+      status: (body.status as PoStatus) ?? "planned",
+    }).invoiceTotal;
     const paymentTerms =
       body?.payment_terms === undefined
         ? null
-        : normalizePaymentTermsInput(body.payment_terms);
+        : normalizePaymentTermsInput(body.payment_terms, {
+            invoiceTotal,
+            currency: body.currency != null ? String(body.currency) : "IDR",
+          });
     if (paymentTerms?.error || (body?.payment_terms !== undefined && !paymentTerms?.terms)) {
       return NextResponse.json(
         { error: paymentTerms?.error ?? "Payment terms are invalid." },

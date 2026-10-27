@@ -329,10 +329,16 @@ export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
 }
 
 function apInstallmentRemark(
-  term: { label: string; pct: number },
+  term: {
+    label: string;
+    pct: number;
+    basis?: "pct" | "amount";
+    remainder?: boolean;
+  },
   index: number,
   count: number,
 ): string {
+  if (term.basis === "amount" || term.remainder) return term.label;
   const pct = formatPaymentPct(term.pct);
   const label = normalizePaymentLabel(term.label);
   if (count === 2 && index === 0 && label === "down payment") {

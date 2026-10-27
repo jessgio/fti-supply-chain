@@ -85,7 +85,12 @@ export async function PATCH(
       order_date?: string | null;
       expected_date?: string | null;
       down_payment_pct?: number;
-      payment_terms?: { label: string; pct: number }[] | null;
+      payment_terms?: {
+        label: string;
+        pct: number;
+        basis?: "pct" | "amount";
+        amount?: number | null;
+      }[] | null;
       discount_amount?: number;
       tax_pct?: number;
       pph_pct?: number;
@@ -180,8 +185,29 @@ export async function PATCH(
     invalidateForecastCache();
     return NextResponse.json({ purchaseOrder });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+    const message = errorMessage(error);
+    return NextResponse.json(
+      { error: message },
+      { status: paymentTermsErrorStatus(message) },
+    );
   }
+}
+
+function paymentTermsErrorStatus(message: string): number {
+  if (
+    message.startsWith("Add at least one payment") ||
+    message.startsWith("A purchase order can have at most") ||
+    message.startsWith("Each payment") ||
+    message.startsWith("Payment names") ||
+    message.startsWith("Payment percents") ||
+    message.startsWith("Enter a percent") ||
+    message.startsWith("Enter an amount") ||
+    message.startsWith("Fixed payments") ||
+    message.startsWith("Payment terms must")
+  ) {
+    return 400;
+  }
+  return 500;
 }
 
 export async function DELETE(
