@@ -78,7 +78,7 @@ const COLUMNS: Array<{
     key: "paymentTerms",
     label: "Payment terms",
     align: "left",
-    title: "Down payment and balance payment. Sorts by down payment percent.",
+    title: "Each payment on the invoice. Sorts by the first payment percent.",
   },
   {
     key: "lastInbound",
@@ -494,10 +494,27 @@ function SearchResultRows({
           {formatPoMoney(row.total, row.currency)}
         </td>
         <td className="whitespace-nowrap py-2 pr-3">
-          <span className="tabular-nums">{formatPct(row.downPaymentPct)} DP</span>
-          <span className="block text-xs tabular-nums text-stone-500">
-            {formatPct(row.balancePct)} balance
-          </span>
+          {row.paymentTerms.length > 2 ? (
+            <span
+              className="tabular-nums"
+              title={row.paymentTerms
+                .map((term) => `${term.label} ${formatPct(term.pct)}`)
+                .join(", ")}
+            >
+              {row.paymentTerms.map((term) => (
+                <span key={term.label} className="block">
+                  {formatPct(term.pct)} {term.label}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <>
+              <span className="tabular-nums">{formatPct(row.downPaymentPct)} DP</span>
+              <span className="block text-xs tabular-nums text-stone-500">
+                {formatPct(row.balancePct)} balance
+              </span>
+            </>
+          )}
         </td>
         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
           {formatDate(row.lastInboundDate)}

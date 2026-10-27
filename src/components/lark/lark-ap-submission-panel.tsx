@@ -54,7 +54,22 @@ type Colleague = {
   is_default_approver?: boolean;
 };
 
-function paymentScopeLabel(scope: string | null | undefined): string {
+function paymentScopeLabel(
+  scope: string | null | undefined,
+  termCount = 2,
+): string {
+  if (termCount > 2) {
+    switch (scope) {
+      case "down_payment":
+        return "First payment only";
+      case "balance":
+        return "Remaining payments";
+      case "both":
+        return "All payments";
+      default:
+        return "Payment";
+    }
+  }
   switch (scope) {
     case "down_payment":
       return "Down payment only";
@@ -122,6 +137,8 @@ function PaymentPlanDateInput({
 }
 
 export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated }: Props) {
+  const paymentTermCount =
+    po.payment_terms && po.payment_terms.length > 0 ? po.payment_terms.length : 2;
   const [busy, setBusy] = useState(false);
   const [loadingPeople, setLoadingPeople] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -842,7 +859,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                       }`}
                     >
                       <span className="font-medium text-stone-900">
-                        {paymentScopeLabel(sub.payment_scope)}
+                        {paymentScopeLabel(sub.payment_scope, paymentTermCount)}
                         {amount
                           ? ` · ${formatPoMoney(amount.amount, amount.currency)}`
                           : ""}
@@ -933,14 +950,14 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                 >
                   {AP_PAYMENT_PLAN_SCOPES.map((s) => (
                     <option key={s.value} value={s.value}>
-                      {s.label}
+                      {paymentScopeLabel(s.value, paymentTermCount)}
                     </option>
                   ))}
                 </select>
               </label>
             ) : activeSubmission ? (
               <p className="text-xs text-stone-500">
-                Scope: {paymentScopeLabel(activeSubmission.payment_scope)}
+                Scope: {paymentScopeLabel(activeSubmission.payment_scope, paymentTermCount)}
               </p>
             ) : null}
             <button
@@ -1122,7 +1139,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                 >
                   {AP_PAYMENT_PLAN_SCOPES.map((s) => (
                     <option key={s.value} value={s.value}>
-                      {s.label}
+                      {paymentScopeLabel(s.value, paymentTermCount)}
                     </option>
                   ))}
                 </select>
@@ -1337,7 +1354,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                   >
                     {AP_PAYMENT_PLAN_SCOPES.map((s) => (
                       <option key={s.value} value={s.value}>
-                        {s.label}
+                        {paymentScopeLabel(s.value, paymentTermCount)}
                       </option>
                     ))}
                   </select>

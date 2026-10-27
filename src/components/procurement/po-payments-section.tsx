@@ -13,6 +13,7 @@ import {
   PO_CURRENCIES,
 } from "@/lib/procurement/currencies";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
+import { paymentPurposeChoices } from "@/lib/procurement/payment-terms";
 import {
   computePoPaymentSummary,
   PAYMENT_STATUS_LABELS,
@@ -34,22 +35,26 @@ interface PaymentFormState {
   customPurpose: string;
 }
 
-function emptyPaymentForm(poCurrency: string): PaymentFormState {
+function emptyPaymentForm(
+  poCurrency: string,
+  purpose: string = PO_PAYMENT_PURPOSES[0],
+): PaymentFormState {
   return {
     paymentDate: new Date().toISOString().slice(0, 10),
     amount: "",
     paymentRequestNumber: "",
     currency: poCurrency,
     exchangeRate: "",
-    purpose: PO_PAYMENT_PURPOSES[0],
+    purpose,
     customPurpose: "",
   };
 }
 
-function paymentFormFromRecord(payment: PoPayment): PaymentFormState {
-  const isPreset = (PO_PAYMENT_PURPOSES as readonly string[]).includes(
-    payment.purpose,
-  );
+function paymentFormFromRecord(
+  payment: PoPayment,
+  choices: readonly string[],
+): PaymentFormState {
+  const isPreset = choices.includes(payment.purpose);
   return {
     paymentDate: payment.payment_date,
     amount: String(payment.amount),
@@ -85,7 +90,6 @@ export function PoPaymentsSection({
   const [form, setForm] = useState(() =>
     emptyPaymentForm(po.currency ?? DEFAULT_PO_CURRENCY),
   );
-
   const payments = useMemo(
     () =>
       [...(po.payments ?? [])].sort((a, b) =>
@@ -101,6 +105,10 @@ export function PoPaymentsSection({
   const paymentNoteCounts = useStatusUpdateCounts("payment", paymentIds);
 
   const summary = useMemo(() => computePoPaymentSummary(po), [po]);
+  const purposeChoices = useMemo(
+    () => paymentPurposeChoices(summary.installments.map((term) => term.label)),
+    [summary.installments],
+  );
   const fmt = (value: number, currency = summary.poCurrency) =>
     formatPoMoney(value, currency);
   const fmtIdr = (value: number | null) =>
@@ -114,20 +122,30 @@ export function PoPaymentsSection({
 
   function openAddForm() {
     setEditingId(null);
-    setForm(emptyPaymentForm(summary.poCurrency));
+    setForm(
+      emptyPaymentForm(
+        summary.poCurrency,
+        purposeChoices[0] ?? PO_PAYMENT_PURPOSES[0],
+      ),
+    );
     setFormOpen(true);
   }
 
   function openEditForm(payment: PoPayment) {
     setEditingId(payment.id);
-    setForm(paymentFormFromRecord(payment));
+    setForm(paymentFormFromRecord(payment, purposeChoices));
     setFormOpen(true);
   }
 
   function closeForm() {
     setFormOpen(false);
     setEditingId(null);
-    setForm(emptyPaymentForm(summary.poCurrency));
+    setForm(
+      emptyPaymentForm(
+        summary.poCurrency,
+        purposeChoices[0] ?? PO_PAYMENT_PURPOSES[0],
+      ),
+    );
   }
 
   async function savePayment() {
@@ -228,27 +246,23 @@ export function PoPaymentsSection({
         )}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm">
-          <p className="text-stone-500">Down payment ({summary.poCurrency})</p>
-          <p className="mt-0.5 font-medium text-stone-900">
-            {fmt(summary.paidDown)} / {fmt(summary.expectedDown)}
-          </p>
-          <Badge className={`mt-1 ${PAYMENT_STATUS_STYLES[summary.downStatus]}`}>
-            {PAYMENT_STATUS_LABELS[summary.downStatus]}
-          </Badge>
-        </div>
-        <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm">
-          <p className="text-stone-500">Balance ({summary.poCurrency})</p>
-          <p className="mt-0.5 font-medium text-stone-900">
-            {fmt(summary.paidBalance)} / {fmt(summary.expectedBalance)}
-          </p>
-          <Badge
-            className={`mt-1 ${PAYMENT_STATUS_STYLES[summary.balanceStatus]}`}
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {summary.installments.map((installment) => (
+          <div
+            key={installment.label}
+            className="rounded-lg bg-stone-50 px-3 py-2 text-sm"
           >
-            {PAYMENT_STATUS_LABELS[summary.balanceStatus]}
-          </Badge>
-        </div>
+            <p className="text-stone-500">
+              {installment.label} ({summary.poCurrency})
+            </p>
+            <p className="mt-0.5 font-medium text-stone-900">
+              {fmt(installment.paid)} / {fmt(installment.expected)}
+            </p>
+            <Badge className={`mt-1 ${PAYMENT_STATUS_STYLES[installment.status]}`}>
+              {PAYMENT_STATUS_LABELS[installment.status]}
+            </Badge>
+          </div>
+        ))}
         <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm">
           <p className="text-stone-500">Invoice ({summary.poCurrency})</p>
           <p className="mt-0.5 font-medium text-stone-900">
@@ -436,7 +450,7 @@ export function PoPaymentsSection({
                   setForm((prev) => ({ ...prev, purpose: e.target.value }))
                 }
               >
-                {PO_PAYMENT_PURPOSES.map((p) => (
+                {purposeChoices.map((p) => (
                   <option key={p} value={p}>
                     {p}
                   </option>

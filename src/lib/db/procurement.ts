@@ -16,6 +16,14 @@ import {
   CLEARED_COMMITTED_PAYMENT_AMOUNTS,
 } from "@/lib/procurement/committed-payment-amounts";
 import { syncSkuLastPurchaseCosts } from "@/lib/db/sku-purchase-costs";
+import {
+  defaultPaymentTerms,
+  normalizePaymentLabel,
+  normalizePaymentTermsInput,
+  parseCommittedPaymentTerms,
+  parsePaymentTerms,
+  type PaymentTermDraft,
+} from "@/lib/procurement/payment-terms";
 import { sortSuppliersByName } from "@/lib/procurement/supplier-list";
 import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
@@ -34,6 +42,7 @@ export interface NewPoInput {
   order_date?: string | null;
   expected_date?: string | null;
   down_payment_pct?: number;
+  payment_terms?: PaymentTermDraft[] | null;
   discount_amount?: number;
   tax_pct?: number;
   pph_pct?: number;
@@ -57,6 +66,7 @@ export interface UpdatePoInput {
   order_date?: string | null;
   expected_date?: string | null;
   down_payment_pct?: number;
+  payment_terms?: PaymentTermDraft[] | null;
   discount_amount?: number;
   tax_pct?: number;
   pph_pct?: number;
@@ -138,6 +148,28 @@ const SUPPLIER_SELECT =
   "payment_terms, lead_time_note, delivery_time, packaging_notes, " +
   "beneficiary_name, beneficiary_account_number, swift_code, beneficiary_country, " +
   "beneficiary_address, beneficiary_bank, beneficiary_bank_address, bank_code, branch_code, notes";
+
+function isLegacyTwoPaymentSchedule(
+  terms: PaymentTermDraft[] | null | undefined,
+): boolean {
+  if (terms == null || terms.length === 0) return true;
+  if (terms.length !== 2) return false;
+  return (
+    normalizePaymentLabel(terms[0]?.label ?? "") === "down payment" &&
+    normalizePaymentLabel(terms[1]?.label ?? "") === "final payment"
+  );
+}
+
+function storedPaymentTerms(
+  terms: PaymentTermDraft[] | null | undefined,
+): PaymentTermDraft[] | null {
+  if (terms == null) return null;
+  const parsed = normalizePaymentTermsInput(terms);
+  if (parsed.error || !parsed.terms) {
+    throw new Error(parsed.error ?? "Payment terms are invalid.");
+  }
+  return parsed.terms;
+}
 
 function generatePoNumber(): string {
   const date = new Date();
@@ -271,6 +303,7 @@ type PoRow = {
   order_date: string | null;
   expected_date: string | null;
   down_payment_pct: number;
+  payment_terms?: unknown;
   discount_amount: number;
   tax_pct: number;
   pph_pct: number;
@@ -286,6 +319,7 @@ type PoRow = {
   committed_invoice_total?: number | null;
   committed_down_payment?: number | null;
   committed_balance?: number | null;
+  committed_payment_terms?: unknown;
   payment_amounts_committed_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -445,6 +479,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     order_date: row.order_date,
     expected_date: row.expected_date,
     down_payment_pct: Number(row.down_payment_pct ?? 30),
+    payment_terms: parsePaymentTerms(row.payment_terms),
     discount_amount: Number(row.discount_amount ?? 0),
     tax_pct: Number(row.tax_pct ?? 11),
     pph_pct: Number(row.pph_pct ?? 0),
@@ -461,6 +496,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
         : Number(row.committed_down_payment),
     committed_balance:
       row.committed_balance == null ? null : Number(row.committed_balance),
+    committed_payment_terms: parseCommittedPaymentTerms(row.committed_payment_terms),
     payment_amounts_committed_at: row.payment_amounts_committed_at ?? null,
     pd_project_id: row.pd_project_id ?? null,
     pd_project_name: pdProject?.name ?? null,
@@ -486,10 +522,10 @@ const PO_LARK_SUBMISSIONS_EMBED =
   "purchase_order_lark_submissions(id, lark_instance_code, lark_serial_number, lark_approval_status, payment_scope, submitted_at)";
 
 const PO_COMMITTED_PAYMENT_COLS =
-  "committed_invoice_total, committed_down_payment, committed_balance, payment_amounts_committed_at";
+  "committed_invoice_total, committed_down_payment, committed_balance, committed_payment_terms, payment_amounts_committed_at";
 
 const PO_SELECT =
-  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, payment_terms, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
   PO_LARK_COLS +
   ", " +
   PO_COMMITTED_PAYMENT_COLS +
@@ -499,7 +535,7 @@ const PO_SELECT =
   PO_LARK_SUBMISSIONS_EMBED;
 
 const PO_DETAIL_SELECT =
-  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
+  "id, po_number, supplier_id, pd_project_id, status, order_date, expected_date, down_payment_pct, payment_terms, discount_amount, tax_pct, pph_pct, other_charges, currency, notes, " +
   PO_LARK_COLS +
   ", " +
   PO_COMMITTED_PAYMENT_COLS +
@@ -586,7 +622,8 @@ export async function createPurchaseOrder(
       status: input.status ?? "planned",
       order_date: input.order_date ?? null,
       expected_date: input.expected_date ?? null,
-      down_payment_pct: input.down_payment_pct ?? 30,
+      down_payment_pct: input.payment_terms?.[0]?.pct ?? input.down_payment_pct ?? 30,
+      payment_terms: storedPaymentTerms(input.payment_terms),
       discount_amount: input.discount_amount ?? 0,
       tax_pct: input.tax_pct ?? 11,
       pph_pct: input.pph_pct ?? 0,
@@ -648,6 +685,7 @@ export async function updatePurchaseOrder(
       input.order_date === undefined &&
       input.expected_date === undefined &&
       input.down_payment_pct === undefined &&
+      input.payment_terms === undefined &&
       input.discount_amount === undefined &&
       input.tax_pct === undefined &&
       input.pph_pct === undefined &&
@@ -680,6 +718,18 @@ export async function updatePurchaseOrder(
     headerPatch.expected_date = input.expected_date;
   if (input.down_payment_pct !== undefined)
     headerPatch.down_payment_pct = input.down_payment_pct;
+  if (input.payment_terms !== undefined) {
+    const terms = storedPaymentTerms(input.payment_terms);
+    headerPatch.payment_terms = terms;
+    if (terms && terms.length > 0) {
+      headerPatch.down_payment_pct = terms[0]!.pct;
+    }
+  } else if (
+    input.down_payment_pct !== undefined &&
+    isLegacyTwoPaymentSchedule(existing.payment_terms)
+  ) {
+    headerPatch.payment_terms = defaultPaymentTerms(input.down_payment_pct);
+  }
   if (input.discount_amount !== undefined)
     headerPatch.discount_amount = input.discount_amount;
   if (input.tax_pct !== undefined) headerPatch.tax_pct = input.tax_pct;
@@ -793,6 +843,7 @@ export async function updatePurchaseOrder(
     existing.committed_down_payment != null ||
     existing.committed_balance != null ||
     existing.committed_invoice_total != null ||
+    existing.committed_payment_terms != null ||
     existing.payment_amounts_committed_at != null
   ) {
     await releaseCommittedPaymentAmountsIfUnpaid(supabase, id);

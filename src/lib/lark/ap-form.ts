@@ -1,4 +1,5 @@
 import { formatPaymentPct, resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { normalizePaymentLabel } from "@/lib/procurement/payment-terms";
 import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 import { formatSupplierPaymentDetails } from "@/lib/procurement/supplier-po-notes";
 import type { PurchaseOrder, Supplier } from "@/types/database";
@@ -327,10 +328,30 @@ export function poHasSplitPaymentPlan(po: PurchaseOrder): boolean {
   return schedule.downPayment > 0 && schedule.balance > 0;
 }
 
+function apInstallmentRemark(
+  term: { label: string; pct: number },
+  index: number,
+  count: number,
+): string {
+  const pct = formatPaymentPct(term.pct);
+  const label = normalizePaymentLabel(term.label);
+  if (count === 2 && index === 0 && label === "down payment") {
+    return `Down payment ${pct}%`;
+  }
+  if (
+    count === 2 &&
+    index === count - 1 &&
+    (label === "final payment" || label === "balance payment" || label === "balance")
+  ) {
+    return `Balance ${pct}%`;
+  }
+  return `${term.label} ${pct}%`;
+}
+
 /**
  * Default AP Form payment plan rows.
- * Down payment stays at the logged/frozen amount; invoice total and remaining
- * balance follow live PO lines and charges.
+ * The first installment stays at the logged/frozen amount; the invoice total
+ * and the last installment follow live PO lines and charges.
  */
 export function buildPaymentPlanRows(
   po: PurchaseOrder,
@@ -345,35 +366,26 @@ export function buildPaymentPlanRows(
 
   const schedule = resolvePaymentSchedule(po);
   const today = localTodayYmd();
-  const dpPct = schedule.downPaymentPct;
   const dpDate = dueDateYmd(po.order_date) ?? today;
   const balanceDate = dueDateYmd(po.expected_date) ?? today;
 
-  const downAmount = roundMoney(schedule.downPayment);
-  const balanceAmount = roundMoney(schedule.balance);
+  const payableTerms = schedule.terms.filter((term) => roundMoney(term.amount) > 0);
   const invoiceAmount = roundMoney(schedule.invoiceTotal);
 
-  const isSplit = downAmount > 0 && balanceAmount > 0;
-
-  if (isSplit) {
-    const downLabel = `Down payment ${formatPaymentPct(dpPct)}%`;
-    const balanceLabel = `Balance ${formatPaymentPct(schedule.finalPaymentPct)}%`;
-    const downPaymentRow: PaymentPlanRow = {
-      dateYmd: dpDate,
-      amount: downAmount,
+  if (payableTerms.length > 1) {
+    const rows = payableTerms.map((term, index) => ({
+      dateYmd: index === 0 ? dpDate : balanceDate,
+      amount: roundMoney(term.amount),
       currency,
-      remarks: buildPaymentPlanRemark(downLabel, po),
-    };
-    const balanceRow: PaymentPlanRow = {
-      dateYmd: balanceDate,
-      amount: balanceAmount,
-      currency,
-      remarks: buildPaymentPlanRemark(balanceLabel, po),
-    };
+      remarks: buildPaymentPlanRemark(
+        apInstallmentRemark(term, index, payableTerms.length),
+        po,
+      ),
+    }));
 
-    if (scope === "down_payment") return [downPaymentRow];
-    if (scope === "balance") return [balanceRow];
-    return [downPaymentRow, balanceRow];
+    if (scope === "down_payment") return rows.slice(0, 1);
+    if (scope === "balance") return rows.slice(1);
+    return rows;
   }
 
   return [

@@ -6,6 +6,7 @@ import type {
   PoTimelineEntry,
 } from "@/types/database";
 import { receivePoLine } from "@/lib/db/procurement";
+import { parsePaymentTerms } from "@/lib/procurement/payment-terms";
 import { latestInboundReceiveDate } from "@/lib/procurement/unpaid-pos";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { resolvePoShortfallAfterShortClose } from "@/lib/procurement/po-shortfall";
@@ -48,6 +49,7 @@ function buildTimelineLifecycleInput(
     expected_date: (po.expected_date as string | null) ?? null,
     created_at: po.created_at as string,
     down_payment_pct: Number(po.down_payment_pct ?? 30),
+    payment_terms: parsePaymentTerms(po.payment_terms),
     discount_amount: Number(po.discount_amount ?? 0),
     tax_pct: Number(po.tax_pct ?? 11),
     pph_pct: Number(po.pph_pct ?? 0),
@@ -673,6 +675,7 @@ export async function listOngoingPosForTimeline(
       order_date,
       created_at,
       down_payment_pct,
+      payment_terms,
       discount_amount,
       tax_pct,
       pph_pct,
@@ -815,6 +818,7 @@ const PO_TIMELINE_SELECT = `
   order_date,
   created_at,
   down_payment_pct,
+  payment_terms,
   discount_amount,
   tax_pct,
   pph_pct,

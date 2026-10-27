@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PoStatus } from "@/types/database";
 import {
+  parseCommittedPaymentTerms,
+  parsePaymentTerms,
+} from "@/lib/procurement/payment-terms";
+import {
   derivePoDisplayStatus,
   derivePoStatus,
   PO_ACTIVE_SHIPMENT_STATUSES,
@@ -53,6 +57,7 @@ async function loadPoLifecycleInput(
       expected_date,
       created_at,
       down_payment_pct,
+      payment_terms,
       discount_amount,
       tax_pct,
       pph_pct,
@@ -61,6 +66,7 @@ async function loadPoLifecycleInput(
       committed_invoice_total,
       committed_down_payment,
       committed_balance,
+      committed_payment_terms,
       payment_amounts_committed_at,
       purchase_order_lines (
         qty_ordered,
@@ -129,6 +135,7 @@ async function loadPoLifecycleInput(
     expected_date: po.expected_date as string | null,
     created_at: po.created_at as string,
     down_payment_pct: Number(po.down_payment_pct ?? 30),
+    payment_terms: parsePaymentTerms(po.payment_terms),
     discount_amount: Number(po.discount_amount ?? 0),
     tax_pct: Number(po.tax_pct ?? 11),
     pph_pct: Number(po.pph_pct ?? 0),
@@ -144,6 +151,7 @@ async function loadPoLifecycleInput(
         : Number(po.committed_down_payment),
     committed_balance:
       po.committed_balance == null ? null : Number(po.committed_balance),
+    committed_payment_terms: parseCommittedPaymentTerms(po.committed_payment_terms),
     payment_amounts_committed_at:
       (po.payment_amounts_committed_at as string | null) ?? null,
     lines: lines.map((line) => ({

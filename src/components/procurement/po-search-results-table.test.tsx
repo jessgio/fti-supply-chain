@@ -79,3 +79,25 @@ test("procurement search shows each AP form and marks orders with none", () => {
   assert.match(html, /Balance/);
   assert.match(html, /Not submitted/);
 });
+
+test("procurement search lists every installment when a PO has more than two", () => {
+  const html = renderToStaticMarkup(
+    <PoSearchResultsTable
+      query="PO"
+      skus={[]}
+      purchaseOrders={[
+        purchaseOrder({
+          payment_terms: [
+            { label: "Down payment", pct: 30 },
+            { label: "Progress payment", pct: 40 },
+            { label: "Before shipment", pct: 30 },
+          ],
+        }),
+      ]}
+    />,
+  );
+
+  assert.match(html, /30% Down payment/);
+  assert.match(html, /40% Progress payment/);
+  assert.match(html, /30% Before shipment/);
+});

@@ -11,6 +11,8 @@ import {
 import { getRateToIdr } from "@/lib/procurement/fx-rates";
 import { poFxDate } from "@/lib/procurement/open-po-value";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
+import { poCurrencyTolerance } from "@/lib/procurement/po-payment-status";
 import { listPurchaseOrders } from "@/lib/db/procurement";
 
 export type PaymentLedgerSortKey =
@@ -45,6 +47,8 @@ export interface PaymentPurposeIssue {
   variance_amount: number;
   variance_idr: number;
   status: "underpaid" | "overpaid";
+  /** Set when the PO has more than a down payment and a final payment. */
+  term_label?: string;
 }
 
 export interface PaymentDashboardSummary {
@@ -84,12 +88,6 @@ type PaymentRow = {
     suppliers: { name: string } | null;
   } | null;
 };
-
-import {
-  isBalancePaymentPurpose,
-  isDownPaymentPurpose,
-  poCurrencyTolerance,
-} from "@/lib/procurement/po-payment-status";
 
 function normalizePurpose(purpose: string): string {
   return purpose.trim().toLowerCase();
@@ -309,18 +307,6 @@ function purposeIssue(
   };
 }
 
-/** Down + balance paid may be reallocated between purposes; skip flags when combined total matches. */
-function downBalancePaymentsNetToZero(
-  poCurrency: string,
-  expectedDown: number,
-  expectedBalance: number,
-  paidDown: number,
-  paidBalance: number,
-): boolean {
-  const variance = paidDown + paidBalance - (expectedDown + expectedBalance);
-  return Math.abs(variance) <= poCurrencyToleranceLocal(poCurrency);
-}
-
 export async function computePaymentDashboardSummary(
   supabase: SupabaseClient,
 ): Promise<PaymentDashboardSummary> {
@@ -428,62 +414,39 @@ export async function computePaymentDashboardSummary(
       paidTotalIdr += paymentAmountIdrWithRates(payment, fxRates);
     }
 
-    const paidDownPoCurrency = sumPurposePaymentsInPoCurrency(
-      poPayments,
-      poCurrency,
-      isDownPaymentPurpose,
-    );
-    const paidBalancePoCurrency = sumPurposePaymentsInPoCurrency(
-      poPayments,
-      poCurrency,
-      isBalancePaymentPurpose,
-    );
-
     const remaining = Math.max(0, invoiceIdr - paidTotalIdr);
     if (remaining > PAYMENT_VARIANCE_TOLERANCE_IDR) {
       balanceRemainingIdr += remaining;
       unpaidPoCount += 1;
     }
 
-    const downIdrRate = idrRateForVariance(
-      poPayments,
-      poCurrency,
-      rate,
-      isDownPaymentPurpose,
+    const termPaid = schedule.terms.map((term, index) =>
+      sumPurposePaymentsInPoCurrency(poPayments, poCurrency, (purpose) =>
+        purposeMatchesPaymentTerm(purpose, index, schedule.terms),
+      ),
     );
-    const balanceIdrRate = idrRateForVariance(
-      poPayments,
-      poCurrency,
-      rate,
-      isBalancePaymentPurpose,
-    );
+    const expectedTerms = schedule.terms.reduce((sum, term) => sum + term.amount, 0);
+    const paidTerms = termPaid.reduce((sum, amount) => sum + amount, 0);
+    const termsBalanced =
+      Math.abs(paidTerms - expectedTerms) <= poCurrencyTolerance(poCurrency);
 
-    const downBalanceBalanced = downBalancePaymentsNetToZero(
-      poCurrency,
-      schedule.downPayment,
-      schedule.balance,
-      paidDownPoCurrency,
-      paidBalancePoCurrency,
-    );
-
-    if (!downBalanceBalanced) {
-      const downIssue = purposeIssue(
-        po,
-        poCurrency,
-        schedule.downPayment,
-        paidDownPoCurrency,
-        downIdrRate,
-      );
-      if (downIssue) downPaymentIssues.push(downIssue);
-
-      const balanceIssue = purposeIssue(
-        po,
-        poCurrency,
-        schedule.balance,
-        paidBalancePoCurrency,
-        balanceIdrRate,
-      );
-      if (balanceIssue) balancePaymentIssues.push(balanceIssue);
+    if (!termsBalanced) {
+      schedule.terms.forEach((term, index) => {
+        const matcher = (purpose: string) =>
+          purposeMatchesPaymentTerm(purpose, index, schedule.terms);
+        const issue = purposeIssue(
+          po,
+          poCurrency,
+          term.amount,
+          termPaid[index] ?? 0,
+          idrRateForVariance(poPayments, poCurrency, rate, matcher),
+        );
+        if (!issue) return;
+        const labeled =
+          schedule.terms.length > 2 ? { ...issue, term_label: term.label } : issue;
+        if (index === 0) downPaymentIssues.push(labeled);
+        else balancePaymentIssues.push(labeled);
+      });
     }
   }
 

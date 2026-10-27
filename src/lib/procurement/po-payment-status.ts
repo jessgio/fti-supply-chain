@@ -5,6 +5,7 @@ import {
 } from "@/lib/procurement/currencies";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { paymentAmountIdrSync } from "@/lib/procurement/payment-idr";
+import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 
 export type PaymentFulfillmentStatus = "underpaid" | "paid" | "overpaid";
@@ -54,21 +55,33 @@ export function paymentIdrAmount(payment: PoPayment): number | null {
   return paymentAmountIdrSync(payment);
 }
 
+function laterInstallmentStatus(
+  terms: { status: PaymentFulfillmentStatus }[],
+): PaymentFulfillmentStatus {
+  if (terms.some((term) => term.status === "underpaid")) return "underpaid";
+  if (terms.some((term) => term.status === "overpaid")) return "overpaid";
+  return "paid";
+}
+
 export function computePoPaymentSummary(po: PurchaseOrder) {
   const poCurrency = po.currency ?? DEFAULT_PO_CURRENCY;
   const schedule = resolvePaymentSchedule(po);
   const payments = po.payments ?? [];
 
-  const paidDown = sumPaymentsInPoCurrency(
-    payments,
-    poCurrency,
-    isDownPaymentPurpose,
-  );
-  const paidBalance = sumPaymentsInPoCurrency(
-    payments,
-    poCurrency,
-    isBalancePaymentPurpose,
-  );
+  const installments = schedule.terms.map((term, index) => {
+    const paid = sumPaymentsInPoCurrency(payments, poCurrency, (purpose) =>
+      purposeMatchesPaymentTerm(purpose, index, schedule.terms),
+    );
+    return {
+      label: term.label,
+      pct: term.pct,
+      expected: term.amount,
+      paid,
+      status: paymentFulfillmentStatus(term.amount, paid, poCurrency),
+    };
+  });
+  const paidDown = installments[0]?.paid ?? 0;
+  const paidBalance = installments.slice(1).reduce((sum, term) => sum + term.paid, 0);
   const paidTotalPoCurrency = sumPaymentsInPoCurrency(payments, poCurrency);
 
   const totalIdr = payments.reduce(
@@ -86,16 +99,10 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
     paidBalance,
     paidTotalPoCurrency,
     totalIdr,
-    downStatus: paymentFulfillmentStatus(
-      schedule.downPayment,
-      paidDown,
-      poCurrency,
-    ),
-    balanceStatus: paymentFulfillmentStatus(
-      schedule.balance,
-      paidBalance,
-      poCurrency,
-    ),
+    installments,
+    downStatus: installments[0]?.status ??
+      paymentFulfillmentStatus(schedule.downPayment, paidDown, poCurrency),
+    balanceStatus: laterInstallmentStatus(installments.slice(1)),
     overallStatus: paymentFulfillmentStatus(
       schedule.invoiceTotal,
       paidTotalPoCurrency,

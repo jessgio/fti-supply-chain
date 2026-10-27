@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizePaymentTermsInput } from "@/lib/procurement/payment-terms";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   createPurchaseOrder,
@@ -88,6 +89,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const paymentTerms =
+      body?.payment_terms === undefined
+        ? null
+        : normalizePaymentTermsInput(body.payment_terms);
+    if (paymentTerms?.error || (body?.payment_terms !== undefined && !paymentTerms?.terms)) {
+      return NextResponse.json(
+        { error: paymentTerms?.error ?? "Payment terms are invalid." },
+        { status: 400 },
+      );
+    }
+
     const supabase = createAdminClient();
     const purchaseOrder = await createPurchaseOrder(supabase, {
       po_number:
@@ -100,6 +112,7 @@ export async function POST(request: Request) {
       expected_date: body.expected_date ?? null,
       down_payment_pct:
         body.down_payment_pct != null ? Number(body.down_payment_pct) : undefined,
+      payment_terms: paymentTerms?.terms ?? undefined,
       discount_amount:
         body.discount_amount != null ? Number(body.discount_amount) : undefined,
       tax_pct: body.tax_pct != null ? Number(body.tax_pct) : undefined,

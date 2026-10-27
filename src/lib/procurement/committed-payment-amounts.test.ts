@@ -118,3 +118,53 @@ test("the first logged payment replaces a stale unpaid freeze", () => {
   assert.equal(patch.committed_down_payment, 1000);
   assert.equal(patch.payment_amounts_committed_at, "2026-10-13T00:00:00.000Z");
 });
+
+test("three payment terms show on the invoice and freeze when one is logged", () => {
+  const terms = [
+    { label: "Down payment", pct: 30 },
+    { label: "Progress payment", pct: 40 },
+    { label: "Before shipment", pct: 30 },
+  ];
+  const unpaid = resolvePaymentSchedule({
+    ...cosmaxPo({ down_payment_pct: 30, payment_terms: terms }),
+    payments: [],
+    committed_down_payment: null,
+    committed_balance: null,
+    committed_invoice_total: null,
+    payment_amounts_committed_at: null,
+  });
+  assert.equal(unpaid.terms.length, 3);
+  assert.equal(
+    unpaid.terms.reduce((sum, term) => sum + term.amount, 0),
+    unpaid.invoiceTotal,
+  );
+  assert.equal(unpaid.terms[1]?.label, "Progress payment");
+
+  const patch = buildCommittedPatchFromPayment(
+    cosmaxPo({ down_payment_pct: 30, payment_terms: terms }),
+    "Progress payment",
+    1000,
+    "2026-10-13T00:00:00.000Z",
+    { replaceExisting: true },
+  );
+  assert.ok(patch);
+  assert.equal(patch.committed_payment_terms[1]?.amount, 1000);
+
+  const committed = resolvePaymentSchedule({
+    ...cosmaxPo({
+      down_payment_pct: 30,
+      payment_terms: terms,
+      committed_payment_terms: patch.committed_payment_terms,
+      committed_down_payment: patch.committed_down_payment,
+      committed_balance: patch.committed_balance,
+      committed_invoice_total: patch.committed_invoice_total,
+      payment_amounts_committed_at: patch.payment_amounts_committed_at,
+    }),
+    payments: [{ purpose: "Progress payment", amount: 1000, currency: "IDR" }],
+  });
+  assert.equal(committed.terms[1]?.amount, 1000);
+  assert.equal(
+    committed.terms.reduce((sum, term) => sum + term.amount, 0),
+    committed.invoiceTotal,
+  );
+});
