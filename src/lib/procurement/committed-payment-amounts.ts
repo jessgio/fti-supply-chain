@@ -1,10 +1,12 @@
 import { preserveFractionalMoney } from "@/lib/procurement/currencies";
 import {
+  absorbingTermIndex,
   allocatePaymentTerms,
   configuredPaymentTerms,
   formatPaymentPct,
   normalizePaymentLabel,
   parseCommittedPaymentTerms,
+  paymentTermBasis,
   paymentTermIndexForPurpose,
   type ResolvedPaymentTerm,
   type StoredPaymentTermAmount,
@@ -169,22 +171,25 @@ function committedTerms(
       ? Number(po.committed_down_payment)
       : null;
 
+  const absorbing = absorbingTermIndex(configured);
+  const hasAmount = configured.some((term) => paymentTermBasis(term) === "amount");
   let used = 0;
   const amounts = configured.map((term, index) => {
-    const isLast = index === configured.length - 1;
-    if (isLast) return 0;
+    if (index === absorbing) return 0;
     const frozen = frozenByLabel.get(normalizePaymentLabel(term.label));
     const amount =
       frozen != null
         ? statedMoney(frozen)
         : index === 0 && legacyDown != null
           ? statedMoney(legacyDown)
-          : live[index]?.amount ?? 0;
+          : paymentTermBasis(term) === "amount"
+            ? statedMoney(term.amount ?? live[index]?.amount ?? 0)
+            : live[index]?.amount ?? 0;
     used += amount;
     return amount;
   });
   if (amounts.length > 0) {
-    amounts[amounts.length - 1] = statedMoney(invoiceTotal - used);
+    amounts[absorbing] = statedMoney(invoiceTotal - used);
   }
 
   return configured.map((term, index) => ({
@@ -192,6 +197,8 @@ function committedTerms(
     amount: amounts[index] ?? 0,
     pct: term.pct,
     configuredPct: term.pct,
+    basis: paymentTermBasis(term),
+    remainder: hasAmount && index === absorbing && paymentTermBasis(term) !== "amount",
   }));
 }
 
@@ -268,16 +275,20 @@ function installmentsAtFirstPayment(
     live.invoiceTotal,
     configuredPaymentTerms(po),
   );
+  const absorbing = terms.findIndex((term) => term.remainder);
+  const plug = absorbing >= 0 ? absorbing : Math.max(terms.length - 1, 0);
   const match = paymentTermIndexForPurpose(purpose, terms);
-  if (match < 0 || match >= terms.length - 1) return terms;
+  if (match < 0 || match === plug) return terms;
 
   const next = terms.map((term, index) =>
     index === match ? { ...term, amount: statedMoney(amount) } : { ...term },
   );
-  const used = next.slice(0, -1).reduce((sum, term) => sum + term.amount, 0);
-  const last = next.length - 1;
-  next[last] = {
-    ...next[last]!,
+  const used = next.reduce(
+    (sum, term, index) => (index === plug ? sum : sum + term.amount),
+    0,
+  );
+  next[plug] = {
+    ...next[plug]!,
     amount: statedMoney(live.invoiceTotal - used),
   };
   return next;

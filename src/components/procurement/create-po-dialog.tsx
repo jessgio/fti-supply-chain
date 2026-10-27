@@ -246,9 +246,16 @@ export function CreatePoDialog({
 
   const previewInstallments = useMemo(() => {
     const drafts = paymentTermDraftsFromForm(paymentTerms);
-    if (validatePaymentTerms(drafts)) return [];
+    if (
+      validatePaymentTerms(drafts, {
+        invoiceTotal: previewTotals.invoiceTotal,
+        currency,
+      })
+    ) {
+      return [];
+    }
     return allocatePaymentTerms(previewTotals.invoiceTotal, drafts);
-  }, [paymentTerms, previewTotals.invoiceTotal]);
+  }, [paymentTerms, previewTotals.invoiceTotal, currency]);
 
   const previewFmt = (value: number) => formatPoMoney(value, currency);
 
@@ -324,7 +331,10 @@ export function CreatePoDialog({
     }
 
     const drafts = paymentTermDraftsFromForm(paymentTerms);
-    const termsError = validatePaymentTerms(drafts);
+    const termsError = validatePaymentTerms(drafts, {
+      invoiceTotal: previewTotals.invoiceTotal,
+      currency,
+    });
     if (termsError) {
       setFormError(termsError);
       return;
@@ -464,7 +474,12 @@ export function CreatePoDialog({
             </Select>
           </label>
           <div className="space-y-1 sm:col-span-2">
-            <PaymentTermsFields rows={paymentTerms} onChange={setPaymentTerms} />
+            <PaymentTermsFields
+              rows={paymentTerms}
+              onChange={setPaymentTerms}
+              invoiceTotal={previewTotals.invoiceTotal}
+              currency={currency}
+            />
             {usualTerms?.downPayment && (
               <div className="flex flex-wrap items-center gap-x-2">
                 <span className="text-xs text-stone-500">First payment</span>

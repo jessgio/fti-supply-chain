@@ -100,6 +100,19 @@ function formatPct(value: number): string {
   return `${formatNumber(rounded, decimals)}%`;
 }
 
+function formatPaymentTermShare(
+  term:
+    | { pct: number; amount: number; basis?: string; remainder?: boolean }
+    | undefined,
+  currency: string,
+): string {
+  if (!term) return "—";
+  if (term.basis === "amount" || term.remainder) {
+    return formatPoMoney(term.amount, currency);
+  }
+  return formatPct(term.pct);
+}
+
 function ProductTypeBadges({ types }: { types: PoLineProductType[] }) {
   if (types.length === 0) {
     return <span className="text-stone-400">—</span>;
@@ -498,20 +511,22 @@ function SearchResultRows({
             <span
               className="tabular-nums"
               title={row.paymentTerms
-                .map((term) => `${term.label} ${formatPct(term.pct)}`)
+                .map((term) => `${term.label} ${formatPaymentTermShare(term, row.currency)}`)
                 .join(", ")}
             >
               {row.paymentTerms.map((term) => (
                 <span key={term.label} className="block">
-                  {formatPct(term.pct)} {term.label}
+                  {formatPaymentTermShare(term, row.currency)} {term.label}
                 </span>
               ))}
             </span>
           ) : (
             <>
-              <span className="tabular-nums">{formatPct(row.downPaymentPct)} DP</span>
+              <span className="tabular-nums">
+                {formatPaymentTermShare(row.paymentTerms[0], row.currency)} DP
+              </span>
               <span className="block text-xs tabular-nums text-stone-500">
-                {formatPct(row.balancePct)} balance
+                {formatPaymentTermShare(row.paymentTerms[1], row.currency)} balance
               </span>
             </>
           )}

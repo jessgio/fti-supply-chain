@@ -657,10 +657,16 @@ export interface PurchaseOrder {
   expected_date: string | null;
   down_payment_pct: number;
   /**
-   * Named installments that must total 100%. Null keeps the two-part split
-   * from down_payment_pct: down payment, then final payment.
+   * Named installments. A percent term uses `pct`. A fixed term uses
+   * `basis: "amount"` and `amount`. Null keeps the two-part split from
+   * down_payment_pct: down payment, then final payment.
    */
-  payment_terms?: Array<{ label: string; pct: number }> | null;
+  payment_terms?: Array<{
+    label: string;
+    pct: number;
+    basis?: "pct" | "amount";
+    amount?: number | null;
+  }> | null;
   discount_amount: number;
   tax_pct: number;
   pph_pct: number;

@@ -32,7 +32,7 @@ import {
   PO_CURRENCIES,
   PO_UNIT_COST_STEP,
 } from "@/lib/procurement/currencies";
-import { DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
+import { computePoInvoiceTotals, DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import {
   STATUS_LABELS,
   STATUS_FLOW,
@@ -119,6 +119,28 @@ export function EditPoDialog({
     po.id,
   );
 
+  const invoiceTotal = useMemo(() => {
+    const cleanLines = lines
+      .filter((line) => line.sku_id && Number(line.qty_ordered) > 0)
+      .map((line) => ({
+        id: line.id ?? "",
+        po_id: po.id,
+        sku_id: line.sku_id,
+        qty_ordered: Number(line.qty_ordered),
+        qty_received: line.qty_received ?? 0,
+        is_closed: line.is_closed ?? false,
+        unit_cost: line.unit_cost ? Number(line.unit_cost) : null,
+      }));
+    return computePoInvoiceTotals({
+      status,
+      lines: cleanLines,
+      discount_amount: discountAmount ? Number(discountAmount) : 0,
+      tax_pct: taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT,
+      pph_pct: pphPct !== "" ? Number(pphPct) : 0,
+      other_charges: otherCharges ? Number(otherCharges) : 0,
+    }).invoiceTotal;
+  }, [lines, discountAmount, taxPct, pphPct, otherCharges, status, po.id]);
+
   function updateLine(idx: number, patch: Partial<DraftLine>) {
     setLines((prev) =>
       prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
@@ -204,7 +226,10 @@ export function EditPoDialog({
         }
 
         const drafts = paymentTermDraftsFromForm(paymentTerms);
-        const termsError = validatePaymentTerms(drafts);
+        const termsError = validatePaymentTerms(drafts, {
+          invoiceTotal,
+          currency,
+        });
         if (termsError) {
           setFormError(termsError);
           setSaving(false);
@@ -349,6 +374,8 @@ export function EditPoDialog({
                 <PaymentTermsFields
                   rows={paymentTerms}
                   onChange={setPaymentTerms}
+                  invoiceTotal={invoiceTotal}
+                  currency={currency}
                 />
                 {usualTerms?.downPayment && (
                   <div className="flex flex-wrap items-center gap-x-2">

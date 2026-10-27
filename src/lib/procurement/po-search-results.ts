@@ -5,7 +5,11 @@ import type {
   PurchaseOrder,
   PurchaseOrderLine,
 } from "@/types/database";
-import { configuredPaymentTerms } from "@/lib/procurement/payment-terms";
+import {
+  allocatePaymentTerms,
+  configuredPaymentTerms,
+  type PaymentTermBasis,
+} from "@/lib/procurement/payment-terms";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 import {
   computePoPaymentSummary,
@@ -54,7 +58,13 @@ export interface PoSearchRowView {
   total: number;
   downPaymentPct: number;
   balancePct: number;
-  paymentTerms: Array<{ label: string; pct: number }>;
+  paymentTerms: Array<{
+    label: string;
+    pct: number;
+    amount: number;
+    basis: PaymentTermBasis;
+    remainder: boolean;
+  }>;
   lastInboundDate: string | null;
   status: PoStatus;
   /** Null when payments were not loaded with the purchase order. */
@@ -153,7 +163,10 @@ export function buildPoSearchRow(
     .map((line) => line.unitPrice)
     .filter((price): price is number => price != null);
   const uniquePrices = new Set(prices);
-  const paymentTerms = configuredPaymentTerms(po);
+  const paymentTerms = allocatePaymentTerms(
+    totals.invoiceTotal,
+    configuredPaymentTerms(po),
+  );
   const downPaymentPct = paymentTerms[0]?.pct ?? Number(po.down_payment_pct ?? 0);
   const balancePct =
     paymentTerms.length > 2

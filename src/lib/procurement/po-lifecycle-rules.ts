@@ -35,7 +35,12 @@ export interface PoLifecycleInput {
   pph_pct: number;
   other_charges: number;
   currency: string;
-  payment_terms?: Array<{ label: string; pct: number }> | null;
+  payment_terms?: Array<{
+    label: string;
+    pct: number;
+    basis?: "pct" | "amount";
+    amount?: number | null;
+  }> | null;
   committed_invoice_total?: number | null;
   committed_down_payment?: number | null;
   committed_balance?: number | null;
