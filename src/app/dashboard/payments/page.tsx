@@ -27,7 +27,6 @@ import { StatusUpdateNotesLink } from "@/components/status-updates/status-update
 import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { formatPoMoney } from "@/lib/procurement/currencies";
-import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import type {
   PaymentDashboardSummary,
   PaymentLedgerRow,
@@ -37,6 +36,15 @@ import type {
 type SortDir = "asc" | "desc";
 const DEFAULT_PAYMENT_SORT_KEY: PaymentLedgerSortKey = "payment_date";
 const DEFAULT_PAYMENT_SORT_DIR: SortDir = "desc";
+const PAYMENT_PURPOSE_FILTERS = [
+  "Down payment",
+  "Final payment",
+  "Balance payment",
+  "Shipping",
+  "Fee",
+  "Tax",
+  "Other",
+] as const;
 
 function fmtIdr(value: number | null | undefined): string {
   if (value == null) return "—";
@@ -250,10 +258,13 @@ export default function PaymentsPage() {
                 <p className="mb-2 font-medium text-stone-700">Down payment</p>
                 <ul className="space-y-1 text-stone-600">
                   {summary.down_payment_issues.map((issue) => (
-                    <li key={`down-${issue.po_id}`} className="flex flex-wrap gap-x-2">
+                    <li key={`down-${issue.po_id}-${issue.term_label ?? ""}`} className="flex flex-wrap gap-x-2">
                       <span className="font-medium text-stone-900">
                         {issue.po_number}
                       </span>
+                      {issue.term_label && (
+                        <span className="text-stone-500">{issue.term_label}</span>
+                      )}
                       <span
                         className={
                           issue.status === "underpaid"
@@ -286,12 +297,15 @@ export default function PaymentsPage() {
                 <ul className="space-y-1 text-stone-600">
                   {summary.balance_payment_issues.map((issue) => (
                     <li
-                      key={`balance-${issue.po_id}`}
+                      key={`balance-${issue.po_id}-${issue.term_label ?? ""}`}
                       className="flex flex-wrap gap-x-2"
                     >
                       <span className="font-medium text-stone-900">
                         {issue.po_number}
                       </span>
+                      {issue.term_label && (
+                        <span className="text-stone-500">{issue.term_label}</span>
+                      )}
                       <span
                         className={
                           issue.status === "underpaid"
@@ -350,7 +364,7 @@ export default function PaymentsPage() {
                 onChange={(e) => setPurpose(e.target.value)}
               >
                 <option value="">All purposes</option>
-                {PO_PAYMENT_PURPOSES.map((p) => (
+                {PAYMENT_PURPOSE_FILTERS.map((p) => (
                   <option key={p} value={p}>
                     {p}
                   </option>

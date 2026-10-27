@@ -1,10 +1,11 @@
 import type { PoStatus, PurchaseOrderLine } from "@/types/database";
 import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import {
-  isBalancePaymentPurpose,
   isDownPaymentPurpose,
   paymentFulfillmentStatus,
+  type PaymentFulfillmentStatus,
 } from "@/lib/procurement/po-payment-status";
 
 /** Shipment statuses that keep a PO linked to an active shipping schedule. */
@@ -34,9 +35,11 @@ export interface PoLifecycleInput {
   pph_pct: number;
   other_charges: number;
   currency: string;
+  payment_terms?: Array<{ label: string; pct: number }> | null;
   committed_invoice_total?: number | null;
   committed_down_payment?: number | null;
   committed_balance?: number | null;
+  committed_payment_terms?: Array<{ label: string; amount: number }> | null;
   payment_amounts_committed_at?: string | null;
   lines: Array<
     Pick<PurchaseOrderLine, "qty_ordered" | "qty_received" | "unit_cost" | "is_closed">
@@ -147,6 +150,7 @@ function paymentSummary(input: PoLifecycleInput) {
   const poCurrency = input.currency ?? DEFAULT_PO_CURRENCY;
   const schedule = resolvePaymentSchedule({
     down_payment_pct: input.down_payment_pct,
+    payment_terms: input.payment_terms,
     discount_amount: input.discount_amount,
     tax_pct: input.tax_pct,
     pph_pct: input.pph_pct,
@@ -154,6 +158,7 @@ function paymentSummary(input: PoLifecycleInput) {
     committed_invoice_total: input.committed_invoice_total,
     committed_down_payment: input.committed_down_payment,
     committed_balance: input.committed_balance,
+    committed_payment_terms: input.committed_payment_terms,
     payment_amounts_committed_at: input.payment_amounts_committed_at,
     payments: input.payments,
     lines: input.lines.map(
@@ -167,28 +172,26 @@ function paymentSummary(input: PoLifecycleInput) {
     ),
   });
 
-  const paidDown = sumLifecyclePaymentsInPoCurrency(
-    input.payments,
-    poCurrency,
-    isDownPaymentPurpose,
+  const statuses: PaymentFulfillmentStatus[] = schedule.terms.map((term, index) =>
+    paymentFulfillmentStatus(
+      term.amount,
+      sumLifecyclePaymentsInPoCurrency(
+        input.payments,
+        poCurrency,
+        (purpose) => purposeMatchesPaymentTerm(purpose, index, schedule.terms),
+      ),
+      poCurrency,
+    ),
   );
-  const paidBalance = sumLifecyclePaymentsInPoCurrency(
-    input.payments,
-    poCurrency,
-    isBalancePaymentPurpose,
-  );
+  const later = statuses.slice(1);
 
   return {
-    downStatus: paymentFulfillmentStatus(
-      schedule.downPayment,
-      paidDown,
-      poCurrency,
-    ),
-    balanceStatus: paymentFulfillmentStatus(
-      schedule.balance,
-      paidBalance,
-      poCurrency,
-    ),
+    downStatus: statuses[0] ?? "paid",
+    balanceStatus: later.some((status) => status === "underpaid")
+      ? "underpaid"
+      : later.some((status) => status === "overpaid")
+        ? "overpaid"
+        : "paid",
   };
 }
 

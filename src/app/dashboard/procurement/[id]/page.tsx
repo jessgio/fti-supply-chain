@@ -38,11 +38,8 @@ import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
 } from "@/lib/procurement/currencies";
-import {
-  downPaymentLabel,
-  finalPaymentLabel,
-  resolvePaymentSchedule,
-} from "@/lib/procurement/committed-payment-amounts";
+import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
+import { paymentTermLabel } from "@/lib/procurement/payment-terms";
 import {
   computePoInvoiceTotals,
   poLineOpenQty,
@@ -593,16 +590,26 @@ function PurchaseOrderPageInner() {
                 <span>Invoice total</span>
                 <span>{fmt(totals.invoiceTotal)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-stone-600">
-                  {downPaymentLabel(paymentSchedule.downPaymentPct)}
-                </span>
-                <span className="font-medium">{fmt(paymentSchedule.downPayment)}</span>
-              </div>
-              <div className="flex justify-between font-medium">
-                <span>{finalPaymentLabel(paymentSchedule.finalPaymentPct)}</span>
-                <span>{fmt(paymentSchedule.balance)}</span>
-              </div>
+              {paymentSchedule.terms.map((term, index) => {
+                const last = index === paymentSchedule.terms.length - 1;
+                return (
+                  <div
+                    key={`${term.label}-${index}`}
+                    className={
+                      last
+                        ? "flex justify-between font-medium"
+                        : "flex justify-between"
+                    }
+                  >
+                    <span className={last ? undefined : "text-stone-600"}>
+                      {paymentTermLabel(term)}
+                    </span>
+                    <span className={last ? undefined : "font-medium"}>
+                      {fmt(term.amount)}
+                    </span>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 
@@ -611,7 +618,7 @@ function PurchaseOrderPageInner() {
               <CardTitle className="text-base">Next steps</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-stone-600">
-              <p>1. Log down payment when sent to supplier.</p>
+              <p>1. Log each payment when it is sent to the supplier.</p>
               <p>2. Advance status to Ordered when committed.</p>
               <p>3. Log shipment when goods depart.</p>
               <p>4. Record inbound when goods arrive.</p>

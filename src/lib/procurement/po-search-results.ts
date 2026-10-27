@@ -5,6 +5,7 @@ import type {
   PurchaseOrder,
   PurchaseOrderLine,
 } from "@/types/database";
+import { configuredPaymentTerms } from "@/lib/procurement/payment-terms";
 import { computePoInvoiceTotals } from "@/lib/procurement/po-totals";
 import {
   computePoPaymentSummary,
@@ -53,6 +54,7 @@ export interface PoSearchRowView {
   total: number;
   downPaymentPct: number;
   balancePct: number;
+  paymentTerms: Array<{ label: string; pct: number }>;
   lastInboundDate: string | null;
   status: PoStatus;
   /** Null when payments were not loaded with the purchase order. */
@@ -151,7 +153,12 @@ export function buildPoSearchRow(
     .map((line) => line.unitPrice)
     .filter((price): price is number => price != null);
   const uniquePrices = new Set(prices);
-  const downPaymentPct = Number(po.down_payment_pct ?? 0);
+  const paymentTerms = configuredPaymentTerms(po);
+  const downPaymentPct = paymentTerms[0]?.pct ?? Number(po.down_payment_pct ?? 0);
+  const balancePct =
+    paymentTerms.length > 2
+      ? (paymentTerms[paymentTerms.length - 1]?.pct ?? 0)
+      : Math.max(0, 100 - downPaymentPct);
   const paymentStatus =
     po.payments == null ? null : computePoPaymentSummary(po).overallStatus;
   return {
@@ -168,7 +175,8 @@ export function buildPoSearchRow(
     vatPct: totals.taxPct,
     total: totals.invoiceTotal,
     downPaymentPct,
-    balancePct: Math.max(0, 100 - downPaymentPct),
+    balancePct,
+    paymentTerms,
     lastInboundDate: po.last_inbound_date?.trim() || null,
     status: po.status,
     paymentStatus,

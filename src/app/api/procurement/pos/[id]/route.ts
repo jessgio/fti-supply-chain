@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/procurement";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
+import { normalizePaymentTermsInput } from "@/lib/procurement/payment-terms";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -84,6 +85,7 @@ export async function PATCH(
       order_date?: string | null;
       expected_date?: string | null;
       down_payment_pct?: number;
+      payment_terms?: { label: string; pct: number }[] | null;
       discount_amount?: number;
       tax_pct?: number;
       pph_pct?: number;
@@ -124,6 +126,17 @@ export async function PATCH(
     }
     if (body?.down_payment_pct !== undefined) {
       input.down_payment_pct = Number(body.down_payment_pct);
+    }
+    if (body?.payment_terms !== undefined) {
+      const paymentTerms = normalizePaymentTermsInput(body.payment_terms);
+      if (paymentTerms.error || !paymentTerms.terms) {
+        return NextResponse.json(
+          { error: paymentTerms.error ?? "Payment terms are invalid." },
+          { status: 400 },
+        );
+      }
+      input.payment_terms = paymentTerms.terms;
+      input.down_payment_pct = paymentTerms.terms[0]!.pct;
     }
     if (body?.discount_amount !== undefined) {
       input.discount_amount = Number(body.discount_amount);

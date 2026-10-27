@@ -14,9 +14,19 @@ import {
   useLastPurchaseCosts,
 } from "@/components/procurement/last-purchase-cost-hint";
 import {
+  applyDownPaymentPct,
+  PaymentTermsFields,
+  paymentTermDraftsFromForm,
+  paymentTermFormFromDrafts,
+} from "@/components/procurement/payment-terms-fields";
+import {
   SupplierUsualPctHint,
   useSupplierUsualTerms,
 } from "@/components/procurement/supplier-usual-terms-hint";
+import {
+  configuredPaymentTerms,
+  validatePaymentTerms,
+} from "@/lib/procurement/payment-terms";
 import {
   DEFAULT_PO_CURRENCY,
   PO_CURRENCIES,
@@ -71,8 +81,8 @@ export function EditPoDialog({
   const [status, setStatus] = useState<PoStatus>(po.status);
   const [orderDate, setOrderDate] = useState(po.order_date ?? "");
   const [expectedDate, setExpectedDate] = useState(po.expected_date ?? "");
-  const [downPaymentPct, setDownPaymentPct] = useState(
-    String(po.down_payment_pct ?? 30),
+  const [paymentTerms, setPaymentTerms] = useState(() =>
+    paymentTermFormFromDrafts(configuredPaymentTerms(po)),
   );
   const [discountAmount, setDiscountAmount] = useState(
     po.discount_amount ? String(po.discount_amount) : "",
@@ -193,12 +203,21 @@ export function EditPoDialog({
           return;
         }
 
+        const drafts = paymentTermDraftsFromForm(paymentTerms);
+        const termsError = validatePaymentTerms(drafts);
+        if (termsError) {
+          setFormError(termsError);
+          setSaving(false);
+          return;
+        }
+
         payload.po_number = poNumber.trim();
         payload.supplier_id = supplierId || null;
         payload.status = status;
         payload.order_date = orderDate || null;
         payload.expected_date = expectedDate || null;
-        payload.down_payment_pct = downPaymentPct ? Number(downPaymentPct) : 30;
+        payload.down_payment_pct = drafts[0]?.pct ?? 30;
+        payload.payment_terms = drafts;
         payload.discount_amount = discountAmount ? Number(discountAmount) : 0;
         payload.tax_pct = taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT;
         payload.pph_pct = pphPct !== "" ? Number(pphPct) : 0;
@@ -326,25 +345,24 @@ export function EditPoDialog({
                   ))}
                 </Select>
               </label>
-              <div className="space-y-1">
-                <label className="space-y-1">
-                  <span className="text-sm font-medium text-stone-700">
-                    Down payment %
-                  </span>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={downPaymentPct}
-                    onChange={(e) => setDownPaymentPct(e.target.value)}
-                  />
-                </label>
-                <SupplierUsualPctHint
-                  term={usualTerms?.downPayment}
-                  poCount={usualTerms?.poCount ?? 0}
-                  currentValue={downPaymentPct}
-                  onApply={setDownPaymentPct}
+              <div className="space-y-1 sm:col-span-2">
+                <PaymentTermsFields
+                  rows={paymentTerms}
+                  onChange={setPaymentTerms}
                 />
+                {usualTerms?.downPayment && (
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <span className="text-xs text-stone-500">First payment</span>
+                    <SupplierUsualPctHint
+                      term={usualTerms.downPayment}
+                      poCount={usualTerms.poCount}
+                      currentValue={paymentTerms[0]?.pct ?? ""}
+                      onApply={(value) =>
+                        setPaymentTerms((rows) => applyDownPaymentPct(rows, value))
+                      }
+                    />
+                  </div>
+                )}
               </div>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-stone-700">

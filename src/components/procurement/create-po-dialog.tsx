@@ -15,10 +15,24 @@ import {
   useLastPurchaseCosts,
 } from "@/components/procurement/last-purchase-cost-hint";
 import {
+  applyDownPaymentPct,
+  PaymentTermsFields,
+  paymentTermDraftsFromForm,
+  paymentTermFormFromDrafts,
+  type PaymentTermFormRow,
+} from "@/components/procurement/payment-terms-fields";
+import {
   SupplierUsualPctHint,
   useSupplierUsualTerms,
 } from "@/components/procurement/supplier-usual-terms-hint";
 import { formatPctInput } from "@/lib/procurement/supplier-usual-terms";
+import {
+  allocatePaymentTerms,
+  defaultPaymentTerms,
+  paymentTermLabel,
+  validatePaymentTerms,
+  type ResolvedPaymentTerm,
+} from "@/lib/procurement/payment-terms";
 import {
   DEFAULT_PO_CURRENCY,
   formatPoMoney,
@@ -39,12 +53,14 @@ type SkuOption = PoSkuOption;
 
 function PoInvoiceTotalsView({
   totals,
+  terms,
   fmt,
   className = "text-sm text-stone-600",
   rowClassName = "flex justify-between",
   totalRowClassName = "mt-1 flex justify-between font-medium text-stone-900",
 }: {
   totals: PoInvoiceTotals;
+  terms: ResolvedPaymentTerm[];
   fmt: (value: number) => string;
   className?: string;
   rowClassName?: string;
@@ -92,14 +108,12 @@ function PoInvoiceTotalsView({
         <span>Invoice total</span>
         <span>{fmt(totals.invoiceTotal)}</span>
       </div>
-      <div className={`${rowClassName} mt-1`}>
-        <span>Down payment ({totals.downPaymentPct}%)</span>
-        <span>{fmt(totals.downPayment)}</span>
-      </div>
-      <div className={`${rowClassName} mt-1`}>
-        <span>Final payment ({100 - totals.downPaymentPct}%)</span>
-        <span>{fmt(totals.finalPayment)}</span>
-      </div>
+      {terms.map((term, index) => (
+        <div key={`${term.label}-${index}`} className={`${rowClassName} mt-1`}>
+          <span>{paymentTermLabel(term)}</span>
+          <span>{fmt(term.amount)}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -139,7 +153,9 @@ export function CreatePoDialog({
   const [status, setStatus] = useState<PoStatus>("planned");
   const [orderDate, setOrderDate] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
-  const [downPaymentPct, setDownPaymentPct] = useState("30");
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTermFormRow[]>(() =>
+    paymentTermFormFromDrafts(defaultPaymentTerms(30)),
+  );
   const [discountAmount, setDiscountAmount] = useState("");
   const [taxPct, setTaxPct] = useState(String(DEFAULT_PO_TAX_PCT));
   const [pphPct, setPphPct] = useState("0");
@@ -177,11 +193,16 @@ export function CreatePoDialog({
     if (appliedUsualTermsFor.current === supplierId) return;
     appliedUsualTermsFor.current = supplierId;
     if (usualTerms) {
-      setDownPaymentPct(formatPctInput(usualTerms.downPayment.value));
+      setPaymentTerms((rows) =>
+        applyDownPaymentPct(
+          rows,
+          formatPctInput(usualTerms.downPayment.value),
+        ),
+      );
       setTaxPct(formatPctInput(usualTerms.vat.value));
       return;
     }
-    setDownPaymentPct("30");
+    setPaymentTerms(paymentTermFormFromDrafts(defaultPaymentTerms(30)));
     setTaxPct(String(DEFAULT_PO_TAX_PCT));
   }, [supplierId, usualTerms, usualTermsLoading]);
 
@@ -219,9 +240,15 @@ export function CreatePoDialog({
       tax_pct: taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT,
       pph_pct: pphPct !== "" ? Number(pphPct) : 0,
       other_charges: otherCharges ? Number(otherCharges) : 0,
-      down_payment_pct: downPaymentPct ? Number(downPaymentPct) : 30,
+      down_payment_pct: Number(paymentTerms[0]?.pct) || 30,
     });
-  }, [lines, discountAmount, taxPct, pphPct, otherCharges, downPaymentPct]);
+  }, [lines, discountAmount, taxPct, pphPct, otherCharges, paymentTerms]);
+
+  const previewInstallments = useMemo(() => {
+    const drafts = paymentTermDraftsFromForm(paymentTerms);
+    if (validatePaymentTerms(drafts)) return [];
+    return allocatePaymentTerms(previewTotals.invoiceTotal, drafts);
+  }, [paymentTerms, previewTotals.invoiceTotal]);
 
   const previewFmt = (value: number) => formatPoMoney(value, currency);
 
@@ -296,6 +323,13 @@ export function CreatePoDialog({
       return;
     }
 
+    const drafts = paymentTermDraftsFromForm(paymentTerms);
+    const termsError = validatePaymentTerms(drafts);
+    if (termsError) {
+      setFormError(termsError);
+      return;
+    }
+
     setSaving(true);
     setFormError(null);
     try {
@@ -308,7 +342,8 @@ export function CreatePoDialog({
           status,
           order_date: orderDate || null,
           expected_date: expectedDate || null,
-          down_payment_pct: downPaymentPct ? Number(downPaymentPct) : 30,
+          down_payment_pct: drafts[0]?.pct ?? 30,
+          payment_terms: drafts,
           discount_amount: discountAmount ? Number(discountAmount) : 0,
           tax_pct: taxPct !== "" ? Number(taxPct) : DEFAULT_PO_TAX_PCT,
           pph_pct: pphPct !== "" ? Number(pphPct) : 0,
@@ -428,25 +463,21 @@ export function CreatePoDialog({
               ))}
             </Select>
           </label>
-          <div className="space-y-1">
-            <label className="space-y-1">
-              <span className="text-sm font-medium text-stone-700">
-                Down payment %
-              </span>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                value={downPaymentPct}
-                onChange={(e) => setDownPaymentPct(e.target.value)}
-              />
-            </label>
-            <SupplierUsualPctHint
-              term={usualTerms?.downPayment}
-              poCount={usualTerms?.poCount ?? 0}
-              currentValue={downPaymentPct}
-              onApply={setDownPaymentPct}
-            />
+          <div className="space-y-1 sm:col-span-2">
+            <PaymentTermsFields rows={paymentTerms} onChange={setPaymentTerms} />
+            {usualTerms?.downPayment && (
+              <div className="flex flex-wrap items-center gap-x-2">
+                <span className="text-xs text-stone-500">First payment</span>
+                <SupplierUsualPctHint
+                  term={usualTerms.downPayment}
+                  poCount={usualTerms.poCount}
+                  currentValue={paymentTerms[0]?.pct ?? ""}
+                  onApply={(value) =>
+                    setPaymentTerms((rows) => applyDownPaymentPct(rows, value))
+                  }
+                />
+              </div>
+            )}
           </div>
           <label className="space-y-1">
             <span className="text-sm font-medium text-stone-700">
@@ -576,7 +607,11 @@ export function CreatePoDialog({
 
         {previewTotals.subtotal > 0 && (
           <div className="rounded-lg bg-stone-50 p-3">
-            <PoInvoiceTotalsView totals={previewTotals} fmt={previewFmt} />
+            <PoInvoiceTotalsView
+              totals={previewTotals}
+              terms={previewInstallments}
+              fmt={previewFmt}
+            />
           </div>
         )}
 

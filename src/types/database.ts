@@ -656,6 +656,11 @@ export interface PurchaseOrder {
   order_date: string | null;
   expected_date: string | null;
   down_payment_pct: number;
+  /**
+   * Named installments that must total 100%. Null keeps the two-part split
+   * from down_payment_pct: down payment, then final payment.
+   */
+  payment_terms?: Array<{ label: string; pct: number }> | null;
   discount_amount: number;
   tax_pct: number;
   pph_pct: number;
@@ -670,6 +675,8 @@ export interface PurchaseOrder {
   committed_invoice_total?: number | null;
   committed_down_payment?: number | null;
   committed_balance?: number | null;
+  /** Frozen installment amounts. The last installment still absorbs invoice changes. */
+  committed_payment_terms?: Array<{ label: string; amount: number }> | null;
   payment_amounts_committed_at?: string | null;
   /** Optional FK to a pd_projects row — links this PO to a product development launch. */
   pd_project_id: string | null;

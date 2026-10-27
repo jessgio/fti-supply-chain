@@ -45,3 +45,41 @@ test("AP payment plan states the exact 50% down payment", () => {
     101,
   );
 });
+
+test("AP payment plan lists every installment when a supplier has more than two", () => {
+  const po = {
+    id: "po",
+    po_number: "PO-2",
+    supplier_id: null,
+    status: "ordered",
+    order_date: "2026-10-01",
+    expected_date: "2026-11-01",
+    down_payment_pct: 30,
+    payment_terms: [
+      { label: "Down payment", pct: 30 },
+      { label: "Progress payment", pct: 40 },
+      { label: "Before shipment", pct: 30 },
+    ],
+    discount_amount: 0,
+    tax_pct: 0,
+    pph_pct: 0,
+    other_charges: 0,
+    currency: "IDR",
+    notes: null,
+    pd_project_id: null,
+    lines: [line(100)],
+    payments: [],
+  } as PurchaseOrder;
+
+  const rows = buildPaymentPlanRows(po, "both");
+  assert.equal(rows.length, 3);
+  assert.deepEqual(
+    rows.map((row) => row.amount),
+    [30, 40, 30],
+  );
+  assert.match(rows[1]?.remarks ?? "", /Progress payment 40%/);
+
+  const later = buildPaymentPlanRows(po, "balance");
+  assert.equal(later.length, 2);
+  assert.equal(later[0]?.amount, 40);
+});
