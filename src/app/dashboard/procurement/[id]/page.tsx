@@ -526,6 +526,7 @@ function PurchaseOrderPageInner() {
           />
 
           <LarkApSubmissionPanel
+            key={po.id}
             po={po}
             supplier={
               po.supplier_id

@@ -15,6 +15,7 @@ import {
   formFilesFromLarkForm,
   toClientLarkFormFiles,
 } from "@/lib/lark/form-files";
+import { saveLatestPoLarkBadge } from "@/lib/lark/additional-ap-submission";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder } from "@/lib/db/procurement";
 import { errorMessage } from "@/lib/errors";
@@ -221,16 +222,22 @@ export async function POST(
       );
     }
 
-    const { error: updateErr } = await supabase
-      .from("purchase_orders")
-      .update({
+    const updateErr = await saveLatestPoLarkBadge(
+      {
         lark_instance_code: resolved.instanceCode,
         lark_serial_number: serialNumber,
         lark_approval_status: approvalStatus,
         lark_status_synced_at: syncedAt,
         lark_submitted_at: syncedAt,
-      })
-      .eq("id", po.id);
+      },
+      async (patch) => {
+        const { error } = await supabase
+          .from("purchase_orders")
+          .update(patch)
+          .eq("id", po.id);
+        return error;
+      },
+    );
 
     if (updateErr) {
       return NextResponse.json(

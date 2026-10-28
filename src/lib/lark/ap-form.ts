@@ -177,8 +177,14 @@ type LarkFormControl = {
   ext?: string;
 };
 
-function toRfc3339Date(ymd: string, timeZoneOffset = "+07:00"): string {
-  return `${ymd}T00:00:00${timeZoneOffset}`;
+function toRfc3339Date(
+  ymd: string,
+  timeZoneOffset = "+07:00",
+  seconds = 0,
+): string {
+  const clamped = Math.min(59, Math.max(0, Math.trunc(seconds)));
+  const ss = String(clamped).padStart(2, "0");
+  return `${ymd}T00:00:${ss}${timeZoneOffset}`;
 }
 
 function roundMoney(amount: number): number {
@@ -320,6 +326,23 @@ export function isApPaymentPlanScope(
   value: string,
 ): value is ApPaymentPlanScope {
   return AP_PAYMENT_PLAN_SCOPES.some((s) => s.value === value);
+}
+
+/**
+ * Which payment rows to prefill when filing another AP Form for a PO that
+ * already has one. An existing submission never means "no further form".
+ */
+export function suggestNextApPaymentScope(
+  hasSplitPlan: boolean,
+  submittedScopes: Iterable<string>,
+): ApPaymentPlanScope {
+  if (!hasSplitPlan) return "both";
+  const scopes = new Set(submittedScopes);
+  const hasDown = scopes.has("down_payment") || scopes.has("both");
+  const hasBalance = scopes.has("balance") || scopes.has("both");
+  if (hasDown && !hasBalance) return "balance";
+  if (hasBalance && !hasDown) return "down_payment";
+  return scopes.size > 0 ? "balance" : "both";
 }
 
 /** True when the PO has a split down-payment / balance schedule. */
@@ -628,6 +651,36 @@ export function paymentAmountForApSubmission(
   );
 }
 
+function paymentPlanFieldValue(planRows: PaymentPlanRow[]): unknown[] {
+  // Later installments share the PO expected date. Lark's detail table
+  // rejects repeated date values, which blocked the follow-up form (the
+  // remaining payments) after the first installment was already filed.
+  // A few seconds keep the calendar day and make each row distinct.
+  const seenDates = new Map<string, number>();
+  return planRows.map((row) => {
+    const occurrence = seenDates.get(row.dateYmd) ?? 0;
+    seenDates.set(row.dateYmd, occurrence + 1);
+    return [
+      {
+        id: AP_FORM_WIDGETS.datePlanned,
+        type: "date",
+        value: toRfc3339Date(row.dateYmd, "+07:00", occurrence),
+      },
+      {
+        id: AP_FORM_WIDGETS.amountPlanned,
+        type: "amount",
+        value: row.amount,
+        currency: row.currency,
+      },
+      {
+        id: AP_FORM_WIDGETS.planRemarks,
+        type: "input",
+        value: row.remarks,
+      },
+    ];
+  });
+}
+
 export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] {
   const {
     po,
@@ -679,24 +732,7 @@ export function buildApFormControls(input: BuildApFormInput): LarkFormControl[] 
     {
       id: AP_FORM_WIDGETS.paymentPlan,
       type: "fieldList",
-      value: planRows.map((row) => [
-        {
-          id: AP_FORM_WIDGETS.datePlanned,
-          type: "date",
-          value: toRfc3339Date(row.dateYmd),
-        },
-        {
-          id: AP_FORM_WIDGETS.amountPlanned,
-          type: "amount",
-          value: row.amount,
-          currency: row.currency,
-        },
-        {
-          id: AP_FORM_WIDGETS.planRemarks,
-          type: "input",
-          value: row.remarks,
-        },
-      ]),
+      value: paymentPlanFieldValue(planRows),
     },
   ];
 

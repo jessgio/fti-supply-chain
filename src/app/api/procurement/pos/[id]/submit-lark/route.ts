@@ -36,6 +36,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getPurchaseOrder, getSupplier } from "@/lib/db/procurement";
 import { generatePoPdf } from "@/lib/procurement/po-pdf";
 import { formatLarkAttachmentExt } from "@/lib/lark/form-files";
+import {
+  anotherApSubmissionAllowed,
+  larkRemarksForAdditionalAttempt,
+  saveLatestPoLarkBadge,
+  submissionInsertConflict,
+} from "@/lib/lark/additional-ap-submission";
 import { errorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
@@ -323,24 +329,6 @@ export async function POST(
       }
     }
 
-    const formControls = buildApFormControls({
-      po,
-      expenseCategory,
-      brand,
-      apDateYmd,
-      ownerOpenId: submitterOpenId,
-      project,
-      supplier,
-      remarks,
-      planRows,
-      planRemarks,
-      attachmentCodes,
-      attachmentExt: formatLarkAttachmentExt([
-        poPdfName,
-        ...extraEntries.map((extra) => extra.filename),
-      ]),
-    });
-
     const effectivePlanRows =
       planRows ?? buildPaymentPlanRows(po, paymentScope);
     const submittedAmount = sumPlanRowAmounts(effectivePlanRows);
@@ -353,16 +341,73 @@ export async function POST(
       remarks: row.remarks,
     }));
 
-    const result = await createApprovalInstance({
-      approvalCode: getLarkApprovalCode(),
-      openId: submitterOpenId,
-      form: stringifyApForm(formControls),
-      // Unique per submission so DP and balance can both be filed for one PO.
-      uuid: crypto.randomUUID(),
-      nodeApproverOpenIdList: [
-        { key: AP_FORM_APPROVER_NODE_ID, value: approverOpenIds },
-      ],
-    });
+    const { data: priorSubmissions } = await supabase
+      .from("purchase_order_lark_submissions")
+      .select("lark_instance_code")
+      .eq("purchase_order_id", po.id);
+    const existingInstanceCodes = (priorSubmissions ?? []).map(
+      (row) => row.lark_instance_code as string,
+    );
+
+    // An existing AP Form does not block another. Retry once when Lark hands
+    // back the instance already stored for this PO (idempotent uuid / identical
+    // form), so the balance can still be filed after the down payment.
+    let result: { instance_code: string } | null = null;
+    let remarksForLark = remarks;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const nonce = crypto.randomUUID();
+      remarksForLark = larkRemarksForAdditionalAttempt(
+        remarks,
+        attempt,
+        nonce,
+      );
+      const formControls = buildApFormControls({
+        po,
+        expenseCategory,
+        brand,
+        apDateYmd,
+        ownerOpenId: submitterOpenId,
+        project,
+        supplier,
+        remarks: remarksForLark,
+        planRows,
+        planRemarks,
+        attachmentCodes,
+        attachmentExt: formatLarkAttachmentExt([
+          poPdfName,
+          ...extraEntries.map((extra) => extra.filename),
+        ]),
+      });
+      const created = await createApprovalInstance({
+        approvalCode: getLarkApprovalCode(),
+        openId: submitterOpenId,
+        form: stringifyApForm(formControls),
+        uuid: nonce,
+        nodeApproverOpenIdList: [
+          { key: AP_FORM_APPROVER_NODE_ID, value: approverOpenIds },
+        ],
+      });
+      if (
+        anotherApSubmissionAllowed({
+          existingInstanceCodes,
+          newInstanceCode: created.instance_code,
+        })
+      ) {
+        result = created;
+        break;
+      }
+    }
+
+    if (!result) {
+      return NextResponse.json(
+        {
+          error:
+            "Lark reused the AP Form already on this PO instead of opening a new one. Change the remarks or payment amount and try again.",
+          code: "LARK_INSTANCE_REUSED",
+        },
+        { status: 409 },
+      );
+    }
 
     const details = await getApprovalInstanceDetails(result.instance_code);
     const serialNumber = details.serialNumber;
@@ -388,29 +433,41 @@ export async function POST(
       });
 
     if (insertErr) {
+      const conflict = submissionInsertConflict(insertErr);
       return NextResponse.json(
         {
-          error: `Submitted to Lark (${result.instance_code}) but failed to save submission history: ${insertErr.message}`,
+          error:
+            conflict === "instance"
+              ? "This AP Form is already saved. Refresh the page, then submit again if you still need another one."
+              : `Submitted to Lark (${result.instance_code}) but failed to save submission history: ${insertErr.message}`,
+          code: conflict === "instance" ? "INSTANCE_ALREADY_STORED" : undefined,
           instanceCode: result.instance_code,
           serialNumber,
           status: approvalStatus,
         },
-        { status: 500 },
+        { status: conflict === "instance" ? 409 : 500 },
       );
     }
 
-    // Keep PO columns as the latest submission for list/detail badges.
-    const { error: updateErr } = await supabase
-      .from("purchase_orders")
-      .update({
+    // Badge columns are unique and only show the latest form. A clash with
+    // another PO must not fail this submission — the history row is saved.
+    const updateErr = await saveLatestPoLarkBadge(
+      {
         lark_instance_code: result.instance_code,
         lark_serial_number: serialNumber,
         lark_approval_status: approvalStatus,
         lark_status_synced_at: syncedAt,
         lark_submitted_at: syncedAt,
         lark_expense_category: expenseCategory,
-      })
-      .eq("id", po.id);
+      },
+      async (patch) => {
+        const { error } = await supabase
+          .from("purchase_orders")
+          .update(patch)
+          .eq("id", po.id);
+        return error;
+      },
+    );
 
     if (updateErr) {
       return NextResponse.json(
