@@ -38,11 +38,11 @@ export function paymentFulfillmentStatus(
 }
 
 /**
- * A settled invoice has no unpaid installment. Money logged against one
- * purpose, or against none of them, still covers the down payment when the
- * payments add up to the invoice.
- * Short installments are shown as paid for their expected amount. An
- * installment that was actually overpaid stays overpaid.
+ * A settled invoice has no unpaid installment. One final payment for the
+ * whole PO covers the scheduled down payment instead of leaving that line
+ * empty and marking the final payment overpaid by the same money.
+ * Amounts are moved, not copied, so the installments still add up to what
+ * was paid. Anything above the invoice stays on the last installment.
  */
 export function coverInstallmentsWhenInvoiceSettled<
   T extends { expected: number; paid: number },
@@ -51,17 +51,61 @@ export function coverInstallmentsWhenInvoiceSettled<
   totalPaid: number,
   currency: string,
 ): Array<T & { status: PaymentFulfillmentStatus }> {
+  const withStatus = (paid: readonly number[]) =>
+    installments.map((term, index) => {
+      const amount = preserveFractionalMoney(paid[index] ?? 0);
+      return {
+        ...term,
+        paid: amount,
+        status: paymentFulfillmentStatus(term.expected, amount, currency),
+      };
+    });
+
   const expectedTotal = installments.reduce((sum, term) => sum + term.expected, 0);
   const invoiceSettled =
     paymentFulfillmentStatus(expectedTotal, totalPaid, currency) !== "underpaid";
+  if (!invoiceSettled || installments.length === 0) {
+    return withStatus(installments.map((term) => term.paid));
+  }
 
-  return installments.map((term) => {
-    const status = paymentFulfillmentStatus(term.expected, term.paid, currency);
-    if (invoiceSettled && status === "underpaid") {
-      return { ...term, paid: term.expected, status: "paid" };
+  const tolerance = poCurrencyTolerance(currency);
+  const paid = installments.map((term) => term.paid);
+  let pool =
+    totalPaid - paid.reduce((sum, amount) => sum + amount, 0);
+
+  const shortfallAt = (index: number) =>
+    Math.max(0, installments[index]!.expected - paid[index]!);
+  const surplusAt = (index: number) =>
+    Math.max(0, paid[index]! - installments[index]!.expected);
+
+  for (let index = 0; index < paid.length && pool > tolerance; index++) {
+    const need = shortfallAt(index);
+    if (need <= tolerance) continue;
+    const take = Math.min(pool, need);
+    paid[index] = paid[index]! + take;
+    pool -= take;
+  }
+
+  for (let index = 0; index < paid.length; index++) {
+    let need = shortfallAt(index);
+    if (need <= tolerance) continue;
+    for (let source = paid.length - 1; source >= 0 && need > tolerance; source--) {
+      if (source === index) continue;
+      const extra = surplusAt(source);
+      if (extra <= tolerance) continue;
+      const take = Math.min(need, extra);
+      paid[source] = paid[source]! - take;
+      paid[index] = paid[index]! + take;
+      need -= take;
     }
-    return { ...term, status };
-  });
+  }
+
+  if (pool > tolerance) {
+    const last = paid.length - 1;
+    paid[last] = paid[last]! + pool;
+  }
+
+  return withStatus(paid);
 }
 
 export function sumPaymentsInPoCurrency(

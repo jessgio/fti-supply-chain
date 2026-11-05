@@ -13,7 +13,7 @@ import { poFxDate } from "@/lib/procurement/open-po-value";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import {
-  paymentFulfillmentStatus,
+  coverInstallmentsWhenInvoiceSettled,
   poCurrencyTolerance,
 } from "@/lib/procurement/po-payment-status";
 import { listPurchaseOrders } from "@/lib/db/procurement";
@@ -431,36 +431,31 @@ export async function computePaymentDashboardSummary(
     const paidTotalPoCurrency = poPayments
       .filter((payment) => (payment.currency ?? poCurrency) === poCurrency)
       .reduce((sum, payment) => sum + Number(payment.amount), 0);
-    const expectedTerms = schedule.terms.reduce((sum, term) => sum + term.amount, 0);
-    const paidTerms = termPaid.reduce((sum, amount) => sum + amount, 0);
-    const termsBalanced =
-      Math.abs(paidTerms - expectedTerms) <= poCurrencyTolerance(poCurrency);
-    const invoiceSettled =
-      paymentFulfillmentStatus(
-        schedule.invoiceTotal,
-        paidTotalPoCurrency,
-        poCurrency,
-      ) !== "underpaid";
+    const settled = coverInstallmentsWhenInvoiceSettled(
+      schedule.terms.map((term, index) => ({
+        expected: term.amount,
+        paid: termPaid[index] ?? 0,
+      })),
+      paidTotalPoCurrency,
+      poCurrency,
+    );
 
-    if (!termsBalanced) {
-      schedule.terms.forEach((term, index) => {
-        const matcher = (purpose: string) =>
-          purposeMatchesPaymentTerm(purpose, index, schedule.terms);
-        const issue = purposeIssue(
-          po,
-          poCurrency,
-          term.amount,
-          termPaid[index] ?? 0,
-          idrRateForVariance(poPayments, poCurrency, rate, matcher),
-        );
-        if (!issue) return;
-        if (invoiceSettled && issue.status === "underpaid") return;
-        const labeled =
-          schedule.terms.length > 2 ? { ...issue, term_label: term.label } : issue;
-        if (index === 0) downPaymentIssues.push(labeled);
-        else balancePaymentIssues.push(labeled);
-      });
-    }
+    settled.forEach((term, index) => {
+      const matcher = (purpose: string) =>
+        purposeMatchesPaymentTerm(purpose, index, schedule.terms);
+      const issue = purposeIssue(
+        po,
+        poCurrency,
+        term.expected,
+        term.paid,
+        idrRateForVariance(poPayments, poCurrency, rate, matcher),
+      );
+      if (!issue) return;
+      const labeled =
+        schedule.terms.length > 2 ? { ...issue, term_label: term.label } : issue;
+      if (index === 0) downPaymentIssues.push(labeled);
+      else balancePaymentIssues.push(labeled);
+    });
   }
 
   return {
