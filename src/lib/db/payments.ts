@@ -12,7 +12,10 @@ import { getRateToIdr } from "@/lib/procurement/fx-rates";
 import { poFxDate } from "@/lib/procurement/open-po-value";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
-import { poCurrencyTolerance } from "@/lib/procurement/po-payment-status";
+import {
+  paymentFulfillmentStatus,
+  poCurrencyTolerance,
+} from "@/lib/procurement/po-payment-status";
 import { listPurchaseOrders } from "@/lib/db/procurement";
 
 export type PaymentLedgerSortKey =
@@ -425,10 +428,19 @@ export async function computePaymentDashboardSummary(
         purposeMatchesPaymentTerm(purpose, index, schedule.terms),
       ),
     );
+    const paidTotalPoCurrency = poPayments
+      .filter((payment) => (payment.currency ?? poCurrency) === poCurrency)
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
     const expectedTerms = schedule.terms.reduce((sum, term) => sum + term.amount, 0);
     const paidTerms = termPaid.reduce((sum, amount) => sum + amount, 0);
     const termsBalanced =
       Math.abs(paidTerms - expectedTerms) <= poCurrencyTolerance(poCurrency);
+    const invoiceSettled =
+      paymentFulfillmentStatus(
+        schedule.invoiceTotal,
+        paidTotalPoCurrency,
+        poCurrency,
+      ) !== "underpaid";
 
     if (!termsBalanced) {
       schedule.terms.forEach((term, index) => {
@@ -442,6 +454,7 @@ export async function computePaymentDashboardSummary(
           idrRateForVariance(poPayments, poCurrency, rate, matcher),
         );
         if (!issue) return;
+        if (invoiceSettled && issue.status === "underpaid") return;
         const labeled =
           schedule.terms.length > 2 ? { ...issue, term_label: term.label } : issue;
         if (index === 0) downPaymentIssues.push(labeled);

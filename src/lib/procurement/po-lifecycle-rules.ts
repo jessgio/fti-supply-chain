@@ -3,8 +3,8 @@ import { DEFAULT_PO_CURRENCY } from "@/lib/procurement/currencies";
 import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amounts";
 import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import {
+  coverInstallmentsWhenInvoiceSettled,
   isDownPaymentPurpose,
-  paymentFulfillmentStatus,
   type PaymentFulfillmentStatus,
 } from "@/lib/procurement/po-payment-status";
 
@@ -177,17 +177,22 @@ function paymentSummary(input: PoLifecycleInput) {
     ),
   });
 
-  const statuses: PaymentFulfillmentStatus[] = schedule.terms.map((term, index) =>
-    paymentFulfillmentStatus(
-      term.amount,
-      sumLifecyclePaymentsInPoCurrency(
-        input.payments,
-        poCurrency,
-        (purpose) => purposeMatchesPaymentTerm(purpose, index, schedule.terms),
-      ),
+  const matchedPaid = schedule.terms.map((term, index) =>
+    sumLifecyclePaymentsInPoCurrency(
+      input.payments,
       poCurrency,
+      (purpose) => purposeMatchesPaymentTerm(purpose, index, schedule.terms),
     ),
   );
+  const totalPaid = sumLifecyclePaymentsInPoCurrency(input.payments, poCurrency);
+  const statuses: PaymentFulfillmentStatus[] = coverInstallmentsWhenInvoiceSettled(
+    schedule.terms.map((term, index) => ({
+      expected: term.amount,
+      paid: matchedPaid[index] ?? 0,
+    })),
+    totalPaid,
+    poCurrency,
+  ).map((term) => term.status);
   const later = statuses.slice(1);
 
   return {

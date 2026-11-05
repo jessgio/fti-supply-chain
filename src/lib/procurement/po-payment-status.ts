@@ -37,6 +37,33 @@ export function paymentFulfillmentStatus(
   return variance < 0 ? "underpaid" : "overpaid";
 }
 
+/**
+ * A settled invoice has no unpaid installment. Money logged against one
+ * purpose, or against none of them, still covers the down payment when the
+ * payments add up to the invoice.
+ * Short installments are shown as paid for their expected amount. An
+ * installment that was actually overpaid stays overpaid.
+ */
+export function coverInstallmentsWhenInvoiceSettled<
+  T extends { expected: number; paid: number },
+>(
+  installments: readonly T[],
+  totalPaid: number,
+  currency: string,
+): Array<T & { status: PaymentFulfillmentStatus }> {
+  const expectedTotal = installments.reduce((sum, term) => sum + term.expected, 0);
+  const invoiceSettled =
+    paymentFulfillmentStatus(expectedTotal, totalPaid, currency) !== "underpaid";
+
+  return installments.map((term) => {
+    const status = paymentFulfillmentStatus(term.expected, term.paid, currency);
+    if (invoiceSettled && status === "underpaid") {
+      return { ...term, paid: term.expected, status: "paid" };
+    }
+    return { ...term, status };
+  });
+}
+
 export function sumPaymentsInPoCurrency(
   payments: PoPayment[],
   poCurrency: string,
@@ -68,21 +95,21 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
   const schedule = resolvePaymentSchedule(po);
   const payments = po.payments ?? [];
 
-  const installments = schedule.terms.map((term, index) => {
-    const paid = sumPaymentsInPoCurrency(payments, poCurrency, (purpose) =>
-      purposeMatchesPaymentTerm(purpose, index, schedule.terms),
-    );
-    return {
+  const paidTotalPoCurrency = sumPaymentsInPoCurrency(payments, poCurrency);
+  const installments = coverInstallmentsWhenInvoiceSettled(
+    schedule.terms.map((term, index) => ({
       label: term.label,
       pct: term.pct,
       expected: term.amount,
-      paid,
-      status: paymentFulfillmentStatus(term.amount, paid, poCurrency),
-    };
-  });
+      paid: sumPaymentsInPoCurrency(payments, poCurrency, (purpose) =>
+        purposeMatchesPaymentTerm(purpose, index, schedule.terms),
+      ),
+    })),
+    paidTotalPoCurrency,
+    poCurrency,
+  );
   const paidDown = installments[0]?.paid ?? 0;
   const paidBalance = installments.slice(1).reduce((sum, term) => sum + term.paid, 0);
-  const paidTotalPoCurrency = sumPaymentsInPoCurrency(payments, poCurrency);
 
   const totalIdr = payments.reduce(
     (sum, payment) => sum + (paymentIdrAmount(payment) ?? 0),
