@@ -427,6 +427,18 @@ export function buildPaymentPlanRows(
   ];
 }
 
+/**
+ * Drop one payment-plan line before an AP Form is filed.
+ * The last remaining line stays, so the request still has an amount.
+ */
+export function omitPaymentPlanRow<T>(rows: readonly T[], index: number): T[] {
+  if (rows.length <= 1) return [...rows];
+  if (!Number.isInteger(index) || index < 0 || index >= rows.length) {
+    return [...rows];
+  }
+  return rows.filter((_, rowIndex) => rowIndex !== index);
+}
+
 /** Total payment amount implied by a PO + AP Form payment scope. */
 export function paymentAmountForApScope(
   po: PurchaseOrder,
