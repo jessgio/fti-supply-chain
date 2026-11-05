@@ -21,6 +21,7 @@ import {
   DEFAULT_AP_EXPENSE_CATEGORY,
   buildLarkApprovalDetailUrl,
   buildPaymentPlanRows,
+  omitPaymentPlanRow,
   defaultApProject,
   defaultApRemarks,
   defaultApSupplier,
@@ -164,6 +165,97 @@ function PaymentPlanDateInput({
   );
 }
 
+type PlanRowDraft = PaymentPlanRow & { draftKey: string };
+
+function draftPlanRows(rows: PaymentPlanRow[]): PlanRowDraft[] {
+  return rows.map((row, index) => ({
+    ...row,
+    // Stable for this prefill so removing an earlier line does not reuse
+    // another line's date field. Derived from the row so server and client match.
+    draftKey: `${index}:${row.dateYmd}:${row.amount}:${row.remarks}`,
+  }));
+}
+
+function planRowsForSubmit(rows: PlanRowDraft[]): PaymentPlanRow[] {
+  return rows.map(({ dateYmd, amount, currency, remarks }) => ({
+    dateYmd,
+    amount,
+    currency,
+    remarks,
+  }));
+}
+
+export function PaymentPlanLineList({
+  rows,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  rows: PlanRowDraft[];
+  disabled?: boolean;
+  onChange: (index: number, patch: Partial<PaymentPlanRow>) => void;
+  onRemove: (index: number) => void;
+}) {
+  return (
+    <div className="mt-1.5 space-y-2">
+      {rows.map((row, index) => (
+        <div
+          key={row.draftKey}
+          className="space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5"
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[11px] text-stone-500">
+              Date
+              <PaymentPlanDateInput
+                key={row.draftKey}
+                value={row.dateYmd}
+                onChange={(dateYmd) => onChange(index, { dateYmd })}
+                disabled={disabled}
+              />
+            </label>
+            <label className="block text-[11px] text-stone-500">
+              Amount ({row.currency})
+              <input
+                type="number"
+                step="any"
+                value={row.amount}
+                onChange={(e) =>
+                  onChange(index, {
+                    amount: Number(e.target.value) || 0,
+                  })
+                }
+                disabled={disabled}
+                className={fieldClass}
+              />
+            </label>
+          </div>
+          <label className="block text-[11px] text-stone-500">
+            Remarks · {formatPoMoney(row.amount, row.currency)}
+            <input
+              type="text"
+              value={row.remarks}
+              onChange={(e) => onChange(index, { remarks: e.target.value })}
+              disabled={disabled}
+              className={fieldClass}
+            />
+          </label>
+          {rows.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              disabled={disabled}
+              aria-label={`Remove line ${index + 1}`}
+              className="text-[11px] font-medium text-stone-500 underline hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Remove line
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated }: Props) {
   const paymentTermCount =
     po.payment_terms && po.payment_terms.length > 0 ? po.payment_terms.length : 2;
@@ -189,9 +281,9 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   const [remarks, setRemarks] = useState(() => defaultApRemarks(po));
   const [paymentPlanScope, setPaymentPlanScope] =
     useState<ApPaymentPlanScope>("both");
-  const [planRows, setPlanRows] = useState<PaymentPlanRow[]>(() => {
+  const [planRows, setPlanRows] = useState<PlanRowDraft[]>(() => {
     try {
-      return buildPaymentPlanRows(po, "both");
+      return draftPlanRows(buildPaymentPlanRows(po, "both"));
     } catch {
       return [];
     }
@@ -639,7 +731,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
   function applyPaymentPlanScope(scope: ApPaymentPlanScope) {
     setPaymentPlanScope(scope);
     try {
-      setPlanRows(buildPaymentPlanRows(po, scope));
+      setPlanRows(draftPlanRows(buildPaymentPlanRows(po, scope)));
     } catch {
       setPlanRows([]);
     }
@@ -649,6 +741,10 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
     setPlanRows((prev) =>
       prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
+  }
+
+  function removePlanRow(index: number) {
+    setPlanRows((prev) => omitPaymentPlanRow(prev, index));
   }
 
   const selectableApprovers = useMemo(
@@ -732,7 +828,7 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
       form.append("supplier", supplier);
       form.append("remarks", remarks);
       form.append("paymentScope", paymentPlanScope);
-      form.append("planRows", JSON.stringify(planRows));
+      form.append("planRows", JSON.stringify(planRowsForSubmit(planRows)));
       form.append("storagePaths", JSON.stringify(storagePaths));
 
       const res = await fetch(`/api/procurement/pos/${po.id}/submit-lark`, {
@@ -1404,59 +1500,18 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
                 </label>
               ) : null}
               <p className="mt-1 text-[11px] text-stone-500">
-                {hasSplitPlan
-                  ? "Only the selected payment amount is submitted — other AP fields stay the same."
-                  : "Prefills from PO totals — edit before submit."}
+                {planRows.length > 1
+                  ? "Remove a line to leave that payment off this request. The amount submitted is the sum of the lines that remain."
+                  : hasSplitPlan
+                    ? "Only the selected payment amount is submitted. Other AP fields stay the same."
+                    : "Prefills from PO totals. Edit before submit."}
               </p>
-              <div className="mt-1.5 space-y-2">
-                {planRows.map((row, index) => (
-                  <div
-                    key={`plan-${paymentPlanScope}-${index}`}
-                    className="rounded-lg border border-stone-200 bg-stone-50 p-2.5 space-y-2"
-                  >
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block text-[11px] text-stone-500">
-                        Date
-                        <PaymentPlanDateInput
-                          key={`plan-date-${paymentPlanScope}-${index}`}
-                          value={row.dateYmd}
-                          onChange={(dateYmd) =>
-                            updatePlanRow(index, { dateYmd })
-                          }
-                          disabled={!currencyOk}
-                        />
-                      </label>
-                      <label className="block text-[11px] text-stone-500">
-                        Amount ({row.currency})
-                        <input
-                          type="number"
-                          step="any"
-                          value={row.amount}
-                          onChange={(e) =>
-                            updatePlanRow(index, {
-                              amount: Number(e.target.value) || 0,
-                            })
-                          }
-                          disabled={!currencyOk}
-                          className={fieldClass}
-                        />
-                      </label>
-                    </div>
-                    <label className="block text-[11px] text-stone-500">
-                      Remarks · {formatPoMoney(row.amount, row.currency)}
-                      <input
-                        type="text"
-                        value={row.remarks}
-                        onChange={(e) =>
-                          updatePlanRow(index, { remarks: e.target.value })
-                        }
-                        disabled={!currencyOk}
-                        className={fieldClass}
-                      />
-                    </label>
-                  </div>
-                ))}
-              </div>
+              <PaymentPlanLineList
+                rows={planRows}
+                disabled={!currencyOk}
+                onChange={updatePlanRow}
+                onRemove={removePlanRow}
+              />
             </div>
           ) : null}
 

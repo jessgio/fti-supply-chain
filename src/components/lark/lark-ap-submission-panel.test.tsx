@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LarkApSubmissionPanel } from "./lark-ap-submission-panel";
+import { buildPaymentPlanRows } from "@/lib/lark/ap-form";
+import {
+  LarkApSubmissionPanel,
+  PaymentPlanLineList,
+} from "./lark-ap-submission-panel";
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
 
 function line(unitCost: number): PurchaseOrderLine {
@@ -76,6 +80,45 @@ test("a PO with an AP form can start another one", () => {
   assert.match(html, /Link existing AP Form/);
   assert.match(html, /202610280001/);
   assert.doesNotMatch(html, /Submit new AP Form/);
+});
+
+test("multiple payments can each be removed from the AP form", () => {
+  const rows = buildPaymentPlanRows(po(), "both");
+  assert.equal(rows.length, 3);
+
+  const html = renderToStaticMarkup(
+    <PaymentPlanLineList
+      rows={rows.map((row, index) => ({ ...row, draftKey: `row-${index}` }))}
+      onChange={() => {}}
+      onRemove={() => {}}
+    />,
+  );
+
+  assert.equal(html.match(/>Remove line</g)?.length, 3);
+  assert.match(html, /Progress payment 40%/);
+  assert.match(html, /Before shipment 30%/);
+});
+
+test("a single payment line stays on the AP form", () => {
+  const rows = buildPaymentPlanRows(
+    po({
+      down_payment_pct: 0,
+      payment_terms: [{ label: "Full payment", pct: 100 }],
+    }),
+    "both",
+  );
+  assert.equal(rows.length, 1);
+
+  const html = renderToStaticMarkup(
+    <PaymentPlanLineList
+      rows={rows.map((row, index) => ({ ...row, draftKey: `row-${index}` }))}
+      onChange={() => {}}
+      onRemove={() => {}}
+    />,
+  );
+
+  assert.doesNotMatch(html, /Remove line/);
+  assert.match(html, /Full payment/);
 });
 
 test("a bad Lark timestamp does not crash the submitted panel", () => {
