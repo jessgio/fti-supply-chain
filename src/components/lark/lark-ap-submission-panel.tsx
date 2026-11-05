@@ -38,6 +38,13 @@ import {
   type ApPaymentPlanScope,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
+import {
+  paymentLineLabel,
+  paymentLineLabels,
+  visiblePlanRowIndexes,
+  type PlanTableSortDir,
+  type PlanTableSortKey,
+} from "@/lib/lark/ap-payment-plan-table";
 import { orderApproversForForm } from "@/lib/lark/approver-list";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { readApiJson } from "@/lib/http";
@@ -148,10 +155,12 @@ function PaymentPlanDateInput({
   value,
   onChange,
   disabled,
+  className = fieldClass,
 }: {
   value: string;
   onChange: (ymd: string) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const initialValue = useRef(value);
   return (
@@ -160,10 +169,13 @@ function PaymentPlanDateInput({
       defaultValue={initialValue.current}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      className={fieldClass}
+      className={className}
     />
   );
 }
+
+const planCellField =
+  "w-full min-w-0 rounded-md border border-stone-300 bg-white px-2 py-1 text-sm text-stone-900";
 
 type PlanRowDraft = PaymentPlanRow & { draftKey: string };
 
@@ -185,6 +197,45 @@ function planRowsForSubmit(rows: PlanRowDraft[]): PaymentPlanRow[] {
   }));
 }
 
+function PlanSortHeader({
+  label,
+  columnKey,
+  activeKey,
+  sortDir,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  columnKey: PlanTableSortKey;
+  activeKey: PlanTableSortKey | null;
+  sortDir: PlanTableSortDir;
+  onSort: (key: PlanTableSortKey) => void;
+  align?: "left" | "right";
+}) {
+  const active = activeKey === columnKey;
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      className={`px-2 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 whitespace-nowrap hover:text-stone-800 ${
+          align === "right" ? "ml-auto" : ""
+        }`}
+        title="Sort. Click again to reverse. A third click restores payment order."
+        onClick={() => onSort(columnKey)}
+      >
+        {label}
+        <span aria-hidden className="text-[10px] text-stone-400">
+          {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 export function PaymentPlanLineList({
   rows,
   disabled,
@@ -196,62 +247,195 @@ export function PaymentPlanLineList({
   onChange: (index: number, patch: Partial<PaymentPlanRow>) => void;
   onRemove: (index: number) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [labelFilter, setLabelFilter] = useState("");
+  const [sortKey, setSortKey] = useState<PlanTableSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<PlanTableSortDir>("asc");
+  const labels = useMemo(() => paymentLineLabels(rows), [rows]);
+  const activeLabel = labels.includes(labelFilter) ? labelFilter : "";
+  const visible = useMemo(
+    () =>
+      visiblePlanRowIndexes(rows, {
+        query,
+        label: activeLabel,
+        sortKey,
+        sortDir,
+      }),
+    [rows, query, activeLabel, sortKey, sortDir],
+  );
+  const currency = rows[0]?.currency ?? "IDR";
+  const submittedTotal = rows.reduce(
+    (sum, row) => sum + (Number(row.amount) || 0),
+    0,
+  );
+  const filtered = visible.length !== rows.length;
+
+  function onSort(key: PlanTableSortKey) {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir("asc");
+      return;
+    }
+    if (sortDir === "asc") {
+      setSortDir("desc");
+      return;
+    }
+    setSortKey(null);
+  }
+
   return (
-    <div className="mt-1.5 space-y-2">
-      {rows.map((row, index) => (
-        <div
-          key={row.draftKey}
-          className="space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5"
-        >
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block text-[11px] text-stone-500">
-              Date
-              <PaymentPlanDateInput
-                key={row.draftKey}
-                value={row.dateYmd}
-                onChange={(dateYmd) => onChange(index, { dateYmd })}
-                disabled={disabled}
+    <div className="mt-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-[12rem] flex-1 text-[11px] font-medium text-stone-600">
+          Search
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Date, amount, or remarks"
+            disabled={disabled}
+            className={`${planCellField} mt-1`}
+          />
+        </label>
+        <label className="min-w-[11rem] text-[11px] font-medium text-stone-600">
+          Filter
+          <select
+            value={activeLabel}
+            onChange={(e) => setLabelFilter(e.target.value)}
+            disabled={disabled}
+            className={`${planCellField} mt-1`}
+          >
+            <option value="">All lines</option>
+            {labels.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="pb-2 text-[11px] text-stone-500">
+          {filtered
+            ? `Showing ${visible.length} of ${rows.length} · ${formatPoMoney(submittedTotal, currency)} submitted`
+            : `${rows.length} line${rows.length === 1 ? "" : "s"} · ${formatPoMoney(submittedTotal, currency)}`}
+        </p>
+      </div>
+      {filtered ? (
+        <p className="mt-1 text-[11px] text-stone-500">
+          Hidden lines stay on this request until you remove them.
+        </p>
+      ) : null}
+      <div className="mt-2 overflow-x-auto rounded-lg border border-stone-200">
+        <table className="w-full min-w-[44rem] border-collapse text-left text-sm">
+          <thead className="bg-stone-50 text-[11px] uppercase tracking-wide text-stone-500">
+            <tr>
+              <PlanSortHeader
+                label="Payment"
+                columnKey="payment"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={onSort}
               />
-            </label>
-            <label className="block text-[11px] text-stone-500">
-              Amount ({row.currency})
-              <input
-                type="number"
-                step="any"
-                value={row.amount}
-                onChange={(e) =>
-                  onChange(index, {
-                    amount: Number(e.target.value) || 0,
-                  })
-                }
-                disabled={disabled}
-                className={fieldClass}
+              <PlanSortHeader
+                label="Date"
+                columnKey="date"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={onSort}
               />
-            </label>
-          </div>
-          <label className="block text-[11px] text-stone-500">
-            Remarks · {formatPoMoney(row.amount, row.currency)}
-            <input
-              type="text"
-              value={row.remarks}
-              onChange={(e) => onChange(index, { remarks: e.target.value })}
-              disabled={disabled}
-              className={fieldClass}
-            />
-          </label>
-          {rows.length > 1 ? (
-            <button
-              type="button"
-              onClick={() => onRemove(index)}
-              disabled={disabled}
-              aria-label={`Remove line ${index + 1}`}
-              className="text-[11px] font-medium text-stone-500 underline hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Remove line
-            </button>
-          ) : null}
-        </div>
-      ))}
+              <PlanSortHeader
+                label="Amount"
+                columnKey="amount"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={onSort}
+                align="right"
+              />
+              <th scope="col" className="px-2 py-2 text-left font-medium">
+                Remarks
+              </th>
+              {rows.length > 1 ? (
+                <th scope="col" className="w-24 px-2 py-2">
+                  <span className="sr-only">Remove</span>
+                </th>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={rows.length > 1 ? 5 : 4}
+                  className="px-3 py-6 text-center text-sm text-stone-500"
+                >
+                  No payments match this search.
+                </td>
+              </tr>
+            ) : (
+              visible.map((index) => {
+                const row = rows[index];
+                if (!row) return null;
+                return (
+                  <tr key={row.draftKey} className="border-t border-stone-100">
+                    <td className="max-w-[12rem] px-2 py-1.5 align-middle text-stone-800">
+                      <span className="line-clamp-2">{paymentLineLabel(row.remarks)}</span>
+                    </td>
+                    <td className="w-40 px-2 py-1.5 align-middle">
+                      <PaymentPlanDateInput
+                        key={row.draftKey}
+                        value={row.dateYmd}
+                        onChange={(dateYmd) => onChange(index, { dateYmd })}
+                        disabled={disabled}
+                        className={planCellField}
+                      />
+                    </td>
+                    <td className="w-36 px-2 py-1.5 align-middle">
+                      <input
+                        type="number"
+                        step="any"
+                        aria-label={`Amount for ${paymentLineLabel(row.remarks)}`}
+                        value={row.amount}
+                        onChange={(e) =>
+                          onChange(index, {
+                            amount: Number(e.target.value) || 0,
+                          })
+                        }
+                        disabled={disabled}
+                        className={`${planCellField} text-right tabular-nums`}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 align-middle">
+                      <input
+                        type="text"
+                        aria-label={`Remarks for ${paymentLineLabel(row.remarks)}`}
+                        title={row.remarks}
+                        value={row.remarks}
+                        onChange={(e) =>
+                          onChange(index, { remarks: e.target.value })
+                        }
+                        disabled={disabled}
+                        className={planCellField}
+                      />
+                    </td>
+                    {rows.length > 1 ? (
+                      <td className="px-2 py-1.5 align-middle text-right">
+                        <button
+                          type="button"
+                          onClick={() => onRemove(index)}
+                          disabled={disabled}
+                          aria-label={`Remove line ${index + 1}`}
+                          className="text-[11px] font-medium text-stone-500 underline hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1473,48 +1657,6 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
             </span>
           </label>
 
-          {planRows.length > 0 ? (
-            <div>
-              <p className="text-xs font-medium text-stone-600">
-                Payment plan (付款计划)
-              </p>
-              {hasSplitPlan ? (
-                <label className="mt-1.5 block text-[11px] text-stone-500">
-                  Include in this AP Form
-                  <select
-                    value={paymentPlanScope}
-                    onChange={(e) =>
-                      applyPaymentPlanScope(
-                        e.target.value as ApPaymentPlanScope,
-                      )
-                    }
-                    disabled={!currencyOk}
-                    className={fieldClass}
-                  >
-                    {AP_PAYMENT_PLAN_SCOPES.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {paymentScopeLabel(s.value, paymentTermCount)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <p className="mt-1 text-[11px] text-stone-500">
-                {planRows.length > 1
-                  ? "Remove a line to leave that payment off this request. The amount submitted is the sum of the lines that remain."
-                  : hasSplitPlan
-                    ? "Only the selected payment amount is submitted. Other AP fields stay the same."
-                    : "Prefills from PO totals. Edit before submit."}
-              </p>
-              <PaymentPlanLineList
-                rows={planRows}
-                disabled={!currencyOk}
-                onChange={updatePlanRow}
-                onRemove={removePlanRow}
-              />
-            </div>
-          ) : null}
-
           <label className="block text-xs font-medium text-stone-600">
             Remarks{" "}
             <span className="font-normal text-stone-400">(optional)</span>
@@ -1710,6 +1852,50 @@ export function LarkApSubmissionPanel({ po, supplier: supplierRecord, onUpdated 
           </div>
         </div>
       </div>
+
+      {planRows.length > 0 ? (
+        <div className="mt-5 border-t border-stone-100 pt-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-stone-600">
+                Payment plan (付款计划)
+              </p>
+              <p className="mt-1 text-[11px] text-stone-500">
+                {planRows.length > 1
+                  ? "Each row is one payment. Remove a line to leave it off this request. Search and filter only change what you see."
+                  : hasSplitPlan
+                    ? "Only the selected payment amount is submitted. Other AP fields stay the same."
+                    : "Prefills from PO totals. Edit a cell before submit."}
+              </p>
+            </div>
+            {hasSplitPlan ? (
+              <label className="block min-w-[14rem] text-[11px] font-medium text-stone-600">
+                Include in this AP Form
+                <select
+                  value={paymentPlanScope}
+                  onChange={(e) =>
+                    applyPaymentPlanScope(e.target.value as ApPaymentPlanScope)
+                  }
+                  disabled={!currencyOk}
+                  className={fieldClass}
+                >
+                  {AP_PAYMENT_PLAN_SCOPES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {paymentScopeLabel(s.value, paymentTermCount)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+          <PaymentPlanLineList
+            rows={planRows}
+            disabled={!currencyOk}
+            onChange={updatePlanRow}
+            onRemove={removePlanRow}
+          />
+        </div>
+      ) : null}
 
       {error ? (
         <p className="mt-4 text-sm text-red-700" role="alert">

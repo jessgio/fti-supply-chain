@@ -94,7 +94,11 @@ test("multiple payments can each be removed from the AP form", () => {
     />,
   );
 
-  assert.equal(html.match(/>Remove line</g)?.length, 3);
+  assert.equal(html.match(/aria-label="Remove line /g)?.length, 3);
+  assert.match(html, /<table/);
+  assert.match(html, /Search/);
+  assert.match(html, /All lines/);
+  assert.match(html, /aria-sort="none"/);
   assert.match(html, /Progress payment 40%/);
   assert.match(html, /Before shipment 30%/);
 });
@@ -118,6 +122,7 @@ test("a single payment line stays on the AP form", () => {
   );
 
   assert.doesNotMatch(html, /Remove line/);
+  assert.match(html, /<table/);
   assert.match(html, /Full payment/);
 });
 
