@@ -30,7 +30,14 @@ function payment(amount: number, purpose: string): PoPayment {
   };
 }
 
-function po(payments: PoPayment[]): PurchaseOrder {
+function po(
+  payments: PoPayment[],
+  overrides: {
+    down_payment_pct?: number;
+    payment_terms?: PurchaseOrder["payment_terms"];
+    unitCost?: number;
+  } = {},
+): PurchaseOrder {
   return {
     id: "po",
     po_number: "PO-1",
@@ -38,8 +45,8 @@ function po(payments: PoPayment[]): PurchaseOrder {
     status: "ordered",
     order_date: "2026-10-01",
     expected_date: "2026-12-01",
-    down_payment_pct: 30,
-    payment_terms: [
+    down_payment_pct: overrides.down_payment_pct ?? 30,
+    payment_terms: overrides.payment_terms ?? [
       { label: "Down payment", pct: 30 },
       { label: "Final payment", pct: 70 },
     ],
@@ -50,7 +57,7 @@ function po(payments: PoPayment[]): PurchaseOrder {
     currency: "IDR",
     notes: null,
     pd_project_id: null,
-    lines: [line()],
+    lines: [{ ...line(), unit_cost: overrides.unitCost ?? 100 }],
     payments,
   } as PurchaseOrder;
 }
@@ -62,7 +69,33 @@ test("a fully paid PO does not leave the down payment unpaid", () => {
   assert.equal(summary.downStatus, "paid");
   assert.equal(summary.installments[0]?.paid, 30);
   assert.equal(summary.installments[0]?.expected, 30);
-  assert.equal(summary.balanceStatus, "overpaid");
+  assert.equal(summary.balanceStatus, "paid");
+  assert.equal(summary.installments[1]?.paid, 70);
+  assert.equal(
+    (summary.installments[0]?.paid ?? 0) + (summary.installments[1]?.paid ?? 0),
+    100,
+  );
+});
+
+test("paying a 50% schedule in one final payment settles both installments", () => {
+  const summary = computePoPaymentSummary(
+    po([payment(464_733_468, "Final payment")], {
+      down_payment_pct: 50,
+      payment_terms: [
+        { label: "Down payment", pct: 50 },
+        { label: "Final payment", pct: 50 },
+      ],
+      unitCost: 464_733_468,
+    }),
+  );
+
+  assert.equal(summary.expectedTotal, 464_733_468);
+  assert.equal(summary.overallStatus, "paid");
+  assert.equal(summary.installments[0]?.expected, 232_366_734);
+  assert.equal(summary.installments[0]?.paid, 232_366_734);
+  assert.equal(summary.downStatus, "paid");
+  assert.equal(summary.installments[1]?.paid, 232_366_734);
+  assert.equal(summary.balanceStatus, "paid");
 });
 
 test("a full payment that matches no installment still covers the down payment", () => {
@@ -82,6 +115,16 @@ test("a short final payment still leaves the down payment unpaid", () => {
   assert.equal(summary.downStatus, "underpaid");
   assert.equal(summary.installments[0]?.paid, 0);
   assert.equal(summary.balanceStatus, "paid");
+});
+
+test("money above the invoice stays overpaid on the final payment", () => {
+  const summary = computePoPaymentSummary(po([payment(120, "Final payment")]));
+
+  assert.equal(summary.overallStatus, "overpaid");
+  assert.equal(summary.downStatus, "paid");
+  assert.equal(summary.installments[0]?.paid, 30);
+  assert.equal(summary.balanceStatus, "overpaid");
+  assert.equal(summary.installments[1]?.paid, 90);
 });
 
 test("logged down and final payments keep their own amounts", () => {
