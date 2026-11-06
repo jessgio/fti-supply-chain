@@ -452,7 +452,9 @@ export async function computePaymentDashboardSummary(
       );
       if (!issue) return;
       const labeled =
-        schedule.terms.length > 2 ? { ...issue, term_label: term.label } : issue;
+        schedule.terms.length > 2
+          ? { ...issue, term_label: schedule.terms[index]?.label }
+          : issue;
       if (index === 0) downPaymentIssues.push(labeled);
       else balancePaymentIssues.push(labeled);
     });
