@@ -13,6 +13,7 @@ import {
   isApPaymentPlanScope,
   isApExtraStoragePath,
   isLarkApprovalStatus,
+  appendPoLineItems,
   buildApFormControls,
   buildPaymentPlanRows,
   stringifyApForm,
@@ -297,6 +298,7 @@ export async function POST(
       supplier: supplierRecord,
       company,
       logo,
+      describeOrderedLines: true,
     });
     const poPdfName = `${po.po_number || "PO"}.pdf`;
     attachmentCodes.push(
@@ -329,8 +331,13 @@ export async function POST(
       }
     }
 
-    const effectivePlanRows =
-      planRows ?? buildPaymentPlanRows(po, paymentScope);
+    const filedRemarks = appendPoLineItems(remarks, po);
+    const effectivePlanRows = (
+      planRows ?? buildPaymentPlanRows(po, paymentScope)
+    ).map((row) => ({
+      ...row,
+      remarks: appendPoLineItems(row.remarks, po, " - "),
+    }));
     const submittedAmount = sumPlanRowAmounts(effectivePlanRows);
     const submittedCurrency =
       effectivePlanRows[0]?.currency ?? po.currency ?? "IDR";
@@ -353,11 +360,11 @@ export async function POST(
     // back the instance already stored for this PO (idempotent uuid / identical
     // form), so the balance can still be filed after the down payment.
     let result: { instance_code: string } | null = null;
-    let remarksForLark = remarks;
+    let remarksForLark = filedRemarks;
     for (let attempt = 0; attempt < 2; attempt++) {
       const nonce = crypto.randomUUID();
       remarksForLark = larkRemarksForAdditionalAttempt(
-        remarks,
+        filedRemarks,
         attempt,
         nonce,
       );
@@ -370,7 +377,7 @@ export async function POST(
         project,
         supplier,
         remarks: remarksForLark,
-        planRows,
+        planRows: effectivePlanRows,
         planRemarks,
         attachmentCodes,
         attachmentExt: formatLarkAttachmentExt([

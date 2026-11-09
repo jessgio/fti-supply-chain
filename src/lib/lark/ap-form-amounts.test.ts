@@ -3,8 +3,10 @@ import test from "node:test";
 import type { PurchaseOrder, PurchaseOrderLine } from "@/types/database";
 import {
   AP_FORM_WIDGETS,
+  appendPoLineItems,
   buildApFormControls,
   buildPaymentPlanRows,
+  defaultApRemarks,
   omitPaymentPlanRow,
   DEFAULT_AP_BRAND,
   DEFAULT_AP_EXPENSE_CATEGORY,
@@ -186,6 +188,66 @@ test("remaining installments that share a due date are distinct Lark dates", () 
   assert.equal(new Set(dates).size, dates.length);
   assert.ok(dates.every((date) => date?.startsWith("2026-11-01T00:00:")));
   assert.notEqual(dates[0], dates[1]);
+});
+
+test("a received PO still describes each SKU and ordered quantity", () => {
+  const po = {
+    id: "po",
+    po_number: "PO-IN",
+    supplier_id: null,
+    status: "received",
+    order_date: "2026-10-01",
+    expected_date: "2026-11-01",
+    down_payment_pct: 30,
+    discount_amount: 0,
+    tax_pct: 0,
+    pph_pct: 0,
+    other_charges: 0,
+    currency: "IDR",
+    notes: "Pay on copy of invoice",
+    pd_project_id: null,
+    lines: [
+      {
+        id: "named",
+        po_id: "po",
+        sku_id: "sku-1",
+        sku_code: "FCR-SERUM",
+        sku_name: "Serum",
+        qty_ordered: 5000,
+        qty_received: 5000,
+        is_closed: true,
+        unit_cost: 10,
+      },
+      {
+        id: "code-only",
+        po_id: "po",
+        sku_id: "sku-2",
+        sku_code: "FCR-JAR",
+        sku_name: null,
+        qty_ordered: 1000,
+        qty_received: 1000,
+        is_closed: true,
+        unit_cost: 2,
+      },
+    ],
+    payments: [],
+  } as PurchaseOrder;
+
+  const rows = buildPaymentPlanRows(po, "both");
+  for (const row of rows) {
+    assert.match(row.remarks, /Serum \(FCR-SERUM, 5,000 pcs\)/);
+    assert.match(row.remarks, /FCR-JAR \(1,000 pcs\)/);
+    assert.doesNotMatch(row.remarks, /\(0 pcs\)/);
+  }
+
+  const remarks = defaultApRemarks(po);
+  assert.match(remarks, /Serum \(FCR-SERUM, 5,000 pcs\)/);
+  assert.match(remarks, /FCR-JAR \(1,000 pcs\)/);
+  assert.match(remarks, /Pay on copy of invoice/);
+
+  const filed = appendPoLineItems("Balance only", po, " - ");
+  assert.match(filed, /Balance only - Serum \(FCR-SERUM, 5,000 pcs\), FCR-JAR \(1,000 pcs\)/);
+  assert.equal(appendPoLineItems(filed, po, " - "), filed);
 });
 
 test("an existing AP form still suggests a scope for the next one", () => {

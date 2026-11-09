@@ -18,7 +18,10 @@ import {
   type ApExpenseCategoryValue,
   type PaymentPlanRow,
 } from "@/lib/lark/ap-form";
-import { isShipmentApInvoiceKind } from "@/lib/lark/shipment-ap";
+import {
+  appendShipmentGoods,
+  isShipmentApInvoiceKind,
+} from "@/lib/lark/shipment-ap";
 import { sumPlanRowAmounts } from "@/lib/procurement/committed-payment-amounts";
 import {
   createApprovalInstance,
@@ -286,6 +289,12 @@ export async function POST(
       }
     }
 
+    const filedRemarks = appendShipmentGoods(remarks, shipment);
+    const filedPlanRows = planRows.map((row) => ({
+      ...row,
+      remarks: appendShipmentGoods(row.remarks, shipment, " - "),
+    }));
+
     const formControls = buildApFormControls({
       expenseCategory,
       brand,
@@ -293,14 +302,14 @@ export async function POST(
       ownerOpenId: submitterOpenId,
       project,
       supplier,
-      remarks,
-      planRows,
+      remarks: filedRemarks,
+      planRows: filedPlanRows,
       attachmentCodes,
     });
 
-    const submittedAmount = sumPlanRowAmounts(planRows);
-    const submittedCurrency = planRows[0]?.currency ?? "IDR";
-    const planRowsSnapshot = planRows.map((row) => ({
+    const submittedAmount = sumPlanRowAmounts(filedPlanRows);
+    const submittedCurrency = filedPlanRows[0]?.currency ?? "IDR";
+    const planRowsSnapshot = filedPlanRows.map((row) => ({
       dateYmd: row.dateYmd,
       amount: row.amount,
       currency: row.currency,

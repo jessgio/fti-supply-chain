@@ -166,25 +166,28 @@ function mapShipmentRow(row: ShipmentRow): Shipment {
   >();
 
   for (const link of row.shipment_purchase_orders ?? []) {
-    const po = link.purchase_orders;
+    const po = unwrapRelation(link.purchase_orders);
     if (!po) continue;
+    const supplier = unwrapRelation(po.suppliers);
     poMap.set(po.id, {
       id: po.id,
       po_number: po.po_number,
-      supplier_name: po.suppliers?.name ?? null,
+      supplier_name: supplier?.name ?? null,
       items: [],
     });
   }
 
   for (const item of row.shipment_items ?? []) {
-    const line = item.purchase_order_lines;
+    const line = unwrapRelation(item.purchase_order_lines);
     if (!line) continue;
+    const sku = unwrapRelation(line.skus);
+    const linePo = unwrapRelation(line.purchase_orders);
     const poId = line.po_id;
     let po = poMap.get(poId);
     if (!po) {
       po = {
         id: poId,
-        po_number: line.purchase_orders?.po_number ?? "",
+        po_number: linePo?.po_number ?? "",
         supplier_name: null,
         items: [],
       };
@@ -196,8 +199,8 @@ function mapShipmentRow(row: ShipmentRow): Shipment {
       po_id: poId,
       po_number: po.po_number,
       sku_id: line.sku_id,
-      sku_code: line.skus?.sku_code ?? "",
-      sku_name: line.skus?.name ?? null,
+      sku_code: sku?.sku_code ?? "",
+      sku_name: sku?.name ?? null,
       quantity: Number(item.quantity),
       qty_ordered: Number(line.qty_ordered),
     });

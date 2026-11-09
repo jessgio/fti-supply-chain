@@ -21,7 +21,10 @@ import {
   formatLarkApprovalStatus,
   larkApprovalStatusBadgeClass,
 } from "@/lib/lark/ap-form";
-import { shipmentPaymentParts } from "@/lib/lark/shipment-ap";
+import {
+  formatShipmentGoodsDescription,
+  shipmentPaymentParts,
+} from "@/lib/lark/shipment-ap";
 import { formatPoMoney } from "@/lib/procurement/currencies";
 import { formatDisplayDate } from "@/lib/shipments/shipment-dates";
 import {
@@ -204,7 +207,7 @@ export default function ShipmentPaymentsPage() {
                 </thead>
                 <tbody>
                   {filtered.map((row) => {
-                    const { poNumbers, productNames, qty } = shipmentPaymentParts(
+                    const { poNumbers, productNames } = shipmentPaymentParts(
                       row.shipment,
                     );
                     return (
@@ -256,8 +259,10 @@ export default function ShipmentPaymentsPage() {
                             ))}
                           </div>
                           <p className="mt-1 text-xs text-stone-500">
-                            {productNames.join(", ") || poNumbers.join(", ") || "—"}
-                            {qty > 0 ? ` · qty ${qty.toLocaleString("en-US")}` : ""}
+                            {formatShipmentGoodsDescription(row.shipment) ||
+                              productNames.join(", ") ||
+                              poNumbers.join(", ") ||
+                              "—"}
                           </p>
                         </td>
                         <td className="py-3 pr-4 text-stone-600">

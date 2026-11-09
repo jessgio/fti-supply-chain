@@ -17,8 +17,8 @@ import { ShipmentApRequestForm } from "@/components/lark/shipment-ap-request-for
 import { PoHoverLink } from "@/components/procurement/po-hover-link";
 import {
   SHIPMENT_AP_INVOICE_LABELS,
+  formatShipmentGoodsDescription,
   formatShipmentPaymentRemarks,
-  shipmentPaymentParts,
   shipmentPoLabel,
 } from "@/lib/lark/shipment-ap";
 import type { ShipmentApContext } from "@/lib/db/shipment-lark";
@@ -27,7 +27,6 @@ import {
   SHIPMENT_STATUS_STYLES,
   type ShipmentStatus,
 } from "@/lib/shipments/constants";
-import { formatNumber } from "@/lib/utils";
 import type { Supplier } from "@/types/database";
 
 type ApPayload = ShipmentApContext & { suppliers: Supplier[] };
@@ -86,7 +85,7 @@ export default function ShipmentPaymentDetailPage() {
   }
 
   const { shipment, project, submissions, suppliers } = data;
-  const { productNames, qty } = shipmentPaymentParts(shipment);
+  const goodsDescription = formatShipmentGoodsDescription(shipment);
   const poLabel = shipmentPoLabel(shipment);
   const taxRemarks = formatShipmentPaymentRemarks(shipment, "tax");
   const shippingRemarks = formatShipmentPaymentRemarks(shipment, "shipping");
@@ -118,8 +117,7 @@ export default function ShipmentPaymentDetailPage() {
             </Badge>
           </div>
           <p className="mt-1 text-sm text-stone-500">
-            {productNames.join(", ") || "Shipment"}
-            {qty > 0 ? ` · ${formatNumber(qty)} pcs` : ""}
+            {goodsDescription || "Shipment"}
           </p>
           <p className="mt-2 text-sm text-stone-600">
             {(shipment.purchase_orders ?? []).map((po, index) => (
@@ -159,6 +157,7 @@ export default function ShipmentPaymentDetailPage() {
               project={project}
               suppliers={suppliers}
               poLabel={poLabel}
+              goodsDescription={goodsDescription}
               submissions={taxSubs}
               onSubmitted={() => void load()}
             />
@@ -181,6 +180,7 @@ export default function ShipmentPaymentDetailPage() {
               project={project}
               suppliers={suppliers}
               poLabel={poLabel}
+              goodsDescription={goodsDescription}
               submissions={shippingSubs}
               onSubmitted={() => void load()}
             />

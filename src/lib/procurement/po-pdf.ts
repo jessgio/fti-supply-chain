@@ -19,6 +19,11 @@ export interface PoPdfData {
   supplier: Supplier | null;
   company: CompanySettings;
   logo?: Buffer | null;
+  /**
+   * Write each line's SKU and ordered quantity into the product description.
+   * Used on the AP Form attachment so inbound billing cannot drop them.
+   */
+  describeOrderedLines?: boolean;
 }
 
 function formatCurrency(value: number, currency: string): string {
@@ -94,7 +99,7 @@ function contactBlock(
 }
 
 export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
-  const { po, supplier, company, logo } = data;
+  const { po, supplier, company, logo, describeOrderedLines } = data;
   const totals = computePoInvoiceTotals(po);
   const paymentSchedule = resolvePaymentSchedule(po);
   const currency = po.currency ?? "IDR";
@@ -209,9 +214,25 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
 
     for (const line of po.lines ?? []) {
       const billedQty = billableLineQty(line, po);
+      const orderedQty = Number(line.qty_ordered) || 0;
       const total = lineTotal(billedQty, line.unit_cost);
       const productLabel = resolveProductLineLabel(line);
       const showInternalSku = showSkuCodeSubline(line);
+      const detailParts: string[] = [];
+      if (describeOrderedLines) {
+        if (showInternalSku && line.sku_code?.trim()) {
+          detailParts.push(line.sku_code.trim());
+        }
+        detailParts.push(`${formatNumber(orderedQty)} pcs`);
+      } else if (showInternalSku && line.sku_code?.trim()) {
+        detailParts.push(line.sku_code.trim());
+        if (orderedQty !== billedQty) {
+          detailParts.push(`Ordered ${formatNumber(orderedQty)}`);
+        }
+      } else if (orderedQty !== billedQty) {
+        detailParts.push(`Ordered ${formatNumber(orderedQty)}`);
+      }
+      const detail = detailParts.join(" · ");
 
       const productWidth = colSku - 8;
       const paddingTop = 6;
@@ -222,15 +243,15 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
         width: productWidth,
         fontSize: 9,
       });
-      const skuHeight = showInternalSku
-        ? measureTextHeight(doc, line.sku_code!, { width: productWidth, fontSize: 8 })
+      const skuHeight = detail
+        ? measureTextHeight(doc, detail, { width: productWidth, fontSize: 8 })
         : 0;
 
       const rowHeight = Math.max(
         22,
         paddingTop +
           productHeight +
-          (showInternalSku ? skuGap + skuHeight : 0) +
+          (detail ? skuGap + skuHeight : 0) +
           paddingBottom,
       );
 
@@ -250,11 +271,11 @@ export function generatePoPdf(data: PoPdfData): Promise<Buffer> {
       doc.font("Helvetica").fontSize(9).fillColor("#111111");
       doc.text(productLabel, left + 8, productY, { width: productWidth });
 
-      if (showInternalSku) {
+      if (detail) {
         doc
           .fontSize(8)
           .fillColor("#78716c")
-          .text(line.sku_code!, left + 8, productY + productHeight + skuGap, {
+          .text(detail, left + 8, productY + productHeight + skuGap, {
             width: productWidth,
           });
         doc.fontSize(9).fillColor("#111111");

@@ -283,24 +283,66 @@ export function defaultApSupplier(
 }
 
 export function defaultApRemarks(po: PurchaseOrder): string {
-  return [po.po_number ? `PO ${po.po_number}` : null, po.notes?.trim() || null]
+  return [
+    po.po_number ? `PO ${po.po_number}` : null,
+    formatPoLineItemsForRemarks(po) || null,
+    po.notes?.trim() || null,
+  ]
     .filter(Boolean)
     .join("\n");
 }
 
-/** Product lines for payment-plan remarks: "Name (5,000 pcs), Other (1,000 pcs)". */
-function formatPoLineItemsForRemarks(po: PurchaseOrder): string {
+/**
+ * One purchased line: "Serum (FCR-SERUM, 5,000 pcs)".
+ * Ordered quantity is used on purpose. A shipped or inbounded PO still
+ * describes what was bought; received and open quantities are not substituted.
+ */
+export function formatSkuQuantityLabel(input: {
+  skuCode?: string | null;
+  skuName?: string | null;
+  quantity?: number | null;
+}): string | null {
+  const code = input.skuCode?.trim() || "";
+  const name = input.skuName?.trim() || "";
+  const title = name || code;
+  const qty = Number(input.quantity);
+  const hasQty = Number.isFinite(qty);
+  const qtyText = hasQty
+    ? new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(qty)
+    : "";
+  if (!title) {
+    if (!hasQty || qty === 0) return null;
+    return `${qtyText} pcs`;
+  }
+  const skuNote = code && name && code !== name ? `${code}, ` : "";
+  return qtyText ? `${title} (${skuNote}${qtyText} pcs)` : title;
+}
+
+/** Product lines for AP remarks: "Serum (FCR-SERUM, 5,000 pcs), Other (1,000 pcs)". */
+export function formatPoLineItemsForRemarks(po: PurchaseOrder): string {
   const parts = (po.lines ?? [])
-    .map((line) => {
-      const name = line.sku_name?.trim();
-      if (!name) return null;
-      const qty = new Intl.NumberFormat("en-US", {
-        maximumFractionDigits: 0,
-      }).format(Number(line.qty_ordered) || 0);
-      return `${name} (${qty} pcs)`;
-    })
-    .filter((p): p is string => !!p);
+    .map((line) =>
+      formatSkuQuantityLabel({
+        skuCode: line.sku_code,
+        skuName: line.sku_name,
+        quantity: line.qty_ordered,
+      }),
+    )
+    .filter((part): part is string => !!part);
   return parts.join(", ");
+}
+
+/** Keep SKU and ordered quantity on an AP field even if the prefill omitted them. */
+export function appendPoLineItems(
+  text: string,
+  po: PurchaseOrder,
+  separator = "\n",
+): string {
+  const items = formatPoLineItemsForRemarks(po);
+  const base = text.trim();
+  if (!items) return base;
+  if (base.includes(items)) return base;
+  return base ? `${base}${separator}${items}` : items;
 }
 
 function buildPaymentPlanRemark(label: string, po: PurchaseOrder): string {

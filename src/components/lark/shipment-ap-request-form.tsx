@@ -101,6 +101,8 @@ type Props = {
   project: string;
   suppliers: Supplier[];
   poLabel: string;
+  /** SKU and quantity text. Kept on tax payment lines after the PO is inbounded. */
+  goodsDescription?: string;
   submissions: ShipmentLarkSubmission[];
   onSubmitted?: () => void;
 };
@@ -112,6 +114,7 @@ export function ShipmentApRequestForm({
   project: initialProject,
   suppliers,
   poLabel,
+  goodsDescription = "",
   submissions,
   onSubmitted,
 }: Props) {
@@ -146,7 +149,7 @@ export function ShipmentApRequestForm({
             currency: "IDR",
           }),
         ]
-      : defaultTaxApPaymentPlanRows(poLabel),
+      : defaultTaxApPaymentPlanRows(poLabel, goodsDescription),
   );
   const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(
     submissions[0]?.id ?? null,
