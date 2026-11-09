@@ -741,6 +741,11 @@ export interface PoPayment {
   currency: string;
   exchange_rate: number | null;
   purpose: string;
+  /**
+   * Tax withheld from the supplier and paid to the government, in `currency`.
+   * It is not a discount. Together with `amount` it settles the invoice.
+   */
+  tax_withholding?: number | null;
   created_at?: string;
   updated_at?: string;
 }

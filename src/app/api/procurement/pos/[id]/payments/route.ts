@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createPoPayment } from "@/lib/db/procurement";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
+import { readTaxWithholding } from "@/lib/procurement/money-input";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
@@ -59,6 +60,17 @@ export async function POST(
       );
     }
 
+    const taxWithholding = readTaxWithholding(body?.tax_withholding);
+    if (taxWithholding == null) {
+      return NextResponse.json(
+        {
+          error:
+            "Tax withholding must be zero or a positive amount, for example 2,000,000.",
+        },
+        { status: 400 },
+      );
+    }
+
     const supabase = createAdminClient();
     const purchaseOrder = await createPoPayment(supabase, id, {
       payment_date: body?.payment_date ?? undefined,
@@ -67,6 +79,7 @@ export async function POST(
       currency,
       exchange_rate: exchangeRate,
       purpose,
+      tax_withholding: taxWithholding,
     });
 
     return NextResponse.json({ purchaseOrder });

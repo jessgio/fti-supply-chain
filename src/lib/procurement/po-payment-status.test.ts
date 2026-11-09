@@ -17,7 +17,11 @@ function line(): PurchaseOrderLine {
   };
 }
 
-function payment(amount: number, purpose: string): PoPayment {
+function payment(
+  amount: number,
+  purpose: string,
+  taxWithholding = 0,
+): PoPayment {
   return {
     id: purpose,
     po_id: "po",
@@ -27,6 +31,7 @@ function payment(amount: number, purpose: string): PoPayment {
     currency: "IDR",
     exchange_rate: null,
     purpose,
+    tax_withholding: taxWithholding,
   };
 }
 
@@ -127,6 +132,59 @@ test("money above the invoice stays overpaid on the final payment", () => {
   assert.equal(summary.installments[1]?.paid, 90);
 });
 
+test("a supplier payment plus tax withholding settles the full invoice", () => {
+  const summary = computePoPaymentSummary(
+    po([payment(98_000_000, "Final payment", 2_000_000)], {
+      unitCost: 100_000_000,
+    }),
+  );
+
+  assert.equal(summary.expectedTotal, 100_000_000);
+  assert.equal(summary.paidToSupplier, 98_000_000);
+  assert.equal(summary.taxWithholding, 2_000_000);
+  assert.equal(summary.paidTotalPoCurrency, 100_000_000);
+  assert.equal(summary.overallStatus, "paid");
+  assert.equal(summary.downStatus, "paid");
+  assert.equal(summary.balanceStatus, "paid");
+  assert.equal(summary.totalIdr, 100_000_000);
+});
+
+test("tax withholding that does not make payments match the invoice is flagged", () => {
+  const short = computePoPaymentSummary(
+    po([payment(98_000_000, "Final payment", 1_000_000)], {
+      unitCost: 100_000_000,
+    }),
+  );
+  assert.equal(short.paidTotalPoCurrency, 99_000_000);
+  assert.equal(short.overallStatus, "underpaid");
+
+  const over = computePoPaymentSummary(
+    po([payment(98_000_000, "Final payment", 3_000_000)], {
+      unitCost: 100_000_000,
+    }),
+  );
+  assert.equal(over.paidTotalPoCurrency, 101_000_000);
+  assert.equal(over.overallStatus, "overpaid");
+});
+
+test("withholding on each installment still adds up to the invoice", () => {
+  const summary = computePoPaymentSummary(
+    po(
+      [
+        payment(29_400_000, "Down payment", 600_000),
+        payment(68_600_000, "Final payment", 1_400_000),
+      ],
+      { unitCost: 100_000_000 },
+    ),
+  );
+
+  assert.equal(summary.paidToSupplier, 98_000_000);
+  assert.equal(summary.taxWithholding, 2_000_000);
+  assert.equal(summary.overallStatus, "paid");
+  assert.equal(summary.installments[0]?.paid, 30_000_000);
+  assert.equal(summary.installments[1]?.paid, 70_000_000);
+});
+
 test("logged down and final payments keep their own amounts", () => {
   const summary = computePoPaymentSummary(
     po([payment(30, "Down payment"), payment(70, "Final payment")]),
@@ -172,6 +230,24 @@ test("a settled invoice is not held in ordered status for a missing down payment
   const today = new Date("2026-11-01T00:00:00");
 
   assert.equal(derivePoStatus(input, today), "in_production");
+  assert.equal(
+    derivePoStatus(
+      {
+        ...input,
+        payments: [
+          {
+            payment_date: "2026-10-02",
+            purpose: "Final payment",
+            amount: 98,
+            currency: "IDR",
+            tax_withholding: 2,
+          },
+        ],
+      },
+      today,
+    ),
+    "in_production",
+  );
   assert.equal(
     derivePoStatus(
       {
