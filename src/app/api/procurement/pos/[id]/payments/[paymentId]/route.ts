@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deletePoPayment, updatePoPayment } from "@/lib/db/procurement";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
+import { readTaxWithholding } from "@/lib/procurement/money-input";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 
@@ -22,6 +23,7 @@ export async function PATCH(
       currency?: string;
       exchange_rate?: number | null;
       purpose?: string;
+      tax_withholding?: number;
     } = {};
 
     if (body?.payment_date !== undefined) {
@@ -66,6 +68,19 @@ export async function PATCH(
         );
       }
       input.currency = currency;
+    }
+    if (body?.tax_withholding !== undefined) {
+      const taxWithholding = readTaxWithholding(body.tax_withholding);
+      if (taxWithholding == null) {
+        return NextResponse.json(
+          {
+            error:
+              "Tax withholding must be zero or a positive amount, for example 2,000,000.",
+          },
+          { status: 400 },
+        );
+      }
+      input.tax_withholding = taxWithholding;
     }
     if (body?.exchange_rate !== undefined) {
       input.exchange_rate =

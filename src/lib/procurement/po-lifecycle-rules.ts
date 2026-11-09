@@ -5,6 +5,7 @@ import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import {
   coverInstallmentsWhenInvoiceSettled,
   isDownPaymentPurpose,
+  paymentTaxWithholding,
   type PaymentFulfillmentStatus,
 } from "@/lib/procurement/po-payment-status";
 
@@ -22,6 +23,8 @@ export interface PoLifecyclePaymentRef {
   purpose: string;
   amount: number;
   currency?: string;
+  /** Tax withheld from this payment and paid to the government. */
+  tax_withholding?: number | null;
 }
 
 export interface PoLifecycleInput {
@@ -148,7 +151,11 @@ function sumLifecyclePaymentsInPoCurrency(
         (payment.currency ?? poCurrency) === poCurrency &&
         (!purposeMatcher || purposeMatcher(payment.purpose)),
     )
-    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    .reduce(
+      (sum, payment) =>
+        sum + Number(payment.amount) + paymentTaxWithholding(payment),
+      0,
+    );
 }
 
 function paymentSummary(input: PoLifecycleInput) {

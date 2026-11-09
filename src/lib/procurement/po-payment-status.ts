@@ -108,22 +108,69 @@ export function coverInstallmentsWhenInvoiceSettled<
   return withStatus(paid);
 }
 
+type SettlementPayment = Pick<PoPayment, "amount" | "currency" | "purpose"> & {
+  tax_withholding?: number | null;
+};
+
+/** Tax kept from the supplier and paid to the government. Missing means none. */
+export function paymentTaxWithholding(payment: {
+  tax_withholding?: number | null;
+}): number {
+  const value = Number(payment.tax_withholding ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+}
+
+/**
+ * Supplier payment plus tax withholding. Both settle the invoice:
+ * the supplier receives `amount`, and the withholding is paid to the government.
+ */
+export function paymentAppliedAmount(payment: {
+  amount: number;
+  tax_withholding?: number | null;
+}): number {
+  return preserveFractionalMoney(
+    Number(payment.amount) + paymentTaxWithholding(payment),
+  );
+}
+
 export function sumPaymentsInPoCurrency(
-  payments: PoPayment[],
+  payments: SettlementPayment[],
   poCurrency: string,
   purposeMatcher?: (purpose: string) => boolean,
+  options?: { includeWithholding?: boolean },
 ): number {
+  const includeWithholding = options?.includeWithholding !== false;
   return payments
     .filter(
       (payment) =>
         (payment.currency ?? poCurrency) === poCurrency &&
         (!purposeMatcher || purposeMatcher(payment.purpose)),
     )
-    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    .reduce(
+      (sum, payment) =>
+        sum +
+        (includeWithholding
+          ? paymentAppliedAmount(payment)
+          : Number(payment.amount)),
+      0,
+    );
 }
 
 export function paymentIdrAmount(payment: PoPayment): number | null {
   return paymentAmountIdrSync(payment);
+}
+
+/** IDR paid to the government for this payment's tax withholding. */
+export function paymentWithholdingIdr(payment: PoPayment): number {
+  const withholding = paymentTaxWithholding(payment);
+  if (withholding <= 0) return 0;
+  return (
+    paymentAmountIdrSync({
+      ...payment,
+      amount: withholding,
+    }) ?? 0
+  );
 }
 
 function laterInstallmentStatus(
@@ -139,7 +186,20 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
   const schedule = resolvePaymentSchedule(po);
   const payments = po.payments ?? [];
 
-  const paidTotalPoCurrency = sumPaymentsInPoCurrency(payments, poCurrency);
+  const paidToSupplier = sumPaymentsInPoCurrency(
+    payments,
+    poCurrency,
+    undefined,
+    { includeWithholding: false },
+  );
+  const taxWithholding = preserveFractionalMoney(
+    payments
+      .filter((payment) => (payment.currency ?? poCurrency) === poCurrency)
+      .reduce((sum, payment) => sum + paymentTaxWithholding(payment), 0),
+  );
+  const paidTotalPoCurrency = preserveFractionalMoney(
+    paidToSupplier + taxWithholding,
+  );
   const installments = coverInstallmentsWhenInvoiceSettled(
     schedule.terms.map((term, index) => ({
       label: term.label,
@@ -156,7 +216,8 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
   const paidBalance = installments.slice(1).reduce((sum, term) => sum + term.paid, 0);
 
   const totalIdr = payments.reduce(
-    (sum, payment) => sum + (paymentIdrAmount(payment) ?? 0),
+    (sum, payment) =>
+      sum + (paymentIdrAmount(payment) ?? 0) + paymentWithholdingIdr(payment),
     0,
   );
 
@@ -168,6 +229,11 @@ export function computePoPaymentSummary(po: PurchaseOrder) {
     paymentScheduleCommitted: schedule.isCommitted,
     paidDown,
     paidBalance,
+    /** Cash sent to the supplier, in the PO currency. */
+    paidToSupplier,
+    /** Tax withheld and paid to the government, in the PO currency. */
+    taxWithholding,
+    /** Supplier payments plus tax withholding. This is what settles the invoice. */
     paidTotalPoCurrency,
     totalIdr,
     installments,

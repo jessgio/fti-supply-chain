@@ -14,6 +14,8 @@ import { resolvePaymentSchedule } from "@/lib/procurement/committed-payment-amou
 import { purposeMatchesPaymentTerm } from "@/lib/procurement/payment-terms";
 import {
   coverInstallmentsWhenInvoiceSettled,
+  paymentAppliedAmount,
+  paymentTaxWithholding,
   poCurrencyTolerance,
 } from "@/lib/procurement/po-payment-status";
 import { listPurchaseOrders } from "@/lib/db/procurement";
@@ -234,6 +236,7 @@ type RawPayment = {
   exchange_rate: number | null;
   purpose: string;
   payment_date: string;
+  tax_withholding?: number | null;
 };
 
 function poCurrencyToleranceLocal(currency: string): number {
@@ -251,7 +254,7 @@ function sumPurposePaymentsInPoCurrency(
         purposeMatcher(payment.purpose) &&
         (payment.currency ?? DEFAULT_PO_CURRENCY) === poCurrency,
     )
-    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    .reduce((sum, payment) => sum + paymentAppliedAmount(payment), 0);
 }
 
 /** Prefer logged exchange rates from matching payments; fall back to PO order-date FX. */
@@ -325,7 +328,7 @@ export async function computePaymentDashboardSummary(
     supabase
       .from("po_payments")
       .select(
-        "id, po_id, payment_date, amount, currency, exchange_rate, purpose",
+        "id, po_id, payment_date, amount, currency, exchange_rate, purpose, tax_withholding",
       ),
   ]);
 
@@ -401,6 +404,7 @@ export async function computePaymentDashboardSummary(
           : Number(payment.exchange_rate),
       purpose: payment.purpose,
       payment_date: payment.payment_date,
+      tax_withholding: Number(payment.tax_withholding ?? 0),
     }));
     const schedule = resolvePaymentSchedule({
       ...po,
@@ -415,6 +419,13 @@ export async function computePaymentDashboardSummary(
     let paidTotalIdr = 0;
     for (const payment of poPayments) {
       paidTotalIdr += paymentAmountIdrWithRates(payment, fxRates);
+      const withheld = paymentTaxWithholding(payment);
+      if (withheld > 0) {
+        paidTotalIdr += paymentAmountIdrWithRates(
+          { ...payment, amount: withheld },
+          fxRates,
+        );
+      }
     }
 
     const remaining = Math.max(0, invoiceIdr - paidTotalIdr);
@@ -430,7 +441,7 @@ export async function computePaymentDashboardSummary(
     );
     const paidTotalPoCurrency = poPayments
       .filter((payment) => (payment.currency ?? poCurrency) === poCurrency)
-      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+      .reduce((sum, payment) => sum + paymentAppliedAmount(payment), 0);
     const settled = coverInstallmentsWhenInvoiceSettled(
       schedule.terms.map((term, index) => ({
         expected: term.amount,

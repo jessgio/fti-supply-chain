@@ -36,6 +36,7 @@ function buildTimelineLifecycleInput(
     purpose: string;
     amount: number;
     currency?: string;
+    tax_withholding?: number | null;
   }>,
   shipments: Array<{
     estimated_departure_date: string;
@@ -689,7 +690,7 @@ export async function listOngoingPosForTimeline(
         unit_cost,
         skus!sku_id ( sku_code, name )
       ),
-      po_payments ( payment_date, purpose, amount, currency ),
+      po_payments ( payment_date, purpose, amount, currency, tax_withholding ),
       shipment_purchase_orders (
         shipments (
           id,
@@ -726,12 +727,14 @@ export async function listOngoingPosForTimeline(
       purpose: string;
       amount: number;
       currency: string;
+      tax_withholding?: number | null;
     }>;
     const payments = rawPayments.map((p) => ({
       payment_date: p.payment_date,
       purpose: p.purpose,
       amount: Number(p.amount),
       currency: p.currency,
+      tax_withholding: Number(p.tax_withholding ?? 0),
     }));
 
     const shipmentLinks = (po.shipment_purchase_orders ?? []) as unknown as Array<{
@@ -832,7 +835,7 @@ const PO_TIMELINE_SELECT = `
     unit_cost,
     skus!sku_id ( sku_code, name )
   ),
-  po_payments ( payment_date, purpose, amount, currency ),
+  po_payments ( payment_date, purpose, amount, currency, tax_withholding ),
   shipment_purchase_orders (
     shipments (
       id,
@@ -865,12 +868,14 @@ function mapPoTimelineRow(po: Record<string, unknown>): PoTimelineEntry {
     purpose: string;
     amount: number;
     currency: string;
+    tax_withholding?: number | null;
   }>;
   const payments = rawPayments.map((p) => ({
     payment_date: p.payment_date,
     purpose: p.purpose,
     amount: Number(p.amount),
     currency: p.currency,
+    tax_withholding: Number(p.tax_withholding ?? 0),
   }));
 
   const shipmentLinks = (po.shipment_purchase_orders ?? []) as unknown as Array<{

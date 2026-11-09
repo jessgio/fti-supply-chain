@@ -12,14 +12,22 @@ import {
   formatPoMoney,
   PO_CURRENCIES,
 } from "@/lib/procurement/currencies";
+import {
+  formatMoneyInput,
+  parseMoneyInput,
+} from "@/lib/procurement/money-input";
 import { PO_PAYMENT_PURPOSES } from "@/lib/procurement/po-payment-purposes";
 import { paymentPurposeChoices } from "@/lib/procurement/payment-terms";
 import {
   computePoPaymentSummary,
   PAYMENT_STATUS_LABELS,
   PAYMENT_STATUS_STYLES,
+  paymentFulfillmentStatus,
   paymentIdrAmount,
+  paymentTaxWithholding,
+  paymentWithholdingIdr,
   previewPaymentIdr,
+  type PaymentFulfillmentStatus,
 } from "@/lib/procurement/po-payment-status";
 import type { PoPayment, PurchaseOrder } from "@/types/database";
 import { StatusUpdateNotesLink } from "@/components/status-updates/status-update-notes-link";
@@ -28,11 +36,79 @@ import { useStatusUpdateCounts } from "@/lib/hooks/use-status-update-counts";
 interface PaymentFormState {
   paymentDate: string;
   amount: string;
+  taxWithholding: string;
   paymentRequestNumber: string;
   currency: string;
   exchangeRate: string;
   purpose: string;
   customPurpose: string;
+}
+
+function settlementFlag(input: {
+  supplier: number;
+  withholding: number;
+  expected: number;
+  currency: string;
+}): { status: PaymentFulfillmentStatus; text: string } | null {
+  if (!(input.withholding > 0)) return null;
+  const applied = input.supplier + input.withholding;
+  const status = paymentFulfillmentStatus(
+    input.expected,
+    applied,
+    input.currency,
+  );
+  const supplier = formatPoMoney(input.supplier, input.currency);
+  const withholding = formatPoMoney(input.withholding, input.currency);
+  const expected = formatPoMoney(input.expected, input.currency);
+  if (status === "paid") {
+    return {
+      status,
+      text: `Logged payments of ${supplier} plus tax withholding of ${withholding} match the invoice total of ${expected}. The withholding is paid to the government, and the invoice is fully paid.`,
+    };
+  }
+  const appliedLabel = formatPoMoney(applied, input.currency);
+  const direction = status === "underpaid" ? "short of" : "above";
+  return {
+    status,
+    text: `Logged payments of ${supplier} plus tax withholding of ${withholding} equal ${appliedLabel}, which is ${direction} the invoice total of ${expected}.`,
+  };
+}
+
+function projectSettlement(input: {
+  withholdingAmount: number | null;
+  amount: string;
+  currency: string;
+  poCurrency: string;
+  expectedTotal: number;
+  editingId: string | null;
+  payments: PoPayment[];
+}): { status: PaymentFulfillmentStatus; text: string } | null {
+  if (input.withholdingAmount == null || input.withholdingAmount <= 0) return null;
+  if (input.currency !== input.poCurrency) return null;
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const others = input.payments.filter(
+    (payment) =>
+      payment.id !== input.editingId &&
+      (payment.currency ?? input.poCurrency) === input.poCurrency,
+  );
+  const supplier =
+    others.reduce((sum, payment) => sum + Number(payment.amount), 0) + amount;
+  const withholding =
+    others.reduce((sum, payment) => sum + paymentTaxWithholding(payment), 0) +
+    input.withholdingAmount;
+  return settlementFlag({
+    supplier,
+    withholding,
+    expected: input.expectedTotal,
+    currency: input.poCurrency,
+  });
+}
+
+function settlementFlagClass(status: PaymentFulfillmentStatus): string {
+  if (status === "paid") return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  if (status === "overpaid") return "border-rose-200 bg-rose-50 text-rose-900";
+  return "border-amber-200 bg-amber-50 text-amber-950";
 }
 
 function emptyPaymentForm(
@@ -42,6 +118,7 @@ function emptyPaymentForm(
   return {
     paymentDate: new Date().toISOString().slice(0, 10),
     amount: "",
+    taxWithholding: "",
     paymentRequestNumber: "",
     currency: poCurrency,
     exchangeRate: "",
@@ -58,6 +135,7 @@ function paymentFormFromRecord(
   return {
     paymentDate: payment.payment_date,
     amount: String(payment.amount),
+    taxWithholding: formatMoneyInput(paymentTaxWithholding(payment)),
     paymentRequestNumber: payment.payment_request_number,
     currency: payment.currency,
     exchangeRate:
@@ -119,6 +197,28 @@ export function PoPaymentsSection({
     form.currency,
     form.exchangeRate,
   );
+  const withholdingAmount = parseMoneyInput(form.taxWithholding);
+  const withholdingInvalid =
+    form.taxWithholding.trim() !== "" && withholdingAmount == null;
+  const withholdingIdrPreview =
+    withholdingAmount != null && withholdingAmount > 0
+      ? previewPaymentIdr(withholdingAmount, form.currency, form.exchangeRate)
+      : null;
+  const draftSettlement = projectSettlement({
+    withholdingAmount,
+    amount: form.amount,
+    currency: form.currency,
+    poCurrency: summary.poCurrency,
+    expectedTotal: summary.expectedTotal,
+    editingId,
+    payments,
+  });
+  const savedSettlement = settlementFlag({
+    supplier: summary.paidToSupplier,
+    withholding: summary.taxWithholding,
+    expected: summary.expectedTotal,
+    currency: summary.poCurrency,
+  });
 
   function openAddForm() {
     setEditingId(null);
@@ -150,9 +250,14 @@ export function PoPaymentsSection({
 
   async function savePayment() {
     const amount = Number(form.amount);
+    const taxWithholding = parseMoneyInput(form.taxWithholding);
     const purpose = resolvePurpose(form.purpose, form.customPurpose);
     if (!Number.isFinite(amount) || amount <= 0) {
       setError("Enter a positive payment amount.");
+      return;
+    }
+    if (taxWithholding == null) {
+      setError("Enter the tax withholding as an amount, for example 2,000,000.");
       return;
     }
     if (!form.paymentRequestNumber.trim()) {
@@ -184,6 +289,7 @@ export function PoPaymentsSection({
         exchange_rate:
           form.currency === "IDR" ? null : Number(form.exchangeRate),
         purpose,
+        tax_withholding: taxWithholding,
       };
 
       const url = editingId
@@ -273,8 +379,21 @@ export function PoPaymentsSection({
           >
             {PAYMENT_STATUS_LABELS[summary.overallStatus]}
           </Badge>
+          {summary.taxWithholding > 0 && (
+            <p className="mt-1 text-xs text-stone-500">
+              Includes {fmt(summary.taxWithholding)} tax withholding
+            </p>
+          )}
         </div>
       </div>
+
+      {!formOpen && savedSettlement && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${settlementFlagClass(savedSettlement.status)}`}
+        >
+          {savedSettlement.text}
+        </div>
+      )}
 
       {payments.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-stone-200">
@@ -285,6 +404,7 @@ export function PoPaymentsSection({
                 <th className="px-3 py-2">Request #</th>
                 <th className="px-3 py-2">Purpose</th>
                 <th className="px-3 py-2 text-right">Amount</th>
+                <th className="px-3 py-2 text-right">Withholding</th>
                 <th className="px-3 py-2 text-right">Rate</th>
                 <th className="px-3 py-2 text-right">IDR</th>
                 <th className="px-3 py-2" />
@@ -308,13 +428,26 @@ export function PoPaymentsSection({
                   <td className="px-3 py-2 text-right font-medium text-stone-900">
                     {formatPoMoney(payment.amount, payment.currency)}
                   </td>
+                  <td className="px-3 py-2 text-right text-stone-700">
+                    {paymentTaxWithholding(payment) > 0
+                      ? formatPoMoney(
+                          paymentTaxWithholding(payment),
+                          payment.currency,
+                        )
+                      : "—"}
+                  </td>
                   <td className="px-3 py-2 text-right text-stone-600">
                     {payment.currency !== "IDR" && payment.exchange_rate != null
                       ? formatNumber(payment.exchange_rate)
                       : "—"}
                   </td>
                   <td className="px-3 py-2 text-right font-medium text-stone-900">
-                    {fmtIdr(paymentIdrAmount(payment))}
+                    {fmtIdr(
+                      paymentIdrAmount(payment) == null
+                        ? null
+                        : (paymentIdrAmount(payment) ?? 0) +
+                            paymentWithholdingIdr(payment),
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">
@@ -347,14 +480,43 @@ export function PoPaymentsSection({
       )}
 
       <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
-        <div className="flex justify-between gap-2">
-          <span className="text-stone-600">
-            Total paid ({summary.poCurrency}) — for PO status
-          </span>
-          <span className="font-medium text-stone-900">
-            {fmt(summary.paidTotalPoCurrency)}
-          </span>
-        </div>
+        {summary.taxWithholding > 0 ? (
+          <>
+            <div className="flex justify-between gap-2">
+              <span className="text-stone-600">
+                Paid to supplier ({summary.poCurrency})
+              </span>
+              <span className="font-medium text-stone-900">
+                {fmt(summary.paidToSupplier)}
+              </span>
+            </div>
+            <div className="mt-1 flex justify-between gap-2">
+              <span className="text-stone-600">
+                Tax withholding ({summary.poCurrency}) — paid to the government
+              </span>
+              <span className="font-medium text-stone-900">
+                {fmt(summary.taxWithholding)}
+              </span>
+            </div>
+            <div className="mt-1 flex justify-between gap-2 border-t border-stone-200 pt-1">
+              <span className="text-stone-600">
+                Applied to invoice ({summary.poCurrency})
+              </span>
+              <span className="font-medium text-stone-900">
+                {fmt(summary.paidTotalPoCurrency)}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-between gap-2">
+            <span className="text-stone-600">
+              Total paid ({summary.poCurrency}) — for PO status
+            </span>
+            <span className="font-medium text-stone-900">
+              {fmt(summary.paidTotalPoCurrency)}
+            </span>
+          </div>
+        )}
         <div className="mt-1 flex justify-between gap-2 border-t border-stone-200 pt-1">
           <span className="text-stone-600">Total spent (IDR) — internal</span>
           <span className="font-semibold text-stone-900">
@@ -390,6 +552,33 @@ export function PoPaymentsSection({
                   setForm((prev) => ({ ...prev, amount: e.target.value }))
                 }
               />
+            </label>
+            <label className="block text-sm sm:col-span-2">
+              <span className="mb-1 block text-stone-600">Tax withholding</span>
+              <Input
+                inputMode="decimal"
+                autoComplete="off"
+                value={form.taxWithholding}
+                placeholder="2,000,000"
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    taxWithholding: e.target.value,
+                  }))
+                }
+              />
+              <span className="mt-1 block text-xs text-stone-500">
+                Optional. Withheld from the supplier and paid to the government.
+                The supplier receives the payment amount. Type 2,000,000 for two
+                million. Logged payments plus this withholding are compared with
+                the invoice total. Leave it blank when that total already has
+                PPh deducted.
+              </span>
+              {withholdingInvalid && (
+                <span className="mt-1 block text-xs text-rose-700">
+                  Enter an amount such as 2,000,000.
+                </span>
+              )}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-stone-600">Payment request #</span>
@@ -478,11 +667,36 @@ export function PoPaymentsSection({
               <span className="font-semibold text-stone-900">
                 {formatPoMoney(formIdrPreview, "IDR")}
               </span>
+              {withholdingIdrPreview != null && (
+                <>
+                  . Tax withholding:{" "}
+                  <span className="font-semibold text-stone-900">
+                    {formatPoMoney(withholdingIdrPreview, "IDR")}
+                  </span>{" "}
+                  paid to the government
+                </>
+              )}
             </p>
           )}
+          {draftSettlement && (
+            <div
+              className={`mt-3 rounded-lg border px-3 py-2 text-sm ${settlementFlagClass(draftSettlement.status)}`}
+            >
+              {draftSettlement.text}
+            </div>
+          )}
+          {withholdingAmount != null &&
+            withholdingAmount > 0 &&
+            form.currency !== summary.poCurrency && (
+              <p className="mt-3 text-sm text-amber-800">
+                This withholding is in {form.currency}, so it is not compared
+                with the {summary.poCurrency} invoice total.
+              </p>
+            )}
           <p className="mt-2 text-xs text-stone-500">
             Underpaid / fully paid / overpaid on this PO is judged in{" "}
-            {summary.poCurrency}. IDR is recorded for internal spend tracking only.
+            {summary.poCurrency}. A tax withholding counts toward that total.
+            IDR is recorded for internal spend tracking only.
           </p>
           <div className="mt-4 flex gap-2">
             <Button size="sm" onClick={savePayment} disabled={busy}>

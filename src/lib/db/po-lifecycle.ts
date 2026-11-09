@@ -78,7 +78,8 @@ async function loadPoLifecycleInput(
         payment_date,
         purpose,
         amount,
-        currency
+        currency,
+        tax_withholding
       ),
       shipment_purchase_orders (
         shipments (
@@ -106,6 +107,7 @@ async function loadPoLifecycleInput(
     purpose: string;
     amount: number;
     currency: string;
+    tax_withholding?: number | null;
   }>;
 
   const shipmentLinks = (po.shipment_purchase_orders ?? []) as Array<{
@@ -165,6 +167,7 @@ async function loadPoLifecycleInput(
       purpose: payment.purpose,
       amount: Number(payment.amount),
       currency: payment.currency,
+      tax_withholding: Number(payment.tax_withholding ?? 0),
     })),
     shipments,
   };

@@ -85,6 +85,8 @@ export interface NewPoPaymentInput {
   currency?: string;
   exchange_rate?: number | null;
   purpose: string;
+  /** Tax withheld from the supplier and paid to the government. */
+  tax_withholding?: number;
 }
 
 export interface UpdatePoPaymentInput {
@@ -94,6 +96,8 @@ export interface UpdatePoPaymentInput {
   currency?: string;
   exchange_rate?: number | null;
   purpose?: string;
+  /** Tax withheld from the supplier and paid to the government. */
+  tax_withholding?: number;
 }
 
 export interface NewSupplierInput {
@@ -401,6 +405,7 @@ type PoRow = {
     currency: string;
     exchange_rate: number | null;
     purpose: string;
+    tax_withholding?: number | null;
     created_at: string;
     updated_at: string;
   }[];
@@ -474,6 +479,7 @@ function mapPoPayment(row: NonNullable<PoRow["po_payments"]>[number]): PoPayment
     exchange_rate:
       row.exchange_rate === null ? null : Number(row.exchange_rate),
     purpose: row.purpose,
+    tax_withholding: Number(row.tax_withholding ?? 0),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -601,10 +607,10 @@ const PO_DETAIL_SELECT =
   "suppliers(name), pd_projects(product_name, name), " +
   "purchase_order_lines(id, sku_id, original_sku_id, qty_ordered, qty_received, is_closed, unit_cost, skus!sku_id(sku_code, name, is_packaging), original_sku:skus!original_sku_id(sku_code, name), " +
   "po_receipts(id, qty_received, received_date, location, batch_code, expiry_date)), " +
-  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
+  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, tax_withholding, created_at, updated_at)";
 
 const PO_PAYMENTS_EMBED =
-  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, created_at, updated_at)";
+  "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, tax_withholding, created_at, updated_at)";
 
 const PO_PAYABLE_SELECT = PO_SELECT + ", " + PO_PAYMENTS_EMBED;
 
@@ -1138,11 +1144,18 @@ function validatePaymentInput(
     currency?: string;
     exchange_rate?: number | null;
     purpose?: string;
+    tax_withholding?: number;
   },
   resolvedCurrency?: string,
 ) {
   if (input.amount !== undefined && (!Number.isFinite(input.amount) || input.amount <= 0)) {
     throw new Error("Payment amount must be a positive number.");
+  }
+  if (
+    input.tax_withholding !== undefined &&
+    (!Number.isFinite(input.tax_withholding) || input.tax_withholding < 0)
+  ) {
+    throw new Error("Tax withholding must be zero or a positive number.");
   }
   if (input.payment_request_number !== undefined) {
     const trimmed = input.payment_request_number.trim();
@@ -1212,6 +1225,7 @@ export async function createPoPayment(
     throw new Error("Payment purpose is required.");
   }
 
+  const taxWithholding = input.tax_withholding ?? 0;
   const { error } = await supabase.from("po_payments").insert({
     po_id: poId,
     payment_date: input.payment_date ?? new Date().toISOString().slice(0, 10),
@@ -1220,6 +1234,7 @@ export async function createPoPayment(
     currency,
     exchange_rate: exchangeRate,
     purpose: input.purpose.trim(),
+    tax_withholding: taxWithholding,
   });
   if (error) throw error;
 
@@ -1228,7 +1243,7 @@ export async function createPoPayment(
     const committedPatch = buildCommittedPatchFromPayment(
       fullPo,
       input.purpose.trim(),
-      input.amount,
+      input.amount + taxWithholding,
       new Date().toISOString(),
       { replaceExisting: (priorPaymentCount ?? 0) === 0 },
     );
@@ -1289,6 +1304,8 @@ export async function updatePoPayment(
       currency,
       exchange_rate: exchangeRate,
       purpose: input.purpose ?? existing.purpose,
+      tax_withholding:
+        input.tax_withholding ?? Number(existing.tax_withholding ?? 0),
     },
     poMetaRes.data.currency ?? "IDR",
   );
@@ -1312,6 +1329,9 @@ export async function updatePoPayment(
   if (input.currency !== undefined) patch.currency = currency;
   if (input.currency !== undefined || input.exchange_rate !== undefined) {
     patch.exchange_rate = exchangeRate;
+  }
+  if (input.tax_withholding !== undefined) {
+    patch.tax_withholding = input.tax_withholding;
   }
 
   const { error } = await supabase
