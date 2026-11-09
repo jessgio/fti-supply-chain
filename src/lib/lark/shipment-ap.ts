@@ -1,4 +1,5 @@
 import {
+  formatSkuQuantityLabel,
   isApFormCurrency,
   localTodayYmd,
   type ApFormCurrency,
@@ -32,16 +33,16 @@ export const DEFAULT_TAX_AP_DUTY_LINES = [
   "412111 - Bea Masuk",
 ] as const;
 
-function formatQty(qty: number): string {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(
-    qty,
-  );
+function shipmentItems(shipment: Shipment) {
+  return (shipment.purchase_orders ?? []).flatMap((po) => po.items ?? []);
 }
 
 export function shipmentPaymentParts(shipment: Shipment): {
   poNumbers: string[];
   productNames: string[];
   qty: number;
+  /** Per-SKU ordered/shipped quantity. Stays after the PO is inbounded. */
+  goodsDescription: string;
 } {
   const poNumbers = [
     ...new Set(
@@ -50,7 +51,7 @@ export function shipmentPaymentParts(shipment: Shipment): {
         .filter((value): value is string => !!value),
     ),
   ];
-  const items = (shipment.purchase_orders ?? []).flatMap((po) => po.items ?? []);
+  const items = shipmentItems(shipment);
   const productNames = [
     ...new Set(
       items
@@ -59,7 +60,35 @@ export function shipmentPaymentParts(shipment: Shipment): {
     ),
   ];
   const qty = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-  return { poNumbers, productNames, qty };
+  const goodsDescription = items
+    .map((item) =>
+      formatSkuQuantityLabel({
+        skuCode: item.sku_code,
+        skuName: item.sku_name,
+        quantity: item.quantity,
+      }),
+    )
+    .filter((part): part is string => !!part)
+    .join(", ");
+  return { poNumbers, productNames, qty, goodsDescription };
+}
+
+/** SKU and shipped quantity for each line. Inbound does not remove these. */
+export function formatShipmentGoodsDescription(shipment: Shipment): string {
+  return shipmentPaymentParts(shipment).goodsDescription;
+}
+
+/** Keep the goods description on a shipment AP field when a prefill left it out. */
+export function appendShipmentGoods(
+  text: string,
+  shipment: Shipment,
+  separator = "\n",
+): string {
+  const items = formatShipmentGoodsDescription(shipment);
+  const base = text.trim();
+  if (!items) return base;
+  if (base.includes(items)) return base;
+  return base ? `${base}${separator}${items}` : items;
 }
 
 /** Remarks for shipment AP forms: payment plan rows and the general remarks field. */
@@ -67,15 +96,17 @@ export function formatShipmentPaymentRemarks(
   shipment: Shipment,
   invoiceKind: ShipmentApInvoiceKind = "shipping",
 ): string {
-  const { poNumbers, productNames, qty } = shipmentPaymentParts(shipment);
+  const { poNumbers, goodsDescription, qty } = shipmentPaymentParts(shipment);
   const poPart = poNumbers.join(", ") || shipment.shipment_number;
-  const products = productNames.join(", ");
   const kindLabel =
     invoiceKind === "tax" ? "PIB payment" : "Shipment payment";
-  if (products) {
-    return `${kindLabel} for ${poPart} - ${products} for ${formatQty(qty)}`;
+  if (goodsDescription) {
+    return `${kindLabel} for ${poPart} - ${goodsDescription}`;
   }
-  return `${kindLabel} for ${poPart} for ${formatQty(qty)}`;
+  const total = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(qty);
+  return `${kindLabel} for ${poPart} for ${total}`;
 }
 
 export function shipmentPoLabel(shipment: Shipment): string {
@@ -120,8 +151,11 @@ export function buildShipmentPaymentPlanRow(input: {
 
 export function defaultTaxApPaymentPlanRows(
   poLabel: string,
+  goodsDescription?: string | null,
 ): PaymentPlanRow[] {
-  const suffix = poLabel.trim();
+  const suffix = [poLabel.trim(), goodsDescription?.trim()]
+    .filter((part): part is string => !!part)
+    .join(" - ");
   return DEFAULT_TAX_AP_DUTY_LINES.map((line) =>
     buildShipmentPaymentPlanRow({
       remarks: suffix ? `${line}, ${suffix}` : line,

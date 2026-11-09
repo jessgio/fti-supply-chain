@@ -479,31 +479,40 @@ function mapPoPayment(row: NonNullable<PoRow["po_payments"]>[number]): PoPayment
   };
 }
 
+function embedded<T>(value: T | T[] | null | undefined): T | null {
+  if (value == null) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
 function mapPoRow(row: PoRow): PurchaseOrder {
   const lines: PurchaseOrderLine[] = (row.purchase_order_lines ?? []).map(
-    (l) => ({
-      id: l.id,
-      po_id: row.id,
-      sku_id: l.sku_id,
-      sku_code: l.skus?.sku_code,
-      sku_name: l.skus?.name ?? null,
-      original_sku_id: l.original_sku_id ?? null,
-      original_sku_code: l.original_sku?.sku_code ?? null,
-      original_sku_name: l.original_sku?.name ?? null,
-      qty_ordered: Number(l.qty_ordered),
-      qty_received: Number(l.qty_received),
-      is_closed: Boolean(l.is_closed),
-      unit_cost: l.unit_cost === null ? null : Number(l.unit_cost),
-      receipts: (l.po_receipts ?? []).map((r) => ({
-        id: r.id,
-        po_line_id: l.id,
-        qty_received: Number(r.qty_received),
-        received_date: r.received_date,
-        location: r.location,
-        batch_code: r.batch_code ?? null,
-        expiry_date: r.expiry_date ?? null,
-      })),
-    }),
+    (l) => {
+      const sku = embedded(l.skus);
+      const originalSku = embedded(l.original_sku);
+      return {
+        id: l.id,
+        po_id: row.id,
+        sku_id: l.sku_id,
+        sku_code: sku?.sku_code,
+        sku_name: sku?.name ?? null,
+        original_sku_id: l.original_sku_id ?? null,
+        original_sku_code: originalSku?.sku_code ?? null,
+        original_sku_name: originalSku?.name ?? null,
+        qty_ordered: Number(l.qty_ordered),
+        qty_received: Number(l.qty_received),
+        is_closed: Boolean(l.is_closed),
+        unit_cost: l.unit_cost === null ? null : Number(l.unit_cost),
+        receipts: (l.po_receipts ?? []).map((r) => ({
+          id: r.id,
+          po_line_id: l.id,
+          qty_received: Number(r.qty_received),
+          received_date: r.received_date,
+          location: r.location,
+          batch_code: r.batch_code ?? null,
+          expiry_date: r.expiry_date ?? null,
+        })),
+      };
+    },
   );
   // A missing key means payments were not queried. Null or [] means they
   // were queried and none exist — the invoice schedule must tell those apart.
@@ -523,7 +532,7 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     id: row.id,
     po_number: row.po_number,
     supplier_id: row.supplier_id,
-    supplier_name: row.suppliers?.name ?? null,
+    supplier_name: embedded(row.suppliers)?.name ?? null,
     status: row.status,
     order_date: row.order_date,
     expected_date: row.expected_date,
