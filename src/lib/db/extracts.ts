@@ -18,7 +18,10 @@ import {
   loadActionCodeMappings,
   loadManufacturerNamesByExtractId,
 } from "@/lib/db/extract-mappings";
-import { syncUnlinkedCatalogExtracts } from "@/lib/db/sync-extract-catalog";
+import {
+  syncExtractSkusMissingFromCatalog,
+  syncUnlinkedCatalogExtracts,
+} from "@/lib/db/sync-extract-catalog";
 import type {
   ExtractCategory,
   ExtractCategoryRule,
@@ -322,8 +325,11 @@ export async function listExtracts(
   supabase: SupabaseClient,
   params: ListExtractsParams = {},
 ): Promise<ExtractSummary[]> {
-  // Only link new catalog rows — skip re-syncing the full catalog on every list.
+  // Link new catalog rows, then add products that were marked Extract on
+  // Products but never written to the catalog. Historical ledger items are
+  // left alone.
   await syncUnlinkedCatalogExtracts(supabase);
+  await syncExtractSkusMissingFromCatalog(supabase);
 
   const [{ data: catalogCodes, error }, statsRes] = await Promise.all([
     supabase
