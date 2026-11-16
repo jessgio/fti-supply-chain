@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { upsertExtractByItemNo } from "@/lib/db/extract-mappings";
 import { ensureExtractSku } from "@/lib/db/skus";
+import {
+  extractSkuCatalogKey,
+  extractSkuNeedsCatalogRow,
+  type ExtractCatalogPresence,
+  type ExtractLedgerPresence,
+} from "@/lib/extracts/sku-catalog";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { fixUtf8Mojibake } from "@/lib/text/fix-mojibake";
 
 export interface CatalogCodeRow {
@@ -173,6 +180,86 @@ export async function syncExtractFromCatalogCode(
   await ensureExtractSku(supabase, itemNo, extract_name);
 
   return extractId;
+}
+
+function isUniqueViolation(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+/**
+ * Products marked Extract only set `skus.is_extract`. The Extracts list reads
+ * the catalog, so those products never appeared. Add a catalog row (and its
+ * ledger extract) for product extracts that are not already listed and are
+ * not historical ledger items.
+ */
+export async function syncExtractSkusMissingFromCatalog(
+  supabase: SupabaseClient,
+): Promise<void> {
+  const skus = await fetchAllRows<{ sku_code: string; name: string | null }>(
+    () =>
+      supabase
+        .from("skus")
+        .select("sku_code, name")
+        .eq("is_extract", true)
+        .order("sku_code"),
+  );
+  if (skus.length === 0) return;
+
+  const [codes, extracts] = await Promise.all([
+    fetchAllRows<ExtractCatalogPresence & { id: string }>(() =>
+      supabase
+        .from("extract_codes")
+        .select("id, item_code, extract_name, extract_id, is_active")
+        .order("item_code"),
+    ),
+    fetchAllRows<ExtractLedgerPresence>(() =>
+      supabase.from("extracts").select("id, item_no").order("item_no"),
+    ),
+  ]);
+
+  for (const sku of skus) {
+    if (!extractSkuNeedsCatalogRow(sku, codes, extracts)) continue;
+    const key = extractSkuCatalogKey(sku);
+    if (!key) continue;
+
+    const { data, error } = await supabase
+      .from("extract_codes")
+      .insert({
+        item_code: key.itemCode,
+        extract_name: key.extractName,
+        is_active: true,
+      })
+      .select("id, item_code, extract_name, extract_id")
+      .single();
+
+    let code = data as CatalogCodeRow | null;
+    if (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const { data: existing, error: reloadError } = await supabase
+        .from("extract_codes")
+        .select("id, item_code, extract_name, extract_id")
+        .eq("item_code", key.itemCode)
+        .eq("extract_name", key.extractName)
+        .maybeSingle();
+      if (reloadError) throw reloadError;
+      if (!existing) throw error;
+      code = existing as CatalogCodeRow;
+    }
+    if (!code) continue;
+
+    // Keep the ledger item number equal to the product SKU. Shared catalog
+    // codes are disambiguated for manufacturer uploads; a product extract is
+    // one SKU and should not spawn a second item number.
+    const extractId = await syncExtractFromCatalogCode(supabase, code, 1);
+    codes.push({
+      id: code.id,
+      item_code: key.itemCode,
+      extract_name: key.extractName,
+      extract_id: extractId,
+      is_active: true,
+    });
+    extracts.push({ id: extractId, item_no: key.itemCode });
+  }
 }
 
 /** Backfill ledger links for catalog rows that are not linked yet. */

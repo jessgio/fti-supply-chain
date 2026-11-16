@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCommercialWrite, requireWriteRole } from "@/lib/auth";
+import { syncExtractSkusMissingFromCatalog } from "@/lib/db/sync-extract-catalog";
 import { deleteSku, updateSku } from "@/lib/db/skus";
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -103,6 +104,10 @@ export async function PATCH(
 
     const supabase = createAdminClient();
     const sku = await updateSku(supabase, id, input);
+
+    if (sku.is_extract) {
+      await syncExtractSkusMissingFromCatalog(supabase);
+    }
 
     if (
       typeof input.is_active === "boolean" ||

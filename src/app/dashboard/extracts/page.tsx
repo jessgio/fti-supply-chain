@@ -179,7 +179,8 @@ export default function ExtractsPage() {
           <CardDescription>
             Search by item number or extract name. Click an extract for the
             full ledger, date-range balances, and category breakdown. The list
-            follows the Extract Catalog.
+            follows the Extract Catalog, including products marked as Extract
+            on the Products page.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

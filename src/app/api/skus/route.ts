@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireReadRole, requireWriteRole } from "@/lib/auth";
+import { syncExtractSkusMissingFromCatalog } from "@/lib/db/sync-extract-catalog";
 import { createSku, SkuAlreadyExistsError } from "@/lib/db/skus";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { errorMessage } from "@/lib/errors";
@@ -144,6 +145,10 @@ export async function POST(request: Request) {
       retail_price:
         body.retail_price != null ? Number(body.retail_price) : null,
     });
+
+    if (sku.is_extract) {
+      await syncExtractSkusMissingFromCatalog(supabase);
+    }
 
     return NextResponse.json({ ok: true, sku });
   } catch (error) {
