@@ -707,6 +707,23 @@ export interface PurchaseOrder {
   last_inbound_date?: string | null;
   lines?: PurchaseOrderLine[];
   payments?: PoPayment[];
+  /**
+   * Shipments linked to this PO. Present only when the list query embedded
+   * them. An empty array means the PO has no shipment yet.
+   */
+  shipments?: PoListShipment[];
+}
+
+/** Shipment dates loaded with a purchase order list row. */
+export interface PoListShipment {
+  id: string;
+  shipment_number: string;
+  shipment_type: ShipmentType;
+  status: ShipmentStatus;
+  estimated_departure_date: string;
+  expected_delivery_date: string;
+  transit_days: number;
+  delay_days: number;
 }
 
 export interface PoReceipt {
