@@ -714,6 +714,13 @@ export interface PurchaseOrder {
   shipments?: PoListShipment[];
 }
 
+/** Another purchase order on a shipment, used when production dates move together. */
+export interface PoListLinkedPurchaseOrder {
+  id: string;
+  expected_date: string | null;
+  status: PoStatus;
+}
+
 /** Shipment dates loaded with a purchase order list row. */
 export interface PoListShipment {
   id: string;
@@ -724,6 +731,11 @@ export interface PoListShipment {
   expected_delivery_date: string;
   transit_days: number;
   delay_days: number;
+  /**
+   * Purchase orders on this shipment. Present when the list query loaded
+   * them. Used to decide whether a shared shipment follows this PO's date.
+   */
+  linked_purchase_orders?: PoListLinkedPurchaseOrder[];
 }
 
 export interface PoReceipt {

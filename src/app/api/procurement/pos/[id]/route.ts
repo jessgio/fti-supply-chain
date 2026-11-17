@@ -9,6 +9,7 @@ import {
 import { invalidateForecastCache } from "@/lib/forecast/cache";
 import { isValidPoCurrency } from "@/lib/procurement/currencies";
 import { normalizePaymentTermsInput } from "@/lib/procurement/payment-terms";
+import { isIsoDate } from "@/lib/procurement/po-list-shipments";
 import { errorMessage } from "@/lib/errors";
 import { requireWriteRole } from "@/lib/auth";
 import type { PoStatus } from "@/types/database";
@@ -127,7 +128,18 @@ export async function PATCH(
       input.order_date = body.order_date ?? null;
     }
     if (body?.expected_date !== undefined) {
-      input.expected_date = body.expected_date ?? null;
+      if (body.expected_date === null || body.expected_date === "") {
+        input.expected_date = null;
+      } else {
+        const expectedDate = String(body.expected_date).slice(0, 10);
+        if (!isIsoDate(expectedDate)) {
+          return NextResponse.json(
+            { error: "Choose a valid date." },
+            { status: 400 },
+          );
+        }
+        input.expected_date = expectedDate;
+      }
     }
     if (body?.down_payment_pct !== undefined) {
       input.down_payment_pct = Number(body.down_payment_pct);
@@ -188,9 +200,15 @@ export async function PATCH(
     const message = errorMessage(error);
     return NextResponse.json(
       { error: message },
-      { status: paymentTermsErrorStatus(message) },
+      { status: poUpdateErrorStatus(message) },
     );
   }
+}
+
+function poUpdateErrorStatus(message: string): number {
+  if (message === "Choose a valid date.") return 400;
+  if (message.includes("Refresh and try again.")) return 409;
+  return paymentTermsErrorStatus(message);
 }
 
 function paymentTermsErrorStatus(message: string): number {

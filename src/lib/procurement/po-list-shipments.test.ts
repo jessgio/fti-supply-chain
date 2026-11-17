@@ -93,6 +93,45 @@ test("mapPoListShipments reads the purchase order embed and sorts by departure",
   assert.equal(rows[1]?.estimated_departure_date, "2026-05-02");
 });
 
+test("mapPoListShipments reads linked purchase order production dates", () => {
+  const rows = mapPoListShipments([
+    {
+      shipments: {
+        id: "shared",
+        shipment_number: "SH-1",
+        shipment_type: "sea",
+        status: "planned",
+        estimated_departure_date: "2026-06-01",
+        expected_delivery_date: "2026-06-22",
+        transit_days: 21,
+        delay_days: 0,
+        shipment_purchase_orders: [
+          {
+            po_id: "po-1",
+            purchase_orders: {
+              id: "po-1",
+              expected_date: "2026-06-01T00:00:00+00:00",
+              status: "ordered",
+            },
+          },
+          {
+            po_id: "po-2",
+            purchase_orders: {
+              id: "po-2",
+              expected_date: null,
+              status: "cancelled",
+            },
+          },
+        ],
+      },
+    },
+  ]);
+  assert.deepEqual(rows[0]?.linked_purchase_orders, [
+    { id: "po-1", expected_date: "2026-06-01", status: "ordered" },
+    { id: "po-2", expected_date: null, status: "cancelled" },
+  ]);
+});
+
 test("procurementListShipment edits the soonest open shipment", () => {
   const chosen = procurementListShipment([
     shipment({
@@ -229,4 +268,16 @@ test("list updates keep embedded shipments and replace a linked shipment", () =>
 
   const replaced = withShipmentSummary(withNew, { ...created, delay_days: 4 }, []);
   assert.equal(replaced[0]?.shipments?.[0]?.delay_days, 4);
+
+  const withLinks = shipment({
+    linked_purchase_orders: [
+      { id: "po-1", expected_date: "2026-06-15", status: "ordered" },
+    ],
+  });
+  const kept = withShipmentSummary(
+    [po({ shipments: [withLinks] })],
+    { ...withLinks, delay_days: 4, linked_purchase_orders: undefined },
+    [],
+  );
+  assert.equal(kept[0]?.shipments?.[0]?.linked_purchase_orders?.[0]?.id, "po-1");
 });

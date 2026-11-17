@@ -1,6 +1,8 @@
 import { resolveShipmentStatusFromDeparture } from "@/lib/shipments/shipment-dates";
 import type {
+  PoListLinkedPurchaseOrder,
   PoListShipment,
+  PoStatus,
   PurchaseOrder,
   Shipment,
   ShipmentStatus,
@@ -13,6 +15,14 @@ const SHIPMENT_STATUSES = new Set<ShipmentStatus>([
   "in_transit",
   "delivered",
   "closed",
+]);
+const PO_STATUSES = new Set<PoStatus>([
+  "planned",
+  "ordered",
+  "in_production",
+  "in_transit",
+  "received",
+  "cancelled",
 ]);
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -73,7 +83,52 @@ function asShipmentStatus(value: unknown): ShipmentStatus {
     : "planned";
 }
 
-function shipmentFromEmbed(value: unknown): PoListShipment | null {
+function asPoStatus(value: unknown): PoStatus {
+  return typeof value === "string" && PO_STATUSES.has(value as PoStatus)
+    ? (value as PoStatus)
+    : "ordered";
+}
+
+function linkedPurchaseOrdersFromEmbed(
+  value: unknown,
+): PoListLinkedPurchaseOrder[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return [];
+  const links: PoListLinkedPurchaseOrder[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { po_id?: unknown; purchase_orders?: unknown };
+    const embedded = Array.isArray(record.purchase_orders)
+      ? record.purchase_orders[0]
+      : record.purchase_orders;
+    if (!embedded || typeof embedded !== "object") continue;
+    const po = embedded as {
+      id?: unknown;
+      expected_date?: unknown;
+      status?: unknown;
+    };
+    const id =
+      typeof po.id === "string"
+        ? po.id
+        : typeof record.po_id === "string"
+          ? record.po_id
+          : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const rawDate =
+      typeof po.expected_date === "string" ? po.expected_date.slice(0, 10) : null;
+    links.push({
+      id,
+      expected_date: rawDate && isIsoDate(rawDate) ? rawDate : null,
+      status: asPoStatus(po.status),
+    });
+  }
+  return links;
+}
+
+/** Read one shipment object from a purchase-order or RPC payload. */
+export function parsePoListShipment(value: unknown): PoListShipment | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   const departure =
@@ -89,6 +144,7 @@ function shipmentFromEmbed(value: unknown): PoListShipment | null {
   }
   const transit = Number(row.transit_days ?? 0);
   const delay = Number(row.delay_days ?? 0);
+  const links = linkedPurchaseOrdersFromEmbed(row.shipment_purchase_orders);
   return {
     id: row.id,
     shipment_number:
@@ -99,6 +155,7 @@ function shipmentFromEmbed(value: unknown): PoListShipment | null {
     expected_delivery_date: delivery,
     transit_days: Number.isFinite(transit) && transit >= 0 ? transit : 0,
     delay_days: Number.isFinite(delay) && delay >= 0 ? delay : 0,
+    ...(links ? { linked_purchase_orders: links } : {}),
   };
 }
 
@@ -112,7 +169,7 @@ export function mapPoListShipments(links: unknown): PoListShipment[] {
     const raw = (link as { shipments?: unknown }).shipments;
     const rows = Array.isArray(raw) ? raw : raw ? [raw] : [];
     for (const row of rows) {
-      const shipment = shipmentFromEmbed(row);
+      const shipment = parsePoListShipment(row);
       if (!shipment || seen.has(shipment.id)) continue;
       seen.add(shipment.id);
       shipments.push(shipment);
@@ -302,8 +359,13 @@ export function withShipmentSummary(
       if (!linked.has(po.id)) return po;
       return { ...po, shipments: [...shipments, summary] };
     }
+    const previous = shipments[index]!;
     const next = shipments.slice();
-    next[index] = summary;
+    next[index] = {
+      ...summary,
+      linked_purchase_orders:
+        summary.linked_purchase_orders ?? previous.linked_purchase_orders,
+    };
     return { ...po, shipments: next };
   });
 }
