@@ -68,7 +68,20 @@ import {
   purchaseOrdersForStatusTab,
 } from "@/lib/procurement/po-search-results";
 import { PoSearchResultsTable } from "@/components/procurement/po-search-results-table";
+import { PoListDateCells } from "@/components/procurement/po-list-date-cells";
+import { useInlinePoDates } from "@/components/procurement/use-inline-po-dates";
+import {
+  isIsoDate,
+  mergePurchaseOrderUpdate,
+} from "@/lib/procurement/po-list-shipments";
 import type { ProductPackagingLink } from "@/types/database";
+
+const LogShipmentDialog = dynamic(
+  () =>
+    import("@/components/shipments/log-shipment-dialog").then(
+      (mod) => mod.LogShipmentDialog,
+    ),
+);
 
 const UnpaidPosTable = dynamic(
   () =>
@@ -185,6 +198,14 @@ function ProcurementInner() {
       : null,
   );
   const [now] = useState(() => Date.now());
+  const [shipmentPo, setShipmentPo] = useState<PurchaseOrder | null>(null);
+  const {
+    pendingDateKeys,
+    dateErrors,
+    saveExpectedDate,
+    saveShipmentDate,
+    attachShipment,
+  } = useInlinePoDates(setPos);
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -230,14 +251,7 @@ function ProcurementInner() {
       const updated = data.purchaseOrder as PurchaseOrder;
       setPos((prev) =>
         prev.map((p) =>
-          p.id === poId
-            ? {
-                ...p,
-                ...updated,
-                // Keep list-line payload if PATCH omits nested lines.
-                lines: updated.lines ?? p.lines,
-              }
-            : p,
+          p.id === poId ? mergePurchaseOrderUpdate(p, updated) : p,
         ),
       );
     } catch (err) {
@@ -555,7 +569,16 @@ function ProcurementInner() {
             <td className="py-2 pr-4">
               {formatPoMoney(poInvoiceTotal(po), po.currency)}
             </td>
-            <td className="py-2 pr-4">{po.expected_date ?? "—"}</td>
+            <PoListDateCells
+              po={po}
+              pendingKeys={pendingDateKeys}
+              errors={dateErrors}
+              onExpectedDate={(date) => void saveExpectedDate(po, date)}
+              onShipmentDate={(shipment, field, date) =>
+                void saveShipmentDate(po, shipment, field, date)
+              }
+              onCreateShipment={() => setShipmentPo(po)}
+            />
             <td className="py-2 text-right">
               <Button
                 size="sm"
@@ -569,7 +592,7 @@ function ProcurementInner() {
           {isOpen && (
             <tr className="border-b border-stone-100 bg-stone-50/60">
               <td />
-              <td colSpan={9} className="py-2 pr-4">
+              <td colSpan={11} className="py-2 pr-4">
                 {lines.length === 0 ? (
                   <p className="py-1 text-xs text-stone-500">
                     No line items on this purchase order.
@@ -855,6 +878,18 @@ function ProcurementInner() {
                         </th>
                         <th className="py-2 pr-4">Value</th>
                         <th className="py-2 pr-4">Expected</th>
+                        <th
+                          className="py-2 pr-4"
+                          title="Estimated departure (ETD)"
+                        >
+                          Ship start
+                        </th>
+                        <th
+                          className="py-2 pr-4"
+                          title="Expected delivery (ETA)"
+                        >
+                          Ship end
+                        </th>
                         <th className="py-2" />
                       </tr>
                     </thead>
@@ -891,6 +926,21 @@ function ProcurementInner() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {shipmentPo ? (
+        <LogShipmentDialog
+          open
+          po={shipmentPo}
+          initialDepartureDate={shipmentPo.expected_date}
+          departureHint={
+            isIsoDate(shipmentPo.expected_date)
+              ? "Departure date is prefilled from this PO's expected date."
+              : undefined
+          }
+          onClose={() => setShipmentPo(null)}
+          onCreated={(shipment) => attachShipment(shipment, shipmentPo.id)}
+        />
+      ) : null}
 
       {suppliersOpen && (
         <SuppliersDialog

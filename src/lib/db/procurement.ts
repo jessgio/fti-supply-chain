@@ -27,6 +27,7 @@ import {
 import { computePoInvoiceTotals, DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import { sortSuppliersByName } from "@/lib/procurement/supplier-list";
 import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
+import { mapPoListShipments } from "@/lib/procurement/po-list-shipments";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
 
@@ -417,6 +418,8 @@ type PoRow = {
     payment_scope: string;
     submitted_at: string;
   }[];
+  /** Absent when the list query did not embed shipment dates. */
+  shipment_purchase_orders?: unknown;
 };
 
 function asLarkApprovalStatus(
@@ -576,6 +579,10 @@ function mapPoRow(row: PoRow): PurchaseOrder {
     updated_at: row.updated_at,
     lines,
     payments,
+    shipments:
+      row.shipment_purchase_orders === undefined
+        ? undefined
+        : mapPoListShipments(row.shipment_purchase_orders),
   };
 }
 
@@ -612,6 +619,10 @@ const PO_DETAIL_SELECT =
 const PO_PAYMENTS_EMBED =
   "po_payments(id, payment_date, amount, payment_request_number, currency, exchange_rate, purpose, tax_withholding, created_at, updated_at)";
 
+/** Header dates only — line items stay on the shipment detail queries. */
+const PO_LIST_SHIPMENT_EMBED =
+  "shipment_purchase_orders(shipments(id, shipment_number, shipment_type, status, estimated_departure_date, expected_delivery_date, transit_days, delay_days))";
+
 const PO_PAYABLE_SELECT = PO_SELECT + ", " + PO_PAYMENTS_EMBED;
 
 /** Non-cancelled POs including logged payments, for the unpaid payables tab. */
@@ -632,13 +643,17 @@ export async function listPayablePurchaseOrders(
 export async function listPurchaseOrders(
   supabase: SupabaseClient,
   status?: PoStatus | PoStatus[],
-  options?: { includePayments?: boolean },
+  options?: { includePayments?: boolean; includeShipments?: boolean },
 ): Promise<PurchaseOrder[]> {
+  const select = [
+    options?.includePayments ? `${PO_SELECT}, ${PO_PAYMENTS_EMBED}` : PO_SELECT,
+    options?.includeShipments ? PO_LIST_SHIPMENT_EMBED : null,
+  ]
+    .filter((part): part is string => part != null)
+    .join(", ");
   let query = supabase
     .from("purchase_orders")
-    .select(
-      options?.includePayments ? `${PO_SELECT}, ${PO_PAYMENTS_EMBED}` : PO_SELECT,
-    )
+    .select(select)
     .order("order_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
   if (Array.isArray(status)) {

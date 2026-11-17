@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     const [ordersResult, inboundResult] = await Promise.allSettled([
       listPurchaseOrders(supabase, status ?? undefined, {
         includePayments: true,
+        includeShipments: true,
       }),
       listLastKnownInboundDateByPo(supabase),
     ]);
