@@ -2,8 +2,14 @@
 
 import { useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
+  applySavedPurchaseOrderDates,
+  clonePoListShipments,
+  restorePurchaseOrderExpectedDate,
+  shiftPurchaseOrdersForExpectedDate,
+  todayIsoDate,
+} from "@/lib/procurement/po-expected-date-shipments";
+import {
   isIsoDate,
-  mergePurchaseOrderUpdate,
   patchDesiredWindow,
   patchShipmentWindow,
   toPoListShipment,
@@ -27,7 +33,8 @@ function errorText(error: unknown, fallback: string): string {
 /**
  * Optimistic date saves for the procurement list. A newer pick for the same
  * field waits for the in-flight request, then saves. A failure rolls the
- * field back to the last value the server accepted.
+ * field back to the last value the server accepted. An expected-date edit
+ * also moves open shipment dates, and those roll back with it.
  */
 export function useInlinePoDates(
   setPos: Dispatch<SetStateAction<PurchaseOrder[]>>,
@@ -37,7 +44,12 @@ export function useInlinePoDates(
   );
   const [dateErrors, setDateErrors] = useState<Record<string, string>>({});
   const running = useRef(new Set<string>());
-  const expectedBaseline = useRef(new Map<string, string | null>());
+  const expectedBaseline = useRef(
+    new Map<
+      string,
+      { expectedDate: string | null; shipments: PoListShipment[] }
+    >(),
+  );
   const expectedDesired = useRef(new Map<string, string | null>());
   const shipmentBaseline = useRef(new Map<string, PoListShipment>());
   const shipmentDesired = useRef(
@@ -99,14 +111,16 @@ export function useInlinePoDates(
     if (date === po.expected_date && !running.current.has(key)) return;
 
     if (!running.current.has(key)) {
-      expectedBaseline.current.set(key, po.expected_date);
+      expectedBaseline.current.set(key, {
+        expectedDate: po.expected_date ?? null,
+        shipments: clonePoListShipments(po.shipments),
+      });
     }
     expectedDesired.current.set(key, date);
     clearError(key);
+    const today = todayIsoDate();
     setPos((prev) =>
-      prev.map((row) =>
-        row.id === po.id ? { ...row, expected_date: date } : row,
-      ),
+      shiftPurchaseOrdersForExpectedDate(prev, po.id, date, today),
     );
     if (running.current.has(key)) return;
 
@@ -131,20 +145,32 @@ export function useInlinePoDates(
             );
           }
           const saved = data.purchaseOrder as PurchaseOrder;
-          expectedBaseline.current.set(key, saved.expected_date ?? null);
+          const previous = expectedBaseline.current.get(key);
+          expectedBaseline.current.set(key, {
+            expectedDate: saved.expected_date ?? null,
+            shipments: saved.shipments
+              ? clonePoListShipments(saved.shipments)
+              : previous?.shipments ?? [],
+          });
           if (!expectedDesired.current.has(key)) {
-            setPos((prev) =>
-              prev.map((row) =>
-                row.id === po.id ? mergePurchaseOrderUpdate(row, saved) : row,
-              ),
-            );
+            setPos((prev) => applySavedPurchaseOrderDates(prev, saved));
+            const otherPoIds = new Set<string>();
+            for (const shipment of saved.shipments ?? []) {
+              for (const link of shipment.linked_purchase_orders ?? []) {
+                if (link.id !== po.id) otherPoIds.add(link.id);
+              }
+            }
+            if (otherPoIds.size > 0) void syncPoStatuses([...otherPoIds]);
           }
         } catch (error) {
           if (expectedDesired.current.has(key)) continue;
-          const baseline = expectedBaseline.current.get(key) ?? null;
+          const baseline = expectedBaseline.current.get(key);
           setPos((prev) =>
-            prev.map((row) =>
-              row.id === po.id ? { ...row, expected_date: baseline } : row,
+            restorePurchaseOrderExpectedDate(
+              prev,
+              po.id,
+              baseline?.expectedDate ?? null,
+              baseline?.shipments ?? [],
             ),
           );
           setDateErrors((prev) => ({

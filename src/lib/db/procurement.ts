@@ -4,6 +4,7 @@ import type {
   LarkPaymentPlanScope,
   PoStatus,
   PoPayment,
+  PoListShipment,
   PurchaseOrder,
   PurchaseOrderLarkSubmissionSummary,
   PurchaseOrderLine,
@@ -27,6 +28,8 @@ import {
 import { computePoInvoiceTotals, DEFAULT_PO_TAX_PCT } from "@/lib/procurement/po-totals";
 import { sortSuppliersByName } from "@/lib/procurement/supplier-list";
 import { withShipmentArrivalDates } from "@/lib/forecast/open-batch-arrivals";
+import { applyExpectedDateAndShiftShipments } from "@/lib/db/po-expected-date-shipments";
+import { readIsoDate } from "@/lib/procurement/po-expected-date-shipments";
 import { mapPoListShipments } from "@/lib/procurement/po-list-shipments";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ID_IN_CHUNK, queryInChunks } from "@/lib/supabase/in-chunks";
@@ -621,7 +624,8 @@ const PO_PAYMENTS_EMBED =
 
 /** Header dates only — line items stay on the shipment detail queries. */
 const PO_LIST_SHIPMENT_EMBED =
-  "shipment_purchase_orders(shipments(id, shipment_number, shipment_type, status, estimated_departure_date, expected_delivery_date, transit_days, delay_days))";
+  "shipment_purchase_orders(shipments(id, shipment_number, shipment_type, status, estimated_departure_date, expected_delivery_date, transit_days, delay_days, " +
+  "shipment_purchase_orders(po_id, purchase_orders(id, expected_date, status))))";
 
 const PO_PAYABLE_SELECT = PO_SELECT + ", " + PO_PAYMENTS_EMBED;
 
@@ -795,8 +799,6 @@ export async function updatePurchaseOrder(
   if (input.supplier_id !== undefined) headerPatch.supplier_id = input.supplier_id;
   if (input.status !== undefined) headerPatch.status = input.status;
   if (input.order_date !== undefined) headerPatch.order_date = input.order_date;
-  if (input.expected_date !== undefined)
-    headerPatch.expected_date = input.expected_date;
   if (input.down_payment_pct !== undefined)
     headerPatch.down_payment_pct = input.down_payment_pct;
   if (input.payment_terms !== undefined) {
@@ -919,8 +921,36 @@ export async function updatePurchaseOrder(
     );
   }
 
+  let linkedShipments: PoListShipment[] | undefined;
+  let shiftedPurchaseOrderIds: string[] = [];
+  if (input.expected_date !== undefined) {
+    const nextExpectedDate = readIsoDate(input.expected_date);
+    if ((input.expected_date ?? "") !== "" && !nextExpectedDate) {
+      throw new Error("Choose a valid date.");
+    }
+    const previousExpectedDate = readIsoDate(existing.expected_date);
+    if (nextExpectedDate !== previousExpectedDate) {
+      const applied = await applyExpectedDateAndShiftShipments(
+        supabase,
+        id,
+        previousExpectedDate,
+        nextExpectedDate,
+      );
+      linkedShipments = applied.shipments;
+      shiftedPurchaseOrderIds = applied.affectedPurchaseOrderIds;
+    }
+  }
+
+  const syncedPurchaseOrders = new Set<string>();
   if (!manualStatus) {
     await recalculatePoStatus(supabase, id);
+    syncedPurchaseOrders.add(id);
+  }
+  for (const poId of shiftedPurchaseOrderIds) {
+    if (syncedPurchaseOrders.has(poId)) continue;
+    if (poId === id) continue;
+    await recalculatePoStatus(supabase, poId);
+    syncedPurchaseOrders.add(poId);
   }
 
   if (
@@ -935,6 +965,9 @@ export async function updatePurchaseOrder(
 
   const updated = await getPurchaseOrder(supabase, id);
   if (!updated) throw new Error("Purchase order not found.");
+  if (linkedShipments) {
+    updated.shipments = linkedShipments;
+  }
   return updated;
 }
 
